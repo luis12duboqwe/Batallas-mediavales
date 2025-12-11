@@ -53,6 +53,12 @@ from .premium import (
     PremiumUseAction,
 )
 from .world import PlayerWorldRead, WorldCreate, WorldRead
+from .wiki import (
+    WIKI_CATEGORIES,
+    WikiArticleCreate,
+    WikiArticleRead,
+    WikiArticleUpdate,
+)
 
 __all__ = [
     "UserCreate",
@@ -131,4 +137,8 @@ __all__ = [
     "WorldCreate",
     "WorldRead",
     "PlayerWorldRead",
+    "WikiArticleCreate",
+    "WikiArticleRead",
+    "WikiArticleUpdate",
+    "WIKI_CATEGORIES",
 ]

@@ -25,6 +25,7 @@ from .quest import Quest
 from .quest_progress import QuestProgress
 from .premium import MapBookmark, PremiumStatus
 from .world import World, PlayerWorld
+from .wiki import WikiArticle, WikiCategory
 
 __all__ = [
     "User",
@@ -60,4 +61,6 @@ __all__ = [
     "MapBookmark",
     "World",
     "PlayerWorld",
+    "WikiArticle",
+    "WikiCategory",
 ]

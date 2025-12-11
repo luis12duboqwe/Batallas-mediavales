@@ -1,67 +1,55 @@
 from . import (
-    admin,
-from . import achievement, alliance, auth, building, city, conquest, message, movement, report, troop
-from . import achievement, alliance, auth, building, city, message, movement, protection, report, troop
-from . import achievement, alliance, auth, building, city, message, movement, ranking, report, troop
-from . import (
+    achievement,
     admin,
     admin_bot,
     alliance,
+    anticheat,
     auth,
     building,
     city,
     conquest,
+    event,
     message,
     movement,
     notification,
+    premium,
     protection,
     queue,
     ranking,
     report,
     season,
+    shop,
+    theme,
     troop,
-)
-    troop,
+    quest,
+    world,
+    wiki,
 )
 
 __all__ = [
+    "achievement",
     "admin",
     "admin_bot",
-from . import alliance, auth, building, city, conquest, message, movement, report, troop
-from . import alliance, auth, building, city, message, movement, protection, report, troop
-from . import alliance, auth, building, city, message, movement, ranking, report, troop
-from . import shop
-from . import event
-from . import quest
-from . import alliance, auth, building, city, message, movement, premium, protection, report, troop
-from . import alliance, auth, building, city, message, movement, premium, ranking, report, troop
-
-__all__ = [
-    "admin",
     "alliance",
+    "anticheat",
     "auth",
     "building",
     "city",
     "conquest",
+    "event",
     "message",
     "movement",
     "notification",
+    "premium",
     "protection",
     "queue",
     "ranking",
     "report",
-    "troop",
-    "premium",
-    "protection",
-    "alliance",
-    "message",
-    "conquest",
-    "queue",
     "season",
-    "admin",
-    "achievement",
     "shop",
-    "queue",
-    "event",
+    "theme",
+    "troop",
     "quest",
+    "world",
+    "wiki",
 ]
