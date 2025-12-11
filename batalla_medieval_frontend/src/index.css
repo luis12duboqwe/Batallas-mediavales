@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-midnight text-gray-100 font-body;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  @apply font-display text-gold tracking-wide;
+}
+
+a {
+  @apply text-gold hover:text-yellow-400;
+}
+
+.btn-primary {
+  @apply bg-gradient-to-r from-yellow-600 to-yellow-500 text-black font-semibold px-4 py-2 rounded shadow-glow hover:from-yellow-500 hover:to-yellow-400 transition;
+}
+
+.card {
+  @apply bg-gray-900/70 border border-yellow-800/40 rounded-lg shadow-lg;
+}
+
+.input {
+  @apply bg-gray-800 border border-gray-700 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-yellow-500;
+}
+
+.table-header {
+  @apply text-xs uppercase tracking-wider text-gray-400 border-b border-gray-700 pb-2;
+}
+
+.table-row {
+  @apply py-2 border-b border-gray-800 text-sm text-gray-200;
+}
+
+.badge {
+  @apply inline-flex items-center gap-2 px-2 py-1 rounded-full text-xs font-semibold bg-gray-800 border border-yellow-700;
+}
