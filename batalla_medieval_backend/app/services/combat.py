@@ -106,6 +106,23 @@ def _apply_losses(troops: Dict[str, int], loss_ratio: float) -> Dict[str, int]:
     return losses
 
 
+def simulate_round(attacker: Dict[str, int], defender: Dict[str, int]) -> Dict[str, Dict[str, int]]:
+    attacker_strength = sum(attacker.values())
+    defender_strength = sum(defender.values())
+
+    if attacker_strength == 0 and defender_strength == 0:
+        return {"attacker_losses": {}, "defender_losses": {}}
+
+    total_strength = max(attacker_strength + defender_strength, 1)
+    attacker_loss_ratio = defender_strength / total_strength
+    defender_loss_ratio = attacker_strength / total_strength
+
+    attacker_losses = _apply_losses(attacker, attacker_loss_ratio)
+    defender_losses = _apply_losses(defender, defender_loss_ratio)
+
+    return {"attacker_losses": attacker_losses, "defender_losses": defender_losses}
+
+
 def resolve_battle(attacker_city: models.City, defender_city: models.City, attacking_troops: Dict[str, int]):
     defender_troops = {troop.unit_type: troop.quantity for troop in defender_city.troops}
 
