@@ -4,8 +4,7 @@ import math
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import espionage
-from . import combat
+from . import combat, espionage, notification as notification_service
 
 UNIT_SPEED = {
     "basic_infantry": 0.6,
@@ -29,16 +28,15 @@ def send_movement(
     target_city_id: int,
     movement_type: str,
     target_city: models.City | None = None,
-) -> models.Movement:
-    target_city = target_city or db.query(models.City).filter(models.City.id == target_city_id).first()
     spy_count: int = 0,
 ) -> models.Movement:
-    target_city = db.query(models.City).filter(models.City.id == target_city_id).first()
+    target_city = target_city or db.query(models.City).filter(models.City.id == target_city_id).first()
     if not target_city:
         raise ValueError("Target city not found")
-    if movement_type != "spy":
-        spy_count = 0
+
     if movement_type == "spy":
+        if spy_count <= 0:
+            spy_count = 1
         spy_troop = (
             db.query(models.Troop)
             .filter(models.Troop.city_id == origin_city.id, models.Troop.unit_type == "spy")
@@ -50,6 +48,9 @@ def send_movement(
         db.add(spy_troop)
         db.commit()
         db.refresh(spy_troop)
+    else:
+        spy_count = 0
+
     speed = UNIT_SPEED.get("fast_cavalry" if movement_type == "spy" else "basic_infantry", 0.6)
     distance = calculate_distance(origin_city, target_city)
     hours = distance / speed
@@ -64,6 +65,16 @@ def send_movement(
     db.add(movement)
     db.commit()
     db.refresh(movement)
+
+    if movement_type == "attack" and target_city.owner:
+        notification_service.create_notification(
+            db,
+            target_city.owner,
+            title="¡Estás bajo ataque!",
+            body=f"{origin_city.name} ha enviado tropas hacia tu ciudad {target_city.name}.",
+            notification_type="attack_incoming",
+        )
+
     return movement
 
 
@@ -143,6 +154,25 @@ def process_arrived_movements(db: Session):
             )
             db.add(attacker_report)
             db.add(defender_report)
+
+            if attacker_city.owner:
+                notification_service.create_notification(
+                    db,
+                    attacker_city.owner,
+                    title="Informe de batalla listo",
+                    body=f"Tu ataque contra {defender_city.name} ha generado un informe.",
+                    notification_type="report_ready",
+                    allow_email=False,
+                )
+            if defender_city.owner:
+                notification_service.create_notification(
+                    db,
+                    defender_city.owner,
+                    title="Has recibido un informe de batalla",
+                    body=f"Tu ciudad {defender_city.name} ha sido atacada. Hay un nuevo informe disponible.",
+                    notification_type="report_ready",
+                    allow_email=False,
+                )
 
         movement.status = "completed"
         db.add(movement)

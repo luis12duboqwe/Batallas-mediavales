@@ -58,17 +58,21 @@ def calculate_upgrade_cost(building: models.Building) -> Dict[str, float]:
     return {resource: value * multiplier for resource, value in base.items()}
 
 
-def process_building_queues(db: Session) -> List[models.BuildingQueue]:
+def process_building_queues(db: Session) -> List[dict]:
     now = datetime.utcnow()
     finished_queues = (
         db.query(models.BuildingQueue)
         .filter(models.BuildingQueue.finish_time <= now)
         .all()
     )
+    finished_info: List[dict] = []
     for queue_entry in finished_queues:
         building = (
             db.query(models.Building)
-            .filter(models.Building.city_id == queue_entry.city_id, models.Building.name == queue_entry.building_type)
+            .filter(
+                models.Building.city_id == queue_entry.city_id,
+                models.Building.name == queue_entry.building_type,
+            )
             .first()
         )
         if not building:
@@ -80,6 +84,13 @@ def process_building_queues(db: Session) -> List[models.BuildingQueue]:
             db.add(building)
             db.flush()
         building.level = max(building.level, queue_entry.target_level)
+        finished_info.append(
+            {
+                "city_id": queue_entry.city_id,
+                "building_type": queue_entry.building_type,
+                "target_level": queue_entry.target_level,
+            }
+        )
         db.delete(queue_entry)
     db.commit()
-    return finished_queues
+    return finished_info

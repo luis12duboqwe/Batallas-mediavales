@@ -57,23 +57,33 @@ def queue_training(db: Session, city: models.City, unit_type: str, quantity: int
     return queue_entry
 
 
-def process_troop_queues(db: Session) -> List[models.TroopQueue]:
+def process_troop_queues(db: Session) -> List[dict]:
     now = datetime.utcnow()
     finished_queues = db.query(models.TroopQueue).filter(models.TroopQueue.finish_time <= now).all()
+    finished_info: List[dict] = []
     for queue_entry in finished_queues:
         troop = (
             db.query(models.Troop)
-            .filter(models.Troop.city_id == queue_entry.city_id, models.Troop.unit_type == queue_entry.troop_type)
+            .filter(
+                models.Troop.city_id == queue_entry.city_id,
+                models.Troop.unit_type == queue_entry.troop_type,
+            )
             .first()
         )
         if not troop:
-            troop = models.Troop(city_id=queue_entry.city_id, unit_type=queue_entry.troop_type, quantity=0)
+            troop = models.Troop(
+                city_id=queue_entry.city_id, unit_type=queue_entry.troop_type, quantity=0
+            )
             db.add(troop)
             db.flush()
         troop.quantity += queue_entry.amount
+        finished_info.append(
+            {
+                "city_id": queue_entry.city_id,
+                "troop_type": queue_entry.troop_type,
+                "amount": queue_entry.amount,
+            }
+        )
         db.delete(queue_entry)
     db.commit()
-    db.refresh(troop)
-    ranking.recalculate_player_and_alliance_scores(db, city.owner_id)
-    return troop
-    return finished_queues
+    return finished_info

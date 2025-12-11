@@ -83,6 +83,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         email=user.email,
         hashed_password=hashed_password,
         protection_ends_at=protection_end,
+        email_notifications=user.email_notifications,
     )
     db.add(db_user)
     db.commit()

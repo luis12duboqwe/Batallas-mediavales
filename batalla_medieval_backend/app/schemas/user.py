@@ -7,6 +7,7 @@ from pydantic import BaseModel, EmailStr
 class UserBase(BaseModel):
     username: str
     email: EmailStr
+    email_notifications: bool = False
 
 
 class UserCreate(UserBase):
@@ -18,6 +19,7 @@ class UserRead(UserBase):
     created_at: datetime
     protection_ends_at: Optional[datetime] = None
     is_admin: bool = False
+    email_notifications: bool = False
 
     class Config:
         orm_mode = True

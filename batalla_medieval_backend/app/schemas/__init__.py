@@ -1,4 +1,4 @@
-from .user import UserCreate, UserRead, Token, TokenData
+from .user import Token, TokenData, UserCreate, UserRead
 from .city import CityCreate, CityRead
 from .building import BuildingCreate, BuildingRead
 from .troop import TroopCreate, TroopRead
@@ -11,6 +11,7 @@ from .queue import (
     TroopQueueRead,
 )
 from .report import ReportCreate, ReportRead
+from .notification import NotificationRead
 from .alliance import (
     AllianceChatMessageCreate,
     AllianceChatMessageRead,
@@ -23,7 +24,6 @@ from .alliance import (
     AllianceUpdate,
 )
 from .spy_report import SpyReportCreate, SpyReportRead
-from .alliance import AllianceCreate, AllianceRead, AllianceMemberRead
 from .message import MessageCreate, MessageRead
 from .conquest import ConquestRequest, ConquestResult, FoundCityRequest
 from .protection import ProtectionStatus
@@ -50,6 +50,7 @@ __all__ = [
     "QueueStatus",
     "ReportCreate",
     "ReportRead",
+    "NotificationRead",
     "SpyReportCreate",
     "SpyReportRead",
     "AllianceCreate",
