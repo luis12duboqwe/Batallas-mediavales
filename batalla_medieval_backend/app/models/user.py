@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -41,3 +41,8 @@ class User(Base):
         "Message", back_populates="receiver", foreign_keys="Message.receiver_id", cascade="all, delete-orphan"
     )
     logs = relationship("Log", back_populates="user", cascade="all, delete-orphan")
+    theme_ownerships = relationship(
+        "ThemeOwnership", back_populates="user", cascade="all, delete-orphan"
+    )
+    current_theme_id = Column(Integer, ForeignKey("themes.id"), nullable=True)
+    current_theme = relationship("Theme", foreign_keys=[current_theme_id])

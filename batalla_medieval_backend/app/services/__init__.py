@@ -2,6 +2,7 @@ from . import admin, building, combat, conquest, espionage, movement, production
 from . import admin, building, combat, espionage, movement, production, protection, troops
 from . import admin, building, combat, espionage, movement, production, ranking, troops
 from . import admin, alliance, building, combat, espionage, movement, production, troops
+from . import theme
 
 __all__ = [
     "admin",
@@ -15,4 +16,5 @@ __all__ = [
     "protection",
     "ranking",
     "troops",
+    "theme",
 ]

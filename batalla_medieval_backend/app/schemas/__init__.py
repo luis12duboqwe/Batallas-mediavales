@@ -29,6 +29,14 @@ from .conquest import ConquestRequest, ConquestResult, FoundCityRequest
 from .protection import ProtectionStatus
 from .ranking import AllianceRanking, PlayerRanking
 from .log import LogCreate, LogRead
+from .theme import (
+    ThemeApplied,
+    ThemeCreate,
+    ThemeOwnershipCreate,
+    ThemeOwnershipRead,
+    ThemeRead,
+    ThemeUpdate,
+)
 
 __all__ = [
     "UserCreate",
@@ -71,4 +79,10 @@ __all__ = [
     "AllianceRanking",
     "LogCreate",
     "LogRead",
+    "ThemeCreate",
+    "ThemeRead",
+    "ThemeUpdate",
+    "ThemeOwnershipCreate",
+    "ThemeOwnershipRead",
+    "ThemeApplied",
 ]
