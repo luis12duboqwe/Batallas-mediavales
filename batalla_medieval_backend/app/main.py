@@ -3,13 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import models
 from .config import get_settings
-from .database import Base, engine
+from .database import run_migrations
 from .routers import alliance, auth, building, city, message, movement, protection, report, troop
 from .routers import alliance, auth, building, city, message, movement, ranking, report, troop
 from .routers import alliance, auth, building, city, message, movement, queue, report, troop
 from .routers import admin, alliance, auth, building, city, message, movement, report, troop
 
-Base.metadata.create_all(bind=engine)
+run_migrations()
 
 settings = get_settings()
 
