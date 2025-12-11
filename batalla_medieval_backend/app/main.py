@@ -5,6 +5,7 @@ from . import models
 from .config import get_settings
 from .database import Base, engine
 from .routers import (
+    achievement,
     admin,
     admin_bot,
 from .middleware import LanguageMiddleware
@@ -38,6 +39,7 @@ from .routers import (
     queue,
     ranking,
     report,
+    troop,
     theme,
     troop,
     shop,
@@ -76,6 +78,7 @@ app.include_router(conquest.router)
 app.include_router(ranking.router)
 app.include_router(theme.router)
 app.include_router(admin.router)
+app.include_router(achievement.router)
 app.include_router(shop.router)
 app.include_router(admin_bot.router)
 app.include_router(anticheat.router)

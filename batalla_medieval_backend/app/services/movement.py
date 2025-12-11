@@ -54,6 +54,9 @@ def send_movement(
     target_city = target_city or db.query(models.City).filter(models.City.id == target_city_id).first()
     if not target_city:
         raise ValueError("Target city not found")
+    if movement_type == "spy":
+        if spy_count <= 0:
+            raise ValueError("Spy missions require at least one spy")
 
     if movement_type == "spy":
         if spy_count <= 0:
@@ -250,6 +253,15 @@ def process_arrived_movements(db: Session):
             db.add(attacker_report)
             db.add(defender_report)
 
+            defender_survivors = battle_result.get("defender_survivors", {})
+            if sum(defender_survivors.values()) == 0:
+                from .achievement import update_achievement_progress
+
+                update_achievement_progress(
+                    db,
+                    attacker_city.owner_id,
+                    "win_battles",
+                    increment=1,
             if attacker_city.owner:
                 notification_service.create_notification(
                     db,

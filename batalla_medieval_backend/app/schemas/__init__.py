@@ -30,6 +30,7 @@ from .conquest import ConquestRequest, ConquestResult, FoundCityRequest
 from .protection import ProtectionStatus
 from .ranking import AllianceRanking, PlayerRanking
 from .log import LogCreate, LogRead
+from .achievement import AchievementRead, AchievementProgressRead, AchievementWithProgress
 from .theme import (
     ThemeApplied,
     ThemeCreate,
@@ -94,6 +95,9 @@ __all__ = [
     "AllianceRanking",
     "LogCreate",
     "LogRead",
+    "AchievementRead",
+    "AchievementProgressRead",
+    "AchievementWithProgress",
     "ThemeCreate",
     "ThemeRead",
     "ThemeUpdate",

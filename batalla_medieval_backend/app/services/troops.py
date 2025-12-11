@@ -80,6 +80,7 @@ def process_troop_queues(db: Session) -> List[dict]:
         return []
     owner_id = None
     for queue_entry in finished_queues:
+        city = db.query(models.City).filter(models.City.id == queue_entry.city_id).first()
         troop = (
             db.query(models.Troop)
             .filter(
@@ -115,7 +116,19 @@ def process_troop_queues(db: Session) -> List[dict]:
                 {"unit_type": queue_entry.troop_type, "amount": queue_entry.amount},
             )
         db.delete(queue_entry)
+        if city:
+            from .achievement import update_achievement_progress
+
+            update_achievement_progress(
+                db,
+                city.owner_id,
+                "train_troops",
+                increment=queue_entry.amount,
+            )
     db.commit()
+    if finished_queues and city:
+        db.refresh(troop)
+        ranking.recalculate_player_and_alliance_scores(db, city.owner_id)
     db.refresh(troop)
     if owner_id:
         ranking.recalculate_player_and_alliance_scores(db, owner_id)

@@ -67,6 +67,9 @@ def create_alliance(db: Session, payload: schemas.AllianceCreate, founder: model
     )
     db.add(membership)
     db.commit()
+    from .achievement import update_achievement_progress
+
+    update_achievement_progress(db, founder.id, "join_alliance", absolute_value=1)
 
     return alliance
 
@@ -126,6 +129,9 @@ def accept_invitation(db: Session, invitation_id: int, user: models.User) -> mod
     invitation.responded_at = datetime.utcnow()
     db.commit()
     db.refresh(membership)
+    from .achievement import update_achievement_progress
+
+    update_achievement_progress(db, user.id, "join_alliance", absolute_value=1)
     quest_service.handle_event(db, user, "alliance_joined")
     return membership
 

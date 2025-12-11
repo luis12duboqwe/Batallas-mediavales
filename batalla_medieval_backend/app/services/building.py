@@ -75,6 +75,7 @@ def process_building_queues(db: Session) -> List[dict]:
     )
     finished_info: List[dict] = []
     for queue_entry in finished_queues:
+        city = db.query(models.City).filter(models.City.id == queue_entry.city_id).first()
         building = (
             db.query(models.Building)
             .filter(
@@ -108,5 +109,14 @@ def process_building_queues(db: Session) -> List[dict]:
                 {"building_type": queue_entry.building_type, "level": building.level},
             )
         db.delete(queue_entry)
+        if city:
+            from .achievement import update_achievement_progress
+
+            update_achievement_progress(
+                db,
+                city.owner_id,
+                "build_level",
+                absolute_value=building.level,
+            )
     db.commit()
     return finished_info

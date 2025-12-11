@@ -58,6 +58,11 @@ class User(Base):
         "Message", back_populates="receiver", foreign_keys="Message.receiver_id", cascade="all, delete-orphan"
     )
     logs = relationship("Log", back_populates="user", cascade="all, delete-orphan")
+    achievement_progress = relationship(
+        "AchievementProgress",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     theme_ownerships = relationship(
         "ThemeOwnership", back_populates="user", cascade="all, delete-orphan"
     )
