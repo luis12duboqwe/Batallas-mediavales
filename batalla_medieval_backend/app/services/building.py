@@ -9,12 +9,12 @@ from . import premium as premium_service
 from . import production, ranking
 
 BUILDING_COSTS: Dict[str, Dict[str, float]] = {
-    "town_hall": {"wood": 200, "clay": 150, "iron": 100},
-    "barracks": {"wood": 150, "clay": 150, "iron": 120},
-    "stable": {"wood": 250, "clay": 200, "iron": 200},
+    "town_hall": {"wood": 260, "clay": 200, "iron": 150},
+    "barracks": {"wood": 200, "clay": 160, "iron": 170},
+    "stable": {"wood": 320, "clay": 260, "iron": 260},
 }
 
-BASE_BUILD_TIME_SECONDS = 300
+BASE_BUILD_TIME_SECONDS = 420
 
 
 def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.BuildingQueue:

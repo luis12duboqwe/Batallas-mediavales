@@ -10,26 +10,26 @@ from . import premium as premium_service
 from . import production, ranking
 
 UNIT_COSTS: Dict[str, Dict[str, float]] = {
-    "basic_infantry": {"wood": 50, "clay": 30, "iron": 20},
-    "heavy_infantry": {"wood": 70, "clay": 60, "iron": 50},
-    "archer": {"wood": 80, "clay": 40, "iron": 40},
-    "fast_cavalry": {"wood": 120, "clay": 80, "iron": 100},
-    "heavy_cavalry": {"wood": 200, "clay": 150, "iron": 200},
-    "spy": {"wood": 40, "clay": 40, "iron": 40},
-    "ram": {"wood": 300, "clay": 200, "iron": 150},
-    "catapult": {"wood": 350, "clay": 250, "iron": 300},
-    "noble": {"wood": 1000, "clay": 1000, "iron": 1000},
+    "basic_infantry": {"wood": 60, "clay": 40, "iron": 25},
+    "heavy_infantry": {"wood": 90, "clay": 75, "iron": 60},
+    "archer": {"wood": 85, "clay": 50, "iron": 55},
+    "fast_cavalry": {"wood": 150, "clay": 110, "iron": 120},
+    "heavy_cavalry": {"wood": 260, "clay": 200, "iron": 260},
+    "spy": {"wood": 55, "clay": 55, "iron": 50},
+    "ram": {"wood": 360, "clay": 260, "iron": 220},
+    "catapult": {"wood": 380, "clay": 300, "iron": 350},
+    "noble": {"wood": 1200, "clay": 1200, "iron": 1200},
 }
 
 TRAINING_TIMES: Dict[str, int] = {
-    "basic_infantry": 45,
-    "heavy_infantry": 60,
-    "archer": 50,
-    "fast_cavalry": 70,
-    "heavy_cavalry": 80,
-    "spy": 30,
-    "ram": 90,
-    "catapult": 120,
+    "basic_infantry": 60,
+    "heavy_infantry": 75,
+    "archer": 70,
+    "fast_cavalry": 95,
+    "heavy_cavalry": 130,
+    "spy": 45,
+    "ram": 140,
+    "catapult": 180,
 }
 
 
