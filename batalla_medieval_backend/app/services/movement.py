@@ -64,6 +64,18 @@ def send_movement(
     return movement
 
 
+def process_movements(db: Session) -> list[models.Movement]:
+    now = datetime.utcnow()
+    arrived_movements = (
+        db.query(models.Movement)
+        .filter(models.Movement.status == "ongoing", models.Movement.arrival_time <= now)
+        .all()
+    )
+    for movement in arrived_movements:
+        movement.status = "arrived"
+        db.add(movement)
+    db.commit()
+    return arrived_movements
 def resolve_due_movements(db: Session):
     now = datetime.utcnow()
     movements = (

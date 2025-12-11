@@ -3,6 +3,7 @@ from .city import City
 from .building import Building
 from .troop import Troop
 from .movement import Movement
+from .queue import BuildingQueue, TroopQueue
 from .report import Report
 from .spy_report import SpyReport
 from .alliance import Alliance, AllianceMember
@@ -15,6 +16,8 @@ __all__ = [
     "Building",
     "Troop",
     "Movement",
+    "BuildingQueue",
+    "TroopQueue",
     "Report",
     "SpyReport",
     "Alliance",

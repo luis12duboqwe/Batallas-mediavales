@@ -3,6 +3,13 @@ from .city import CityCreate, CityRead
 from .building import BuildingCreate, BuildingRead
 from .troop import TroopCreate, TroopRead
 from .movement import MovementCreate, MovementRead
+from .queue import (
+    BuildingQueueCreate,
+    BuildingQueueRead,
+    QueueStatus,
+    TroopQueueCreate,
+    TroopQueueRead,
+)
 from .report import ReportCreate, ReportRead
 from .spy_report import SpyReportCreate, SpyReportRead
 from .alliance import AllianceCreate, AllianceRead, AllianceMemberRead
@@ -22,6 +29,11 @@ __all__ = [
     "TroopRead",
     "MovementCreate",
     "MovementRead",
+    "BuildingQueueCreate",
+    "BuildingQueueRead",
+    "TroopQueueCreate",
+    "TroopQueueRead",
+    "QueueStatus",
     "ReportCreate",
     "ReportRead",
     "SpyReportCreate",

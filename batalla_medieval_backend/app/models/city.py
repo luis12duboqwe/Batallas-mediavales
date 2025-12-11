@@ -25,3 +25,7 @@ class City(Base):
     troops = relationship("Troop", back_populates="city", cascade="all, delete-orphan")
     origin_movements = relationship("Movement", back_populates="origin_city", foreign_keys="Movement.origin_city_id")
     target_movements = relationship("Movement", back_populates="target_city", foreign_keys="Movement.target_city_id")
+    building_queue = relationship(
+        "BuildingQueue", back_populates="city", cascade="all, delete-orphan", uselist=True
+    )
+    troop_queue = relationship("TroopQueue", back_populates="city", cascade="all, delete-orphan", uselist=True)
