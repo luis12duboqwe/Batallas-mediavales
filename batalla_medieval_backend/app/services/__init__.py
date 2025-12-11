@@ -1,49 +1,59 @@
-from . import admin, admin_bot, alliance, building, combat, conquest, espionage, movement, production, protection, ranking, troops
 from . import (
+    achievement,
     admin,
+    admin_bot,
     alliance,
+    anticheat,
     building,
+    chat_manager,
     combat,
     conquest,
-    espionage,
-    movement,
+    economy,
     emailer,
     espionage,
+    event,
+    i18n,
+    icon_generator,
     movement,
     notification,
+    premium,
     production,
     protection,
     queue,
+    quest,
     ranking,
     season,
+    shop,
+    theme,
     troops,
 )
-    troops,
-)
-from . import admin, building, combat, conquest, espionage, movement, production, troops
-from . import admin, building, combat, espionage, movement, production, protection, troops
-from . import admin, building, combat, espionage, movement, production, ranking, troops
-from . import admin, alliance, building, combat, espionage, movement, production, troops
-from . import theme
-from . import quest
 
 __all__ = [
+    "achievement",
     "admin",
     "admin_bot",
     "alliance",
+    "anticheat",
     "building",
+    "chat_manager",
     "combat",
     "conquest",
+    "economy",
     "emailer",
     "espionage",
+    "event",
+    "i18n",
+    "icon_generator",
     "movement",
     "notification",
+    "premium",
     "production",
     "protection",
     "queue",
+    "quest",
     "ranking",
     "season",
-    "troops",
+    "shop",
     "theme",
-    "quest",
+    "troops",
 ]
