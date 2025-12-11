@@ -50,6 +50,7 @@ from .routers import (
     troop,
     world,
 )
+from .routers import chat
 
 Base.metadata.create_all(bind=engine)
 
@@ -90,6 +91,7 @@ app.include_router(event.router)
 app.include_router(quest.router)
 app.include_router(premium.router)
 app.include_router(world.router)
+app.include_router(chat.router)
 app.include_router(icon.router)
 
 
