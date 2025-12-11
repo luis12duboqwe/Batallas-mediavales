@@ -47,6 +47,7 @@ def send_movement(
     origin_city: models.City,
     target_city_id: int,
     movement_type: str,
+    spy_count: int = 0,
     target_city: models.City | None = None,
     spy_count: int = 0,
 ) -> models.Movement:

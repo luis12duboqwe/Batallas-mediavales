@@ -20,8 +20,10 @@ class UserCreate(UserBase):
 class UserRead(UserBase):
     id: int
     created_at: datetime
+    last_active_at: datetime
     protection_ends_at: Optional[datetime] = None
     is_admin: bool = False
+    is_frozen: bool = False
     email_notifications: bool = False
     is_frozen: bool = False
     freeze_reason: Optional[str] = None

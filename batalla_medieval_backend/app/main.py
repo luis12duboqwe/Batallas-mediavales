@@ -4,6 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import models
 from .config import get_settings
 from .database import Base, engine
+from .routers import (
+    admin,
+    admin_bot,
 from .middleware import LanguageMiddleware
 from .routers import (
     admin,
@@ -68,6 +71,7 @@ app.include_router(message.router)
 app.include_router(conquest.router)
 app.include_router(ranking.router)
 app.include_router(admin.router)
+app.include_router(admin_bot.router)
 app.include_router(anticheat.router)
 app.include_router(event.router)
 app.include_router(quest.router)

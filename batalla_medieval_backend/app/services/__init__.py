@@ -1,3 +1,4 @@
+from . import admin, admin_bot, alliance, building, combat, conquest, espionage, movement, production, protection, ranking, troops
 from . import (
     admin,
     alliance,
@@ -22,6 +23,7 @@ from . import quest
 
 __all__ = [
     "admin",
+    "admin_bot",
     "alliance",
     "building",
     "combat",
