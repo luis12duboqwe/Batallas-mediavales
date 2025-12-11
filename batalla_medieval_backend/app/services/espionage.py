@@ -7,6 +7,9 @@ from typing import Dict, Tuple
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import notification as notification_service
+from . import anticheat
+from . import event as event_service
 
 
 def calculate_success(attacker_spies: int, defender_spies: int) -> float:
@@ -66,11 +69,15 @@ def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyRepor
     )
     defender_spies = defender_spy_troop.quantity if defender_spy_troop else 0
 
+    modifiers = event_service.get_active_modifiers(db)
     success_chance = calculate_success(attacker_spies, defender_spies)
+    success_chance *= modifiers.get("spy_modifier", 1.0)
+    success_chance = min(1.0, success_chance)
     success = random.random() < success_chance
     reported_as_unknown = False
     if not success and random.random() < 0.1:
         reported_as_unknown = True
+    anticheat.check_spy_result(db, attacker_city.owner, success_chance, success)
 
     resources = {
         "wood": defender_city.wood,
@@ -135,5 +142,23 @@ def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyRepor
             attacker_city.owner_id,
             "spy_success",
             increment=1,
+
+    if attacker_city.owner:
+        notification_service.create_notification(
+            db,
+            attacker_city.owner,
+            title="Nuevo informe de espionaje",
+            body=f"Tu misión de espionaje sobre {defender_city.name} ha generado un informe.",
+            notification_type="report_ready",
+            allow_email=False,
+        )
+    if defender_city.owner:
+        notification_service.create_notification(
+            db,
+            defender_city.owner,
+            title="Has sido espiado",
+            body=f"Un informe de espionaje sobre {defender_city.name} está disponible.",
+            notification_type="report_ready",
+            allow_email=False,
         )
     return attacker_report, defender_report

@@ -12,10 +12,19 @@ router = APIRouter(prefix="/troop", tags=["troops"])
 @router.post("/train", response_model=schemas.TroopQueueRead)
 def train_troops(
     payload: schemas.TroopQueueCreate,
+    world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    city = db.query(models.City).filter(models.City.id == payload.city_id, models.City.owner_id == current_user.id).first()
+    city = (
+        db.query(models.City)
+        .filter(
+            models.City.id == payload.city_id,
+            models.City.owner_id == current_user.id,
+            models.City.world_id == world_id,
+        )
+        .first()
+    )
     if not city:
         raise HTTPException(status_code=404, detail="City not found")
     queue_service.process_all_queues(db)

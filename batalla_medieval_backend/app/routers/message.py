@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
+from ..services import notification as notification_service
+from ..services import premium as premium_service
 
 router = APIRouter(prefix="/message", tags=["message"])
 
@@ -18,6 +20,22 @@ def send_message(
     if not receiver:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receiver not found")
 
+    receiver_status = premium_service.get_or_create_status(db, receiver)
+    inbox_limit = premium_service.get_message_limit(receiver_status)
+    inbox_count = db.query(models.Message).filter(models.Message.receiver_id == receiver.id).count()
+    if inbox_count >= inbox_limit:
+        oldest = (
+            db.query(models.Message)
+            .filter(models.Message.receiver_id == receiver.id)
+            .order_by(models.Message.timestamp.asc())
+            .first()
+        )
+        if oldest:
+            db.delete(oldest)
+            db.commit()
+
+    premium_service.get_or_create_status(db, current_user)
+
     message = models.Message(
         sender_id=current_user.id,
         receiver_id=payload.receiver_id,
@@ -27,6 +45,14 @@ def send_message(
     db.add(message)
     db.commit()
     db.refresh(message)
+    notification_service.create_notification(
+        db,
+        receiver,
+        title="Nuevo mensaje privado",
+        body=f"Has recibido un mensaje de {current_user.username}: {payload.subject}",
+        notification_type="message_received",
+        allow_email=False,
+    )
     return message
 
 
