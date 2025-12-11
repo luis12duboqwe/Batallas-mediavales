@@ -1,6 +1,9 @@
 from datetime import datetime
 from typing import List, Optional
 
+from datetime import datetime
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -12,6 +15,7 @@ RANK_LEADER = 3
 class AllianceBase(BaseModel):
     name: str
     description: str = ""
+    world_id: int
 
 
 class AllianceCreate(AllianceBase):

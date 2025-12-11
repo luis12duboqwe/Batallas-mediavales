@@ -1,0 +1,42 @@
+{
+  "buildings": {
+    "town_hall": "Town Hall",
+    "barracks": "Barracks",
+    "stable": "Stable"
+  },
+  "troops": {
+    "basic_infantry": "Militia",
+    "heavy_infantry": "Heavy Infantry",
+    "archer": "Archer",
+    "fast_cavalry": "Light Cavalry",
+    "heavy_cavalry": "Knight",
+    "spy": "Scout",
+    "ram": "Battering Ram",
+    "catapult": "Catapult",
+    "noble": "Noble"
+  },
+  "messages": {
+    "building_upgraded": "Building upgraded",
+    "troops_trained": "Troops trained",
+    "welcome": "Welcome to Medieval Battle",
+    "insufficient_resources": "Not enough resources"
+  },
+  "ui": {
+    "attack": "Attack",
+    "defend": "Defend",
+    "train": "Train",
+    "upgrade": "Upgrade",
+    "logout": "Log out"
+  },
+  "missions": {
+    "scout_mission": "Scout the enemy city",
+    "attack_mission": "Lead an assault against your foe",
+    "support_mission": "Send reinforcements to an ally"
+  },
+  "reports": {
+    "battle_won": "You won the battle",
+    "battle_lost": "You lost the battle",
+    "espionage_report": "Espionage report",
+    "trade_report": "Trade report"
+  }
+}

@@ -9,11 +9,13 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 
 @router.get("/", response_model=list[schemas.ReportRead])
-def list_reports(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def list_reports(
+    world_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
+):
     reports = (
         db.query(models.Report)
         .join(models.City, models.Report.city_id == models.City.id)
-        .filter(models.City.owner_id == current_user.id)
+        .filter(models.City.owner_id == current_user.id, models.Report.world_id == world_id)
         .all()
     )
     return reports
