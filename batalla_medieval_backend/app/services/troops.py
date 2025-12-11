@@ -48,7 +48,7 @@ def get_training_times() -> Dict[str, int]:
         "ram": 90,
         "catapult": 120,
     }
-from . import production, ranking
+
 
 UNIT_COSTS: Dict[str, Dict[str, float]] = {
     "basic_infantry": {"wood": 60, "clay": 40, "iron": 25},
@@ -74,7 +74,9 @@ TRAINING_TIMES: Dict[str, int] = {
 }
 
 
-def queue_training(db: Session, city: models.City, unit_type: str, quantity: int) -> models.TroopQueue:
+def queue_training(
+    db: Session, city: models.City, unit_type: str, quantity: int
+) -> models.TroopQueue:
     """Add a troop training order to the queue after validation and payment."""
 
     if quantity <= 0:
@@ -82,9 +84,7 @@ def queue_training(db: Session, city: models.City, unit_type: str, quantity: int
 
     status = premium_service.get_or_create_status(db, city.owner)
     existing_queue = (
-        db.query(models.TroopQueue)
-        .filter(models.TroopQueue.city_id == city.id)
-        .count()
+        db.query(models.TroopQueue).filter(models.TroopQueue.city_id == city.id).count()
     )
     allowed_slots = premium_service.get_troop_queue_limit(status)
     if existing_queue >= allowed_slots:
@@ -92,7 +92,9 @@ def queue_training(db: Session, city: models.City, unit_type: str, quantity: int
 
     total_cost = {
         resource: cost * quantity
-        for resource, cost in get_unit_costs().get(unit_type, {"wood": 10, "clay": 10, "iron": 10}).items()
+        for resource, cost in get_unit_costs()
+        .get(unit_type, {"wood": 10, "clay": 10, "iron": 10})
+        .items()
     }
     production.recalculate_resources(db, city)
     production.pay_cost(city, total_cost)
@@ -140,7 +142,12 @@ def process_troop_queues(db: Session) -> List[dict]:
     finished_info: List[dict] = []
     updated_owners: set[int] = set()
     for queue_entry in finished_queues:
-        city = queue_entry.city or db.query(models.City).filter(models.City.id == queue_entry.city_id).first()
+        city = (
+            queue_entry.city
+            or db.query(models.City)
+            .filter(models.City.id == queue_entry.city_id)
+            .first()
+        )
         troop = (
             db.query(models.Troop)
             .filter(
@@ -151,7 +158,9 @@ def process_troop_queues(db: Session) -> List[dict]:
         )
         if not troop:
             troop = models.Troop(
-                city_id=queue_entry.city_id, unit_type=queue_entry.troop_type, quantity=0
+                city_id=queue_entry.city_id,
+                unit_type=queue_entry.troop_type,
+                quantity=0,
             )
             db.add(troop)
             db.flush()
@@ -185,6 +194,9 @@ def process_troop_queues(db: Session) -> List[dict]:
         ranking.recalculate_player_and_alliance_scores(db, owner_id)
     logger.info(
         "troop_training_completed",
-        extra={"count": len(finished_info), "cities": [item["city_id"] for item in finished_info]},
+        extra={
+            "count": len(finished_info),
+            "cities": [item["city_id"] for item in finished_info],
+        },
     )
     return finished_info
