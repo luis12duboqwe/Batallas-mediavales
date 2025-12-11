@@ -142,6 +142,7 @@ def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyRepor
             attacker_city.owner_id,
             "spy_success",
             increment=1,
+        )
 
     if attacker_city.owner:
         notification_service.create_notification(
