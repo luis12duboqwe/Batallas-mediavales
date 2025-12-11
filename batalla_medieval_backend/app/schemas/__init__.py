@@ -11,8 +11,10 @@ from .queue import (
     TroopQueueRead,
 )
 from .report import ReportCreate, ReportRead
+from .spy_report import SpyReportCreate, SpyReportRead
 from .alliance import AllianceCreate, AllianceRead, AllianceMemberRead
 from .message import MessageCreate, MessageRead
+from .log import LogCreate, LogRead
 
 __all__ = [
     "UserCreate",
@@ -34,9 +36,13 @@ __all__ = [
     "QueueStatus",
     "ReportCreate",
     "ReportRead",
+    "SpyReportCreate",
+    "SpyReportRead",
     "AllianceCreate",
     "AllianceRead",
     "AllianceMemberRead",
     "MessageCreate",
     "MessageRead",
+    "LogCreate",
+    "LogRead",
 ]
