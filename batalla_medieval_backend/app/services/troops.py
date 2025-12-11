@@ -1,4 +1,5 @@
-from typing import Dict
+from datetime import datetime, timedelta
+from typing import Dict, List
 
 from sqlalchemy.orm import Session
 
@@ -16,20 +17,62 @@ UNIT_COSTS: Dict[str, Dict[str, float]] = {
     "catapult": {"wood": 350, "clay": 250, "iron": 300},
 }
 
+TRAINING_TIMES: Dict[str, int] = {
+    "basic_infantry": 45,
+    "heavy_infantry": 60,
+    "archer": 50,
+    "fast_cavalry": 70,
+    "heavy_cavalry": 80,
+    "spy": 30,
+    "ram": 90,
+    "catapult": 120,
+}
 
-def queue_training(db: Session, city: models.City, unit_type: str, quantity: int) -> models.Troop:
-    troop = db.query(models.Troop).filter(models.Troop.city_id == city.id, models.Troop.unit_type == unit_type).first()
-    if not troop:
-        troop = models.Troop(city_id=city.id, unit_type=unit_type, quantity=0)
-        db.add(troop)
-        db.commit()
-        db.refresh(troop)
-    total_cost = {resource: cost * quantity for resource, cost in UNIT_COSTS.get(unit_type, {"wood": 10, "clay": 10, "iron": 10}).items()}
+
+def queue_training(db: Session, city: models.City, unit_type: str, quantity: int) -> models.TroopQueue:
+    if quantity <= 0:
+        raise ValueError("Quantity must be positive")
+
+    total_cost = {
+        resource: cost * quantity
+        for resource, cost in UNIT_COSTS.get(unit_type, {"wood": 10, "clay": 10, "iron": 10}).items()
+    }
     production.recalculate_resources(db, city)
     production.pay_cost(city, total_cost)
-    troop.quantity += quantity
-    db.add(troop)
+
+    base_time = TRAINING_TIMES.get(unit_type, 45)
+    duration_seconds = base_time * quantity
+    finish_time = datetime.utcnow() + timedelta(seconds=duration_seconds)
+
+    queue_entry = models.TroopQueue(
+        city_id=city.id,
+        troop_type=unit_type,
+        amount=quantity,
+        finish_time=finish_time,
+    )
+    db.add(queue_entry)
+    db.commit()
+    db.refresh(queue_entry)
+    return queue_entry
+
+
+def process_troop_queues(db: Session) -> List[models.TroopQueue]:
+    now = datetime.utcnow()
+    finished_queues = db.query(models.TroopQueue).filter(models.TroopQueue.finish_time <= now).all()
+    for queue_entry in finished_queues:
+        troop = (
+            db.query(models.Troop)
+            .filter(models.Troop.city_id == queue_entry.city_id, models.Troop.unit_type == queue_entry.troop_type)
+            .first()
+        )
+        if not troop:
+            troop = models.Troop(city_id=queue_entry.city_id, unit_type=queue_entry.troop_type, quantity=0)
+            db.add(troop)
+            db.flush()
+        troop.quantity += queue_entry.amount
+        db.delete(queue_entry)
     db.commit()
     db.refresh(troop)
     ranking.recalculate_player_and_alliance_scores(db, city.owner_id)
     return troop
+    return finished_queues
