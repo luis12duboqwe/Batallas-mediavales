@@ -1,4 +1,4 @@
-from . import alliance, auth, building, city, message, movement, report, troop
+from . import alliance, auth, building, city, message, movement, protection, report, troop
 
 __all__ = [
     "auth",
@@ -7,6 +7,7 @@ __all__ = [
     "troop",
     "movement",
     "report",
+    "protection",
     "alliance",
     "message",
 ]

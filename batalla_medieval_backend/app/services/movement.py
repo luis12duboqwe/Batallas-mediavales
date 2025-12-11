@@ -21,8 +21,14 @@ def calculate_distance(origin: models.City, target: models.City) -> float:
     return math.hypot(origin.x - target.x, origin.y - target.y)
 
 
-def send_movement(db: Session, origin_city: models.City, target_city_id: int, movement_type: str) -> models.Movement:
-    target_city = db.query(models.City).filter(models.City.id == target_city_id).first()
+def send_movement(
+    db: Session,
+    origin_city: models.City,
+    target_city_id: int,
+    movement_type: str,
+    target_city: models.City | None = None,
+) -> models.Movement:
+    target_city = target_city or db.query(models.City).filter(models.City.id == target_city_id).first()
     if not target_city:
         raise ValueError("Target city not found")
     speed = UNIT_SPEED.get("fast_cavalry" if movement_type == "spy" else "basic_infantry", 0.6)
