@@ -20,10 +20,12 @@ from .alliance import (
     AllianceMemberPublic,
     AllianceMemberRead,
     AllianceRead,
+    RANK_GENERAL,
+    RANK_LEADER,
+    RANK_MEMBER,
     AllianceUpdate,
 )
 from .spy_report import SpyReportCreate, SpyReportRead
-from .alliance import AllianceCreate, AllianceRead, AllianceMemberRead
 from .message import MessageCreate, MessageRead
 from .log import LogCreate, LogRead
 
@@ -58,6 +60,9 @@ __all__ = [
     "AllianceInvitationRead",
     "AllianceChatMessageCreate",
     "AllianceChatMessageRead",
+    "RANK_MEMBER",
+    "RANK_GENERAL",
+    "RANK_LEADER",
     "MessageCreate",
     "MessageRead",
     "LogCreate",
