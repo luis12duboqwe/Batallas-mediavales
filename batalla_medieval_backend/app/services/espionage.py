@@ -149,7 +149,9 @@ def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyRepor
             db,
             attacker_city.owner,
             title="Nuevo informe de espionaje",
-            body=f"Tu misión de espionaje sobre {defender_city.name} ha generado un informe.",
+            body=(
+                f"Tu misión de espionaje sobre {defender_city.name} ha generado un informe."
+            ),
             notification_type="report_ready",
             allow_email=False,
         )
@@ -158,7 +160,9 @@ def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyRepor
             db,
             defender_city.owner,
             title="Has sido espiado",
-            body=f"Un informe de espionaje sobre {defender_city.name} está disponible.",
+            body=(
+                f"Un informe de espionaje sobre {defender_city.name} está disponible."
+            ),
             notification_type="report_ready",
             allow_email=False,
         )
