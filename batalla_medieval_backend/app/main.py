@@ -46,7 +46,9 @@ from .routers import (
     shop,
     theme,
     troop,
+    quest,
     world,
+    wiki,
 )
 from .routers import chat
 
@@ -89,6 +91,7 @@ app.include_router(event.router)
 app.include_router(quest.router)
 app.include_router(premium.router)
 app.include_router(world.router)
+app.include_router(wiki.router)
 app.include_router(public_api.router)
 app.include_router(chat.router)
 app.include_router(icon.router)

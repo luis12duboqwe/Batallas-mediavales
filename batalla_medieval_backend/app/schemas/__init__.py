@@ -53,6 +53,12 @@ from .premium import (
     PremiumUseAction,
 )
 from .world import PlayerWorldRead, WorldCreate, WorldRead
+from .wiki import (
+    WIKI_CATEGORIES,
+    WikiArticleCreate,
+    WikiArticleRead,
+    WikiArticleUpdate,
+)
 from .chat import ChatMessageRead, ChatMessageCreate
 
 __all__ = [
@@ -132,6 +138,10 @@ __all__ = [
     "WorldCreate",
     "WorldRead",
     "PlayerWorldRead",
+    "WikiArticleCreate",
+    "WikiArticleRead",
+    "WikiArticleUpdate",
+    "WIKI_CATEGORIES",
     "ChatMessageRead",
     "ChatMessageCreate",
 ]
