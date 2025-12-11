@@ -38,6 +38,8 @@ from .routers import (
     queue,
     ranking,
     report,
+    theme,
+    troop,
     shop,
     troop,
     troop,
@@ -72,6 +74,7 @@ app.include_router(alliance.router)
 app.include_router(message.router)
 app.include_router(conquest.router)
 app.include_router(ranking.router)
+app.include_router(theme.router)
 app.include_router(admin.router)
 app.include_router(shop.router)
 app.include_router(admin_bot.router)

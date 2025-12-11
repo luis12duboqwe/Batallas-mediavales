@@ -19,6 +19,7 @@ from . import admin, building, combat, conquest, espionage, movement, production
 from . import admin, building, combat, espionage, movement, production, protection, troops
 from . import admin, building, combat, espionage, movement, production, ranking, troops
 from . import admin, alliance, building, combat, espionage, movement, production, troops
+from . import theme
 from . import quest
 
 __all__ = [
@@ -37,5 +38,6 @@ __all__ = [
     "queue",
     "ranking",
     "troops",
+    "theme",
     "quest",
 ]

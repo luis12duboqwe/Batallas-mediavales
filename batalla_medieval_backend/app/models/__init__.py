@@ -10,6 +10,7 @@ from .alliance_member import AllianceMember
 from .spy_report import SpyReport
 from .message import Message
 from .log import Log
+from .theme import Theme, ThemeOwnership
 from .shop_item import ShopItem
 from .user_item import UserItem
 from .admin_bot_log import AdminBotLog
@@ -37,6 +38,8 @@ __all__ = [
     "AllianceChatMessage",
     "Message",
     "Log",
+    "Theme",
+    "ThemeOwnership",
     "ShopItem",
     "UserItem",
     "AdminBotLog",
