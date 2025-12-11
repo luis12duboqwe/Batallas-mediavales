@@ -11,6 +11,22 @@ from .routers import (
     admin_bot,
     alliance,
     anticheat,
+from .routers import alliance, auth, building, city, conquest, message, movement, report, troop
+from .routers import alliance, auth, building, city, message, movement, protection, report, troop
+from .routers import alliance, auth, building, city, message, movement, ranking, report, troop
+from .routers import alliance, auth, building, city, message, movement, queue, report, troop
+from .routers import admin, alliance, auth, building, city, event, message, movement, report, troop
+from .routers import icon
+from .routers import admin, alliance, auth, building, city, message, movement, report, troop
+from .routers import quest
+from .routers import alliance, auth, building, city, conquest, message, movement, premium, report, troop
+from .routers import alliance, auth, building, city, message, movement, premium, protection, report, troop
+from .routers import alliance, auth, building, city, message, movement, premium, ranking, report, troop
+from .routers import alliance, auth, building, city, message, movement, premium, queue, report, troop
+from .routers import admin, alliance, auth, building, city, message, movement, premium, report, troop
+from .routers import (
+    admin,
+    alliance,
     auth,
     building,
     city,
@@ -32,6 +48,7 @@ from .routers import (
     troop,
     world,
 )
+from .routers import chat
 
 Base.metadata.create_all(bind=engine)
 
@@ -73,6 +90,8 @@ app.include_router(quest.router)
 app.include_router(premium.router)
 app.include_router(world.router)
 app.include_router(public_api.router)
+app.include_router(chat.router)
+app.include_router(icon.router)
 
 
 @app.get("/")

@@ -14,6 +14,7 @@ import ReportsView from './pages/ReportsView';
 import AllianceView from './pages/AllianceView';
 import MessagesView from './pages/MessagesView';
 import AdminPanel from './pages/AdminPanel';
+import BattleSimulator from './pages/BattleSimulator';
 import { useUserStore } from './store/userStore';
 import soundManager from './services/sound';
 
@@ -24,6 +25,7 @@ const sidebarLinks = [
   { to: '/movements', label: 'Movimientos' },
   { to: '/map', label: 'Mapa' },
   { to: '/reports', label: 'Reportes' },
+  { to: '/simulator', label: 'Simulador' },
   { to: '/alliance', label: 'Alianza' },
   { to: '/messages', label: 'Mensajes' },
   { to: '/admin', label: 'Admin' },
@@ -149,6 +151,16 @@ const App = () => {
           <ProtectedRoute>
             <Layout>
               <ReportsView />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/simulator"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <BattleSimulator />
             </Layout>
           </ProtectedRoute>
         }
