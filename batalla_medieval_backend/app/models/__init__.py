@@ -8,9 +8,9 @@ from .report import Report
 from .alliance import Alliance, AllianceChatMessage, AllianceInvitation
 from .alliance_member import AllianceMember
 from .spy_report import SpyReport
-from .alliance import Alliance, AllianceMember
 from .message import Message
 from .log import Log
+from .world import World, PlayerWorld
 
 __all__ = [
     "User",
@@ -28,4 +28,6 @@ __all__ = [
     "AllianceChatMessage",
     "Message",
     "Log",
+    "World",
+    "PlayerWorld",
 ]
