@@ -1,11 +1,16 @@
-from datetime import datetime, timedelta
 import math
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import anticheat
+from . import combat, espionage
+from . import event as event_service
 from . import espionage
 from . import combat
+from . import quest as quest_service
+from . import combat, espionage
 
 UNIT_SPEED = {
     "basic_infantry": 0.6,
@@ -23,19 +28,46 @@ def calculate_distance(origin: models.City, target: models.City) -> float:
     return math.hypot(origin.x - target.x, origin.y - target.y)
 
 
+def _spy_adjustments(db: Session, origin_city: models.City, spy_count: int):
+    spy_troop = (
+        db.query(models.Troop)
+        .filter(models.Troop.city_id == origin_city.id, models.Troop.unit_type == "spy")
+        .first()
+    )
+    if not spy_troop or spy_troop.quantity < spy_count:
+        raise ValueError("Not enough spies to send this mission")
+    spy_troop.quantity -= spy_count
+    db.add(spy_troop)
+    db.commit()
+
+
 def send_movement(
     db: Session,
     origin_city: models.City,
     target_city_id: int,
     movement_type: str,
     target_city: models.City | None = None,
-) -> models.Movement:
-    target_city = target_city or db.query(models.City).filter(models.City.id == target_city_id).first()
     spy_count: int = 0,
 ) -> models.Movement:
-    target_city = db.query(models.City).filter(models.City.id == target_city_id).first()
+    target_city = target_city or db.query(models.City).filter(models.City.id == target_city_id).first()
     if not target_city:
         raise ValueError("Target city not found")
+
+    if movement_type == "spy":
+        if spy_count <= 0:
+            raise ValueError("Spy count must be greater than zero")
+        _spy_adjustments(db, origin_city, spy_count)
+    else:
+        spy_count = 0
+
+    anticheat.check_action_speed(db, origin_city.owner, "movement")
+
+    speed = UNIT_SPEED.get("spy" if movement_type == "spy" else "basic_infantry", 0.6)
+    distance = calculate_distance(origin_city, target_city)
+    hours = distance / max(speed, 0.01)
+    if target_city.world_id != origin_city.world_id:
+        raise ValueError("Target city is not in the same world")
+
     if movement_type != "spy":
         spy_count = 0
     if movement_type == "spy":
@@ -51,19 +83,54 @@ def send_movement(
         db.commit()
         db.refresh(spy_troop)
     speed = UNIT_SPEED.get("fast_cavalry" if movement_type == "spy" else "basic_infantry", 0.6)
+    modifiers = event_service.get_active_modifiers(db)
+    effective_speed = speed * modifiers.get("movement_speed", 1.0)
+    if effective_speed <= 0:
+        effective_speed = speed
     distance = calculate_distance(origin_city, target_city)
-    hours = distance / speed
+    hours = distance / effective_speed if effective_speed else distance / speed
+
+    base_speed = UNIT_SPEED.get("fast_cavalry" if movement_type == "spy" else "basic_infantry", 0.6)
+    speed_modifier = origin_city.world.speed_modifier if origin_city.world else 1.0
+    speed = base_speed * speed_modifier
+    distance = calculate_distance(origin_city, target_city)
+    hours = distance / speed if speed else 0
     arrival_time = datetime.utcnow() + timedelta(hours=hours)
-    movement = models.Movement(
+
+    anticheat.check_movement_legitimacy(
+        db,
+        origin_city,
+        target_city,
+        movement_type,
+        arrival_time,
+        speed,
+        spy_count,
+    )
+
+    movement_obj = models.Movement(
         origin_city_id=origin_city.id,
         target_city_id=target_city.id,
         movement_type=movement_type,
         spy_count=spy_count,
         arrival_time=arrival_time,
+        speed_used=speed,
+        world_id=origin_city.world_id,
     )
-    db.add(movement)
+    db.add(movement_obj)
     db.commit()
+    db.refresh(movement_obj)
+    return movement_obj
     db.refresh(movement)
+
+    if origin_city.owner:
+        event_type = None
+        if movement_type == "attack":
+            event_type = "attack_sent"
+        elif movement_type == "spy":
+            event_type = "spy_sent"
+        if event_type:
+            quest_service.handle_event(db, origin_city.owner, event_type, {"movement_id": movement.id})
+
     return movement
 
 
@@ -79,6 +146,8 @@ def process_movements(db: Session) -> list[models.Movement]:
         db.add(movement)
     db.commit()
     return arrived_movements
+
+
 def resolve_due_movements(db: Session):
     now = datetime.utcnow()
     movements = (
@@ -95,6 +164,8 @@ def resolve_due_movements(db: Session):
         resolved.append(movement)
     db.commit()
     return resolved
+
+
 def _city_troops_as_dict(city: models.City) -> dict[str, int]:
     return {troop.unit_type: troop.quantity for troop in city.troops}
 
@@ -109,7 +180,16 @@ def _apply_losses_to_city(db: Session, city: models.City, losses: dict[str, int]
 
 def process_arrived_movements(db: Session):
     now = datetime.utcnow()
+    arriving_movements = db.query(models.Movement).filter(
+        models.Movement.arrival_time <= now, models.Movement.status == "ongoing"
+    ).all()
     arriving_movements = db.query(models.Movement).filter(models.Movement.arrival_time <= now, models.Movement.status == "ongoing").all()
+    modifiers = event_service.get_active_modifiers(db)
+    arriving_movements = (
+        db.query(models.Movement)
+        .filter(models.Movement.arrival_time <= now, models.Movement.status == "ongoing")
+        .all()
+    )
     for movement in arriving_movements:
         if movement.movement_type == "attack":
             attacker_city = db.query(models.City).filter(models.City.id == movement.origin_city_id).first()
@@ -120,7 +200,16 @@ def process_arrived_movements(db: Session):
                 continue
 
             attacking_troops = _city_troops_as_dict(attacker_city)
+            anticheat.check_movement_legitimacy(
+                db,
+                attacker_city,
+                defender_city,
+                movement.movement_type,
+                movement.arrival_time,
+                movement.speed_used or UNIT_SPEED.get("basic_infantry", 0.6),
+            )
             battle_result = combat.resolve_battle(attacker_city, defender_city, attacking_troops)
+            battle_result = combat.resolve_battle(attacker_city, defender_city, attacking_troops, modifiers)
 
             _apply_losses_to_city(db, attacker_city, battle_result["attacker_losses"])
             _apply_losses_to_city(db, defender_city, battle_result["defender_losses"])
@@ -133,6 +222,7 @@ def process_arrived_movements(db: Session):
                 content=report_html,
                 attacker_city_id=attacker_city.id,
                 defender_city_id=defender_city.id,
+                world_id=attacker_city.world_id,
             )
             defender_report = models.Report(
                 city_id=defender_city.id,
@@ -140,6 +230,7 @@ def process_arrived_movements(db: Session):
                 content=report_html,
                 attacker_city_id=attacker_city.id,
                 defender_city_id=defender_city.id,
+                world_id=defender_city.world_id,
             )
             db.add(attacker_report)
             db.add(defender_report)
