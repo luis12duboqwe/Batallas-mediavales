@@ -22,5 +22,5 @@ class User(Base):
         "Message", back_populates="sender", foreign_keys="Message.sender_id", cascade="all, delete-orphan"
     )
     messages_received = relationship(
-        "Message", back_populates="recipient", foreign_keys="Message.recipient_id", cascade="all, delete-orphan"
+        "Message", back_populates="receiver", foreign_keys="Message.receiver_id", cascade="all, delete-orphan"
     )
