@@ -15,6 +15,7 @@ import AllianceView from './pages/AllianceView';
 import MessagesView from './pages/MessagesView';
 import AdminPanel from './pages/AdminPanel';
 import { useUserStore } from './store/userStore';
+import soundManager from './services/sound';
 
 const sidebarLinks = [
   { to: '/', label: 'Ciudad' },
@@ -64,12 +65,29 @@ const ProtectedRoute = ({ children }) => {
 
 const App = () => {
   const { token, refreshCity } = useUserStore();
+  const location = useLocation();
 
   useEffect(() => {
     if (token) {
       refreshCity().catch(() => {});
     }
   }, [token, refreshCity]);
+
+  useEffect(() => {
+    const handleClick = (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('button')) {
+        soundManager.playSFX('click_ui');
+      }
+    };
+    document.addEventListener('click', handleClick, true);
+    return () => document.removeEventListener('click', handleClick, true);
+  }, []);
+
+  useEffect(() => {
+    const isMapView = location.pathname.startsWith('/map');
+    soundManager.playMusic(isMapView ? 'war_drums' : 'calm_medieval');
+  }, [location.pathname]);
 
   return (
     <Routes>

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { api } from '../api/axiosClient';
 import { calculateProduction } from '../utils/gameMath';
+import soundManager from '../services/sound';
 
 export const useCityStore = create((set, get) => ({
   currentCity: null,
@@ -49,8 +50,18 @@ export const useCityStore = create((set, get) => ({
     set({ movements });
   },
   async loadMovements() {
+    const previous = get().movements || [];
+    const previousAttackIds = new Set(
+      previous.filter((m) => m.category === 'attack_in').map((m) => m.id)
+    );
     const { data } = await api.getMovements();
     set({ movements: data.movements });
+    const hasNewAttackIncoming = data.movements.some(
+      (movement) => movement.category === 'attack_in' && !previousAttackIds.has(movement.id)
+    );
+    if (hasNewAttackIncoming) {
+      soundManager.playSFX('attack_incoming');
+    }
     return data;
   },
   async loadReports() {
@@ -64,8 +75,13 @@ export const useCityStore = create((set, get) => ({
     return data;
   },
   async loadMessages() {
+    const previousIds = new Set(get().messages.map((m) => m.id));
     const { data } = await api.getMessages();
     set({ messages: data.messages });
+    const hasNewMessage = data.messages.some((message) => !previousIds.has(message.id));
+    if (hasNewMessage) {
+      soundManager.playSFX('message_received');
+    }
     return data;
   },
 }));
