@@ -228,4 +228,4 @@ def build_battle_report_html(attacker_city: models.City, defender_city: models.C
     <p>Moral aplicada: {battle_result.get('moral'):.2f} | Suerte: {battle_result.get('luck'):.2f}</p>
     <p>Ataque efectivo: {battle_result.get('effective_attack'):.2f} | Defensa efectiva: {battle_result.get('defense_value'):.2f}</p>
     """
-    return html
+    return html.strip()
