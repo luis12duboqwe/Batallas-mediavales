@@ -4,7 +4,7 @@ from typing import Dict, List
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import production
+from . import production, ranking
 
 UNIT_COSTS: Dict[str, Dict[str, float]] = {
     "basic_infantry": {"wood": 50, "clay": 30, "iron": 20},
@@ -72,4 +72,7 @@ def process_troop_queues(db: Session) -> List[models.TroopQueue]:
         troop.quantity += queue_entry.amount
         db.delete(queue_entry)
     db.commit()
+    db.refresh(troop)
+    ranking.recalculate_player_and_alliance_scores(db, city.owner_id)
+    return troop
     return finished_queues

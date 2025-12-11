@@ -25,6 +25,7 @@ from .alliance import (
 from .spy_report import SpyReportCreate, SpyReportRead
 from .alliance import AllianceCreate, AllianceRead, AllianceMemberRead
 from .message import MessageCreate, MessageRead
+from .ranking import AllianceRanking, PlayerRanking
 from .log import LogCreate, LogRead
 
 __all__ = [
@@ -60,6 +61,8 @@ __all__ = [
     "AllianceChatMessageRead",
     "MessageCreate",
     "MessageRead",
+    "PlayerRanking",
+    "AllianceRanking",
     "LogCreate",
     "LogRead",
 ]

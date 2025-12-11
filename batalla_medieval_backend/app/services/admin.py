@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from . import ranking
 from . import production
 
 
@@ -27,6 +28,7 @@ def create_alliance(db: Session, payload: schemas.AllianceCreate, leader: models
     member = models.AllianceMember(alliance_id=alliance.id, user_id=leader.id, rank=schemas.RANK_LEADER)
     db.add(member)
     db.commit()
+    ranking.recalculate_player_and_alliance_scores(db, leader.id)
     return alliance
 
 

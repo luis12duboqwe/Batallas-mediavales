@@ -4,7 +4,7 @@ from typing import Dict, List
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import production
+from . import production, ranking
 
 BUILDING_COSTS: Dict[str, Dict[str, float]] = {
     "town_hall": {"wood": 200, "clay": 150, "iron": 100},
@@ -45,6 +45,9 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
     )
     db.add(queue_entry)
     db.commit()
+    db.refresh(building)
+    ranking.recalculate_player_and_alliance_scores(db, city.owner_id)
+    return building
     db.refresh(queue_entry)
     return queue_entry
 
