@@ -31,6 +31,7 @@ from .routers import (
     building,
     city,
     conquest,
+    economy,
     event,
     message,
     movement,
@@ -95,6 +96,7 @@ app.include_router(wiki.router)
 app.include_router(public_api.router)
 app.include_router(chat.router)
 app.include_router(icon.router)
+app.include_router(economy.router)
 
 
 @app.get("/")
