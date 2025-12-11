@@ -213,19 +213,19 @@ def build_battle_report_html(attacker_city: models.City, defender_city: models.C
         wall_section = f"<p>Muralla dañada: Nivel {wall_damage[0]} → Nivel {wall_damage[1]}</p>"
 
     html = f"""
-    <h2>Informe de batalla</h2>
-    <p><strong>Atacante:</strong> {attacker_city.name} (Jugador {attacker_city.owner.username})</p>
-    <p><strong>Defensor:</strong> {defender_city.name} (Jugador {defender_city.owner.username})</p>
-    <h3>Tropas desplegadas</h3>
-    <p>Atacante:</p><ul>{_format_troops(attacker_survivors)}</ul>
-    <p>Defensor:</p><ul>{_format_troops(defender_survivors)}</ul>
-    <h3>Bajas</h3>
-    <p>Atacante:</p><ul>{_format_troops(attacker_losses)}</ul>
-    <p>Defensor:</p><ul>{_format_troops(defender_losses)}</ul>
-    <h3>Botín</h3>
-    <p>Madera: {loot.get('wood', 0)} | Barro: {loot.get('clay', 0)} | Hierro: {loot.get('iron', 0)}</p>
-    {wall_section}
-    <p>Moral aplicada: {battle_result.get('moral'):.2f} | Suerte: {battle_result.get('luck'):.2f}</p>
-    <p>Ataque efectivo: {battle_result.get('effective_attack'):.2f} | Defensa efectiva: {battle_result.get('defense_value'):.2f}</p>
-    """
+<h2>Informe de batalla</h2>
+<p><strong>Atacante:</strong> {attacker_city.name} (Jugador {attacker_city.owner.username})</p>
+<p><strong>Defensor:</strong> {defender_city.name} (Jugador {defender_city.owner.username})</p>
+<h3>Tropas desplegadas</h3>
+<p>Atacante:</p><ul>{_format_troops(attacker_survivors)}</ul>
+<p>Defensor:</p><ul>{_format_troops(defender_survivors)}</ul>
+<h3>Bajas</h3>
+<p>Atacante:</p><ul>{_format_troops(attacker_losses)}</ul>
+<p>Defensor:</p><ul>{_format_troops(defender_losses)}</ul>
+<h3>Botín</h3>
+<p>Madera: {loot.get('wood', 0)} | Barro: {loot.get('clay', 0)} | Hierro: {loot.get('iron', 0)}</p>
+{wall_section}
+<p>Moral aplicada: {battle_result.get('moral'):.2f} | Suerte: {battle_result.get('luck'):.2f}</p>
+<p>Ataque efectivo: {battle_result.get('effective_attack'):.2f} | Defensa efectiva: {battle_result.get('defense_value'):.2f}</p>
+"""
     return html.strip()
