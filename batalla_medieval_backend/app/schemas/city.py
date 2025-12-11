@@ -22,6 +22,7 @@ class CityRead(CityBase):
     wood: float
     clay: float
     iron: float
+    population_max: int
     last_production: datetime
     buildings: List[BuildingRead] = []
     troops: List[TroopRead] = []

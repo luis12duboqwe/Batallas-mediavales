@@ -6,6 +6,7 @@ from .movement import Movement
 from .report import Report
 from .alliance import Alliance, AllianceMember
 from .message import Message
+from .log import Log
 
 __all__ = [
     "User",
@@ -17,4 +18,5 @@ __all__ = [
     "Alliance",
     "AllianceMember",
     "Message",
+    "Log",
 ]
