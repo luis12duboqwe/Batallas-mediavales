@@ -4,7 +4,8 @@ from pydantic import BaseModel
 
 
 class MessageBase(BaseModel):
-    recipient_id: int
+    receiver_id: int
+    subject: str
     content: str
 
 
@@ -15,7 +16,8 @@ class MessageCreate(MessageBase):
 class MessageRead(MessageBase):
     id: int
     sender_id: int
-    sent_at: datetime
+    read: bool
+    timestamp: datetime
 
     class Config:
         orm_mode = True
