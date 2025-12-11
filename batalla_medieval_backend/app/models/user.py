@@ -19,6 +19,10 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
 
     cities = relationship("City", back_populates="owner", cascade="all, delete-orphan")
+    premium_status = relationship(
+        "PremiumStatus", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    bookmarks = relationship("MapBookmark", back_populates="owner", cascade="all, delete-orphan")
     alliances = relationship("AllianceMember", back_populates="user", cascade="all, delete-orphan")
     alliance_invitations = relationship(
         "AllianceInvitation",

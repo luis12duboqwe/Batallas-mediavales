@@ -29,6 +29,13 @@ from .conquest import ConquestRequest, ConquestResult, FoundCityRequest
 from .protection import ProtectionStatus
 from .ranking import AllianceRanking, PlayerRanking
 from .log import LogCreate, LogRead
+from .premium import (
+    GrantRubies,
+    MapBookmarkRead,
+    PremiumPurchase,
+    PremiumStatusRead,
+    PremiumUseAction,
+)
 
 __all__ = [
     "UserCreate",
@@ -71,4 +78,9 @@ __all__ = [
     "AllianceRanking",
     "LogCreate",
     "LogRead",
+    "PremiumPurchase",
+    "PremiumStatusRead",
+    "PremiumUseAction",
+    "GrantRubies",
+    "MapBookmarkRead",
 ]
