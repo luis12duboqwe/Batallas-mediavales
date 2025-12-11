@@ -7,9 +7,9 @@ from .. import models
 from . import event as event_service
 
 PRODUCTION_RATES = {
-    "wood": 30.0,
-    "clay": 25.0,
-    "iron": 20.0,
+    "wood": 15.0,
+    "clay": 12.0,
+    "iron": 10.0,
 }
 
 LOYALTY_RECOVERY_PER_HOUR = 2.0
