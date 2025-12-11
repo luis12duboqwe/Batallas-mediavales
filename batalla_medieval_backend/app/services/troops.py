@@ -4,6 +4,7 @@ from typing import Dict, List
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import event as event_service
 from . import production, ranking
 
 UNIT_COSTS: Dict[str, Dict[str, float]] = {
@@ -42,7 +43,9 @@ def queue_training(db: Session, city: models.City, unit_type: str, quantity: int
     production.pay_cost(city, total_cost)
 
     base_time = TRAINING_TIMES.get(unit_type, 45)
-    duration_seconds = base_time * quantity
+    modifiers = event_service.get_active_modifiers(db)
+    training_speed = modifiers.get("troop_training_speed", 1.0)
+    duration_seconds = base_time * quantity * training_speed
     finish_time = datetime.utcnow() + timedelta(seconds=duration_seconds)
 
     queue_entry = models.TroopQueue(

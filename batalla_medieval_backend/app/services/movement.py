@@ -4,8 +4,8 @@ import math
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import espionage
-from . import combat
+from . import combat, espionage
+from . import event as event_service
 
 UNIT_SPEED = {
     "basic_infantry": 0.6,
@@ -51,8 +51,12 @@ def send_movement(
         db.commit()
         db.refresh(spy_troop)
     speed = UNIT_SPEED.get("fast_cavalry" if movement_type == "spy" else "basic_infantry", 0.6)
+    modifiers = event_service.get_active_modifiers(db)
+    effective_speed = speed * modifiers.get("movement_speed", 1.0)
+    if effective_speed <= 0:
+        effective_speed = speed
     distance = calculate_distance(origin_city, target_city)
-    hours = distance / speed
+    hours = distance / effective_speed if effective_speed else distance / speed
     arrival_time = datetime.utcnow() + timedelta(hours=hours)
     movement = models.Movement(
         origin_city_id=origin_city.id,
@@ -110,6 +114,7 @@ def _apply_losses_to_city(db: Session, city: models.City, losses: dict[str, int]
 def process_arrived_movements(db: Session):
     now = datetime.utcnow()
     arriving_movements = db.query(models.Movement).filter(models.Movement.arrival_time <= now, models.Movement.status == "ongoing").all()
+    modifiers = event_service.get_active_modifiers(db)
     for movement in arriving_movements:
         if movement.movement_type == "attack":
             attacker_city = db.query(models.City).filter(models.City.id == movement.origin_city_id).first()
@@ -120,7 +125,7 @@ def process_arrived_movements(db: Session):
                 continue
 
             attacking_troops = _city_troops_as_dict(attacker_city)
-            battle_result = combat.resolve_battle(attacker_city, defender_city, attacking_troops)
+            battle_result = combat.resolve_battle(attacker_city, defender_city, attacking_troops, modifiers)
 
             _apply_losses_to_city(db, attacker_city, battle_result["attacker_losses"])
             _apply_losses_to_city(db, defender_city, battle_result["defender_losses"])
