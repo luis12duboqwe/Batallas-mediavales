@@ -11,6 +11,7 @@ class Report(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     city_id = Column(Integer, ForeignKey("cities.id"))
+    world_id = Column(Integer, ForeignKey("worlds.id"), nullable=False)
     report_type = Column(String, nullable=False)  # battle or spy
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -18,3 +19,4 @@ class Report(Base):
     defender_city_id = Column(Integer, ForeignKey("cities.id"), nullable=True)
 
     city = relationship("City")
+    world = relationship("World", back_populates="reports")

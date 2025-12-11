@@ -12,6 +12,7 @@ class City(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     owner_id = Column(Integer, ForeignKey("users.id"))
+    world_id = Column(Integer, ForeignKey("worlds.id"), index=True, nullable=False)
     x = Column(Integer, default=0)
     y = Column(Integer, default=0)
     wood = Column(Float, default=500.0)
@@ -22,6 +23,7 @@ class City(Base):
     last_production = Column(DateTime, default=datetime.utcnow)
 
     owner = relationship("User", back_populates="cities")
+    world = relationship("World", back_populates="cities")
     buildings = relationship("Building", back_populates="city", cascade="all, delete-orphan")
     troops = relationship("Troop", back_populates="city", cascade="all, delete-orphan")
     origin_movements = relationship("Movement", back_populates="origin_city", foreign_keys="Movement.origin_city_id")
