@@ -36,6 +36,8 @@ def send_movement(
     if movement_type != "spy":
         spy_count = 0
     if movement_type == "spy":
+        if spy_count <= 0:
+            raise ValueError("Spy count must be positive")
         spy_troop = (
             db.query(models.Troop)
             .filter(models.Troop.city_id == origin_city.id, models.Troop.unit_type == "spy")
