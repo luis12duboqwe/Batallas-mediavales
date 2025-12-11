@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from . import espionage
 from . import combat
+from . import quest as quest_service
 
 UNIT_SPEED = {
     "basic_infantry": 0.6,
@@ -29,11 +30,9 @@ def send_movement(
     target_city_id: int,
     movement_type: str,
     target_city: models.City | None = None,
-) -> models.Movement:
-    target_city = target_city or db.query(models.City).filter(models.City.id == target_city_id).first()
     spy_count: int = 0,
 ) -> models.Movement:
-    target_city = db.query(models.City).filter(models.City.id == target_city_id).first()
+    target_city = target_city or db.query(models.City).filter(models.City.id == target_city_id).first()
     if not target_city:
         raise ValueError("Target city not found")
     if movement_type != "spy":
@@ -64,6 +63,16 @@ def send_movement(
     db.add(movement)
     db.commit()
     db.refresh(movement)
+
+    if origin_city.owner:
+        event_type = None
+        if movement_type == "attack":
+            event_type = "attack_sent"
+        elif movement_type == "spy":
+            event_type = "spy_sent"
+        if event_type:
+            quest_service.handle_event(db, origin_city.owner, event_type, {"movement_id": movement.id})
+
     return movement
 
 

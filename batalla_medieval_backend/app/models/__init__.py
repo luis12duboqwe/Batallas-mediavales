@@ -11,6 +11,8 @@ from .spy_report import SpyReport
 from .alliance import Alliance, AllianceMember
 from .message import Message
 from .log import Log
+from .quest import Quest
+from .quest_progress import QuestProgress
 
 __all__ = [
     "User",
@@ -28,4 +30,6 @@ __all__ = [
     "AllianceChatMessage",
     "Message",
     "Log",
+    "Quest",
+    "QuestProgress",
 ]

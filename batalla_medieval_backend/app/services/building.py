@@ -4,7 +4,7 @@ from typing import Dict, List
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import production, ranking
+from . import production, ranking, quest as quest_service
 
 BUILDING_COSTS: Dict[str, Dict[str, float]] = {
     "town_hall": {"wood": 200, "clay": 150, "iron": 100},
@@ -80,6 +80,14 @@ def process_building_queues(db: Session) -> List[models.BuildingQueue]:
             db.add(building)
             db.flush()
         building.level = max(building.level, queue_entry.target_level)
+        city = db.query(models.City).filter(models.City.id == queue_entry.city_id).first()
+        if city and city.owner:
+            quest_service.handle_event(
+                db,
+                city.owner,
+                "building_finished",
+                {"building_type": queue_entry.building_type, "level": building.level},
+            )
         db.delete(queue_entry)
     db.commit()
     return finished_queues

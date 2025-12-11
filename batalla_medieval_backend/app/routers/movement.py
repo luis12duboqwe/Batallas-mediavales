@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
@@ -34,22 +35,16 @@ def create_movement(
             raise HTTPException(status_code=400, detail="Target city is under protection")
     try:
         movement_obj = movement.send_movement(
-            db, origin_city, payload.target_city_id, payload.movement_type, target_city
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    queue_service.process_all_queues(db)
-    movement_obj = movement.send_movement(db, origin_city, payload.target_city_id, payload.movement_type)
-    try:
-        movement_obj = movement.send_movement(
             db,
             origin_city,
             payload.target_city_id,
             payload.movement_type,
+            target_city=target_city,
             spy_count=payload.spy_count,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    queue_service.process_all_queues(db)
     return movement_obj
 
 

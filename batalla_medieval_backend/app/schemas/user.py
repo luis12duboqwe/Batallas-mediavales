@@ -18,6 +18,8 @@ class UserRead(UserBase):
     created_at: datetime
     protection_ends_at: Optional[datetime] = None
     is_admin: bool = False
+    rename_tokens: int = 0
+    premium_theme_unlocked: bool = False
 
     class Config:
         orm_mode = True

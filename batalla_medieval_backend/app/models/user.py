@@ -17,6 +17,8 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     protection_ends_at = Column(DateTime, nullable=True)
     is_admin = Column(Boolean, default=False)
+    rename_tokens = Column(Integer, default=0)
+    premium_theme_unlocked = Column(Boolean, default=False)
 
     cities = relationship("City", back_populates="owner", cascade="all, delete-orphan")
     alliances = relationship("AllianceMember", back_populates="user", cascade="all, delete-orphan")
@@ -41,3 +43,6 @@ class User(Base):
         "Message", back_populates="receiver", foreign_keys="Message.receiver_id", cascade="all, delete-orphan"
     )
     logs = relationship("Log", back_populates="user", cascade="all, delete-orphan")
+    quest_progress = relationship(
+        "QuestProgress", back_populates="user", cascade="all, delete-orphan"
+    )
