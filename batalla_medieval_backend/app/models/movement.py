@@ -13,6 +13,7 @@ class Movement(Base):
     origin_city_id = Column(Integer, ForeignKey("cities.id"))
     target_city_id = Column(Integer, ForeignKey("cities.id"))
     movement_type = Column(String, nullable=False)  # attack, spy, reinforce, return
+    spy_count = Column(Integer, default=0)
     arrival_time = Column(DateTime, nullable=False)
     status = Column(String, default="ongoing")
 

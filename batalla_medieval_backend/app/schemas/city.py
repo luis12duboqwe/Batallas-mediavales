@@ -23,7 +23,9 @@ class CityRead(CityBase):
     clay: float
     iron: float
     loyalty: float
+    population_max: int
     last_production: datetime
+    is_protected: bool = False
     buildings: List[BuildingRead] = []
     troops: List[TroopRead] = []
 
