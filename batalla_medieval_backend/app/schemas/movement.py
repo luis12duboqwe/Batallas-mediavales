@@ -8,6 +8,7 @@ class MovementBase(BaseModel):
     target_city_id: int
     movement_type: str
     spy_count: int = 0
+    world_id: int
 
 
 class MovementCreate(MovementBase):

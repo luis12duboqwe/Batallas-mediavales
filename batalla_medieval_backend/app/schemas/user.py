@@ -1,7 +1,9 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr
+
+from .world import WorldRead
 
 
 class UserBase(BaseModel):
@@ -20,6 +22,9 @@ class UserRead(UserBase):
     is_admin: bool = False
     is_frozen: bool = False
     freeze_reason: Optional[str] = None
+    rename_tokens: int = 0
+    premium_theme_unlocked: bool = False
+    world_id: Optional[int] = None
 
     class Config:
         orm_mode = True
@@ -28,6 +33,7 @@ class UserRead(UserBase):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    worlds: List[WorldRead] = []
 
 
 class TokenData(BaseModel):

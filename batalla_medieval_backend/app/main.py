@@ -8,6 +8,21 @@ from .routers import (
     admin,
     alliance,
     anticheat,
+from .routers import alliance, auth, building, city, conquest, message, movement, report, troop
+from .routers import alliance, auth, building, city, message, movement, protection, report, troop
+from .routers import alliance, auth, building, city, message, movement, ranking, report, troop
+from .routers import alliance, auth, building, city, message, movement, queue, report, troop
+from .routers import admin, alliance, auth, building, city, event, message, movement, report, troop
+from .routers import admin, alliance, auth, building, city, message, movement, report, troop
+from .routers import quest
+from .routers import alliance, auth, building, city, conquest, message, movement, premium, report, troop
+from .routers import alliance, auth, building, city, message, movement, premium, protection, report, troop
+from .routers import alliance, auth, building, city, message, movement, premium, ranking, report, troop
+from .routers import alliance, auth, building, city, message, movement, premium, queue, report, troop
+from .routers import admin, alliance, auth, building, city, message, movement, premium, report, troop
+from .routers import (
+    admin,
+    alliance,
     auth,
     building,
     city,
@@ -19,6 +34,7 @@ from .routers import (
     ranking,
     report,
     troop,
+    world,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -49,6 +65,10 @@ app.include_router(conquest.router)
 app.include_router(ranking.router)
 app.include_router(admin.router)
 app.include_router(anticheat.router)
+app.include_router(event.router)
+app.include_router(quest.router)
+app.include_router(premium.router)
+app.include_router(world.router)
 
 
 @app.get("/")
