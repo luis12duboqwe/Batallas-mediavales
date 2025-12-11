@@ -26,6 +26,7 @@ from .quest_progress import QuestProgress
 from .premium import MapBookmark, PremiumStatus
 from .world import World, PlayerWorld
 from .wiki import WikiArticle, WikiCategory
+from .chat_message import ChatMessage
 
 __all__ = [
     "User",
@@ -63,4 +64,5 @@ __all__ = [
     "PlayerWorld",
     "WikiArticle",
     "WikiCategory",
+    "ChatMessage",
 ]

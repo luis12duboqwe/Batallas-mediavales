@@ -59,6 +59,7 @@ from .wiki import (
     WikiArticleRead,
     WikiArticleUpdate,
 )
+from .chat import ChatMessageRead, ChatMessageCreate
 
 __all__ = [
     "UserCreate",
@@ -141,4 +142,6 @@ __all__ = [
     "WikiArticleRead",
     "WikiArticleUpdate",
     "WIKI_CATEGORIES",
+    "ChatMessageRead",
+    "ChatMessageCreate",
 ]
