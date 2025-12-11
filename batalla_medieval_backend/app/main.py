@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import models
 from .config import get_settings
 from .database import Base, engine
+from .middleware import LanguageMiddleware
 from .routers import alliance, auth, building, city, conquest, message, movement, report, troop
 from .routers import alliance, auth, building, city, message, movement, protection, report, troop
 from .routers import alliance, auth, building, city, message, movement, ranking, report, troop
@@ -23,6 +24,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(LanguageMiddleware)
 
 app.include_router(auth.router)
 app.include_router(city.router)

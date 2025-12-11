@@ -7,6 +7,7 @@ from pydantic import BaseModel, EmailStr
 class UserBase(BaseModel):
     username: str
     email: EmailStr
+    language: str = "en"
 
 
 class UserCreate(UserBase):
@@ -26,6 +27,7 @@ class UserRead(UserBase):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    language: str
 
 
 class TokenData(BaseModel):

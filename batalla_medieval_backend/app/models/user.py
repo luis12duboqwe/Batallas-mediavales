@@ -17,6 +17,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     protection_ends_at = Column(DateTime, nullable=True)
     is_admin = Column(Boolean, default=False)
+    language = Column(String, default="en", nullable=False)
 
     cities = relationship("City", back_populates="owner", cascade="all, delete-orphan")
     alliances = relationship("AllianceMember", back_populates="user", cascade="all, delete-orphan")
