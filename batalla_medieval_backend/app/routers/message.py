@@ -5,7 +5,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
 
-router = APIRouter(prefix="/message", tags=["message"])
+router = APIRouter(prefix="/messages", tags=["message"])
 
 
 @router.post("/send", response_model=schemas.MessageRead)
