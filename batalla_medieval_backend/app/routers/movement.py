@@ -22,7 +22,9 @@ def create_movement(
     )
     if not origin_city:
         raise HTTPException(status_code=404, detail="Origin city not found")
-    movement_obj = movement.send_movement(db, origin_city, payload.target_city_id, payload.movement_type)
+    movement_obj = movement.send_movement(
+        db, origin_city, payload.target_city_id, payload.movement_type, payload.troops_payload
+    )
     return movement_obj
 
 
