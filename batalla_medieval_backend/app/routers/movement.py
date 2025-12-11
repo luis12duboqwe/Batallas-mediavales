@@ -53,3 +53,13 @@ def resolve_movements(db: Session = Depends(get_db), current_user: models.User =
     movements = movement.resolve_due_movements(db)
     filtered_movements = [mv for mv in movements if mv.origin_city_id in user_cities]
     return filtered_movements
+@router.post("/process", response_model=list[schemas.MovementRead])
+def process_movements(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    movement.process_arrived_movements(db)
+    updated_movements = (
+        db.query(models.Movement)
+        .join(models.City, models.Movement.origin_city_id == models.City.id)
+        .filter(models.City.owner_id == current_user.id)
+        .all()
+    )
+    return updated_movements
