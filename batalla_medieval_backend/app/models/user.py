@@ -17,6 +17,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     protection_ends_at = Column(DateTime, nullable=True)
     is_admin = Column(Boolean, default=False)
+    language = Column(String, default="en", nullable=False)
     is_frozen = Column(Boolean, default=False)
     freeze_reason = Column(String, nullable=True)
     last_login_ip = Column(String, nullable=True)

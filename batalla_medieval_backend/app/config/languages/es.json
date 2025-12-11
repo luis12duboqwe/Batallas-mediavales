@@ -1,0 +1,42 @@
+{
+  "buildings": {
+    "town_hall": "Ayuntamiento",
+    "barracks": "Cuartel",
+    "stable": "Establo"
+  },
+  "troops": {
+    "basic_infantry": "Lancero común",
+    "heavy_infantry": "Infantería pesada",
+    "archer": "Arquero",
+    "fast_cavalry": "Caballería ligera",
+    "heavy_cavalry": "Caballero",
+    "spy": "Explorador",
+    "ram": "Ariete",
+    "catapult": "Catapulta",
+    "noble": "Noble"
+  },
+  "messages": {
+    "building_upgraded": "Edificio mejorado",
+    "troops_trained": "Tropas entrenadas",
+    "welcome": "Bienvenido a Batalla Medieval",
+    "insufficient_resources": "No tienes suficientes recursos"
+  },
+  "ui": {
+    "attack": "Atacar",
+    "defend": "Defender",
+    "train": "Entrenar",
+    "upgrade": "Mejorar",
+    "logout": "Cerrar sesión"
+  },
+  "missions": {
+    "scout_mission": "Explora la ciudad enemiga",
+    "attack_mission": "Dirige un asalto contra tu enemigo",
+    "support_mission": "Envía refuerzos a un aliado"
+  },
+  "reports": {
+    "battle_won": "Has ganado la batalla",
+    "battle_lost": "Has perdido la batalla",
+    "espionage_report": "Informe de espionaje",
+    "trade_report": "Informe de comercio"
+  }
+}

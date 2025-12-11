@@ -9,6 +9,7 @@ from .world import WorldRead
 class UserBase(BaseModel):
     username: str
     email: EmailStr
+    language: str = "en"
 
 
 class UserCreate(UserBase):
@@ -33,6 +34,7 @@ class UserRead(UserBase):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    language: str
     worlds: List[WorldRead] = []
 
 

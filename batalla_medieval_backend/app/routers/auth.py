@@ -84,6 +84,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         email=user.email,
         hashed_password=hashed_password,
         protection_ends_at=protection_end,
+        language=user.language,
     )
     db.add(db_user)
     db.commit()
@@ -115,6 +116,7 @@ def login_for_access_token(
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
+    return {"access_token": access_token, "token_type": "bearer", "language": user.language}
     worlds = db.query(models.World).filter(models.World.is_active.is_(True)).all()
     return {"access_token": access_token, "token_type": "bearer", "worlds": worlds}
 
