@@ -8,10 +8,13 @@ from .report import Report
 from .alliance import Alliance, AllianceChatMessage, AllianceInvitation
 from .alliance_member import AllianceMember
 from .spy_report import SpyReport
-from .alliance import Alliance, AllianceMember
 from .message import Message
 from .log import Log
 from .event import WorldEvent
+from .quest import Quest
+from .quest_progress import QuestProgress
+from .premium import MapBookmark, PremiumStatus
+from .world import World, PlayerWorld
 
 __all__ = [
     "User",
@@ -30,4 +33,10 @@ __all__ = [
     "Message",
     "Log",
     "WorldEvent",
+    "Quest",
+    "QuestProgress",
+    "PremiumStatus",
+    "MapBookmark",
+    "World",
+    "PlayerWorld",
 ]

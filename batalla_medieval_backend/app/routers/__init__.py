@@ -2,6 +2,9 @@ from . import alliance, auth, building, city, conquest, message, movement, repor
 from . import alliance, auth, building, city, message, movement, protection, report, troop
 from . import alliance, auth, building, city, message, movement, ranking, report, troop
 from . import event
+from . import quest
+from . import alliance, auth, building, city, message, movement, premium, protection, report, troop
+from . import alliance, auth, building, city, message, movement, premium, ranking, report, troop
 
 __all__ = [
     "auth",
@@ -11,9 +14,11 @@ __all__ = [
     "movement",
     "ranking",
     "report",
+    "premium",
     "protection",
     "alliance",
     "message",
     "conquest",
     "event",
+    "quest",
 ]

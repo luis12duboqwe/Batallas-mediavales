@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from . import event as event_service
+from . import production, ranking, quest as quest_service
+from . import premium as premium_service
 from . import production, ranking
 
 UNIT_COSTS: Dict[str, Dict[str, float]] = {
@@ -35,6 +37,16 @@ def queue_training(db: Session, city: models.City, unit_type: str, quantity: int
     if quantity <= 0:
         raise ValueError("Quantity must be positive")
 
+    status = premium_service.get_or_create_status(db, city.owner)
+    existing_queue = (
+        db.query(models.TroopQueue)
+        .filter(models.TroopQueue.city_id == city.id)
+        .count()
+    )
+    allowed_slots = premium_service.get_troop_queue_limit(status)
+    if existing_queue >= allowed_slots:
+        raise ValueError("No troop training queue slots available")
+
     total_cost = {
         resource: cost * quantity
         for resource, cost in UNIT_COSTS.get(unit_type, {"wood": 10, "clay": 10, "iron": 10}).items()
@@ -63,6 +75,9 @@ def queue_training(db: Session, city: models.City, unit_type: str, quantity: int
 def process_troop_queues(db: Session) -> List[models.TroopQueue]:
     now = datetime.utcnow()
     finished_queues = db.query(models.TroopQueue).filter(models.TroopQueue.finish_time <= now).all()
+    if not finished_queues:
+        return []
+    owner_id = None
     for queue_entry in finished_queues:
         troop = (
             db.query(models.Troop)
@@ -74,9 +89,18 @@ def process_troop_queues(db: Session) -> List[models.TroopQueue]:
             db.add(troop)
             db.flush()
         troop.quantity += queue_entry.amount
+        city = db.query(models.City).filter(models.City.id == queue_entry.city_id).first()
+        if city and city.owner:
+            owner_id = city.owner_id
+            quest_service.handle_event(
+                db,
+                city.owner,
+                "troops_trained",
+                {"unit_type": queue_entry.troop_type, "amount": queue_entry.amount},
+            )
         db.delete(queue_entry)
     db.commit()
     db.refresh(troop)
-    ranking.recalculate_player_and_alliance_scores(db, city.owner_id)
-    return troop
+    if owner_id:
+        ranking.recalculate_player_and_alliance_scores(db, owner_id)
     return finished_queues
