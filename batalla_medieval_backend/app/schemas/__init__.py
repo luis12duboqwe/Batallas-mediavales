@@ -4,7 +4,17 @@ from .building import BuildingCreate, BuildingRead
 from .troop import TroopCreate, TroopRead
 from .movement import MovementCreate, MovementRead
 from .report import ReportCreate, ReportRead
-from .alliance import AllianceCreate, AllianceRead, AllianceMemberRead
+from .alliance import (
+    AllianceChatMessageCreate,
+    AllianceChatMessageRead,
+    AllianceCreate,
+    AllianceInvitationCreate,
+    AllianceInvitationRead,
+    AllianceMemberPublic,
+    AllianceMemberRead,
+    AllianceRead,
+    AllianceUpdate,
+)
 from .message import MessageCreate, MessageRead
 
 __all__ = [
@@ -24,7 +34,13 @@ __all__ = [
     "ReportRead",
     "AllianceCreate",
     "AllianceRead",
+    "AllianceUpdate",
     "AllianceMemberRead",
+    "AllianceMemberPublic",
+    "AllianceInvitationCreate",
+    "AllianceInvitationRead",
+    "AllianceChatMessageCreate",
+    "AllianceChatMessageRead",
     "MessageCreate",
     "MessageRead",
 ]
