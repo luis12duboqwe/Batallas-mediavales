@@ -19,6 +19,20 @@ class User(Base):
 
     cities = relationship("City", back_populates="owner", cascade="all, delete-orphan")
     alliances = relationship("AllianceMember", back_populates="user", cascade="all, delete-orphan")
+    alliance_invitations = relationship(
+        "AllianceInvitation",
+        back_populates="invited_user",
+        foreign_keys="AllianceInvitation.invited_user_id",
+        cascade="all, delete-orphan",
+    )
+    alliance_invitations_sent = relationship(
+        "AllianceInvitation",
+        foreign_keys="AllianceInvitation.invited_by_id",
+        cascade="all, delete-orphan",
+    )
+    alliance_chat_messages = relationship(
+        "AllianceChatMessage", back_populates="user", cascade="all, delete-orphan"
+    )
     messages_sent = relationship(
         "Message", back_populates="sender", foreign_keys="Message.sender_id", cascade="all, delete-orphan"
     )
