@@ -30,6 +30,7 @@ from .routers import (
     conquest,
     message,
     movement,
+    notification,
     protection,
     queue,
     ranking,
@@ -60,6 +61,7 @@ app.include_router(troop.router)
 app.include_router(movement.router)
 app.include_router(queue.router)
 app.include_router(report.router)
+app.include_router(notification.router)
 app.include_router(protection.router)
 app.include_router(alliance.router)
 app.include_router(message.router)

@@ -7,6 +7,7 @@ from typing import Dict, Tuple
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import notification as notification_service
 from . import anticheat
 from . import event as event_service
 
@@ -133,4 +134,23 @@ def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyRepor
     db.commit()
     db.refresh(attacker_report)
     db.refresh(defender_report)
+
+    if attacker_city.owner:
+        notification_service.create_notification(
+            db,
+            attacker_city.owner,
+            title="Nuevo informe de espionaje",
+            body=f"Tu misión de espionaje sobre {defender_city.name} ha generado un informe.",
+            notification_type="report_ready",
+            allow_email=False,
+        )
+    if defender_city.owner:
+        notification_service.create_notification(
+            db,
+            defender_city.owner,
+            title="Has sido espiado",
+            body=f"Un informe de espionaje sobre {defender_city.name} está disponible.",
+            notification_type="report_ready",
+            allow_email=False,
+        )
     return attacker_report, defender_report

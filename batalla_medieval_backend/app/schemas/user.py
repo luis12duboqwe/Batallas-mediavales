@@ -9,6 +9,7 @@ from .world import WorldRead
 class UserBase(BaseModel):
     username: str
     email: EmailStr
+    email_notifications: bool = False
     language: str = "en"
 
 
@@ -21,6 +22,7 @@ class UserRead(UserBase):
     created_at: datetime
     protection_ends_at: Optional[datetime] = None
     is_admin: bool = False
+    email_notifications: bool = False
     is_frozen: bool = False
     freeze_reason: Optional[str] = None
     rename_tokens: int = 0
