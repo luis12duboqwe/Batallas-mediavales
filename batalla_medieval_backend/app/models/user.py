@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List
 
-from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -15,6 +15,7 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    is_admin = Column(Boolean, default=False)
 
     cities = relationship("City", back_populates="owner", cascade="all, delete-orphan")
     alliances = relationship("AllianceMember", back_populates="user", cascade="all, delete-orphan")
@@ -38,3 +39,4 @@ class User(Base):
     messages_received = relationship(
         "Message", back_populates="recipient", foreign_keys="Message.recipient_id", cascade="all, delete-orphan"
     )
+    logs = relationship("Log", back_populates="user", cascade="all, delete-orphan")

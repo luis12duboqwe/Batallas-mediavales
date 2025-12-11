@@ -3,6 +3,13 @@ from .city import CityCreate, CityRead
 from .building import BuildingCreate, BuildingRead
 from .troop import TroopCreate, TroopRead
 from .movement import MovementCreate, MovementRead
+from .queue import (
+    BuildingQueueCreate,
+    BuildingQueueRead,
+    QueueStatus,
+    TroopQueueCreate,
+    TroopQueueRead,
+)
 from .report import ReportCreate, ReportRead
 from .alliance import (
     AllianceChatMessageCreate,
@@ -15,7 +22,10 @@ from .alliance import (
     AllianceRead,
     AllianceUpdate,
 )
+from .spy_report import SpyReportCreate, SpyReportRead
+from .alliance import AllianceCreate, AllianceRead, AllianceMemberRead
 from .message import MessageCreate, MessageRead
+from .log import LogCreate, LogRead
 
 __all__ = [
     "UserCreate",
@@ -30,8 +40,15 @@ __all__ = [
     "TroopRead",
     "MovementCreate",
     "MovementRead",
+    "BuildingQueueCreate",
+    "BuildingQueueRead",
+    "TroopQueueCreate",
+    "TroopQueueRead",
+    "QueueStatus",
     "ReportCreate",
     "ReportRead",
+    "SpyReportCreate",
+    "SpyReportRead",
     "AllianceCreate",
     "AllianceRead",
     "AllianceUpdate",
@@ -43,4 +60,6 @@ __all__ = [
     "AllianceChatMessageRead",
     "MessageCreate",
     "MessageRead",
+    "LogCreate",
+    "LogRead",
 ]

@@ -16,6 +16,7 @@ class UserCreate(UserBase):
 class UserRead(UserBase):
     id: int
     created_at: datetime
+    is_admin: bool = False
 
     class Config:
         orm_mode = True
