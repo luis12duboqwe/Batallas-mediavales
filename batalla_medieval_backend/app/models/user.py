@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -15,11 +15,27 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    last_active_at = Column(DateTime, default=datetime.utcnow)
     protection_ends_at = Column(DateTime, nullable=True)
     is_admin = Column(Boolean, default=False)
     rubies_balance = Column(Integer, default=0)
+    is_frozen = Column(Boolean, default=False)
+    email_notifications = Column(Boolean, default=False)
+    language = Column(String, default="en", nullable=False)
+    is_frozen = Column(Boolean, default=False)
+    freeze_reason = Column(String, nullable=True)
+    last_login_ip = Column(String, nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
+    last_action_at = Column(DateTime, nullable=True)
+    rename_tokens = Column(Integer, default=0)
+    premium_theme_unlocked = Column(Boolean, default=False)
+    world_id = Column(Integer, ForeignKey("worlds.id"), nullable=True)
 
     cities = relationship("City", back_populates="owner", cascade="all, delete-orphan")
+    premium_status = relationship(
+        "PremiumStatus", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    bookmarks = relationship("MapBookmark", back_populates="owner", cascade="all, delete-orphan")
     alliances = relationship("AllianceMember", back_populates="user", cascade="all, delete-orphan")
     alliance_invitations = relationship(
         "AllianceInvitation",
@@ -43,3 +59,9 @@ class User(Base):
     )
     logs = relationship("Log", back_populates="user", cascade="all, delete-orphan")
     items = relationship("UserItem", back_populates="user", cascade="all, delete-orphan")
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
+    quest_progress = relationship(
+        "QuestProgress", back_populates="user", cascade="all, delete-orphan"
+    )
+    world = relationship("World", back_populates="users")
+    world_memberships = relationship("PlayerWorld", back_populates="user", cascade="all, delete-orphan")

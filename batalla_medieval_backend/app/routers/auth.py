@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..config import get_settings
 from ..database import get_db
+from ..services import anticheat
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -66,6 +67,11 @@ async def get_current_user(
     user = get_user_by_username(db, username=token_data.username)
     if user is None:
         raise credentials_exception
+    if user.is_frozen:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account frozen")
+    user.last_active_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
     return user
 
 
@@ -83,6 +89,8 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         email=user.email,
         hashed_password=hashed_password,
         protection_ends_at=protection_end,
+        email_notifications=user.email_notifications,
+        language=user.language,
     )
     db.add(db_user)
     db.commit()
@@ -92,7 +100,9 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/token", response_model=schemas.Token)
 def login_for_access_token(
-    form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    request: Request = None,
+    db: Session = Depends(get_db),
 ):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
@@ -101,11 +111,20 @@ def login_for_access_token(
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if user.is_frozen:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Account frozen: {user.freeze_reason or 'Contact an admin'}",
+        )
+    client_ip = request.client.host if request and request.client else None
+    anticheat.check_multiaccount_ip(db, user, client_ip)
     access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer", "language": user.language}
+    worlds = db.query(models.World).filter(models.World.is_active.is_(True)).all()
+    return {"access_token": access_token, "token_type": "bearer", "worlds": worlds}
 
 
 @router.get("/me", response_model=schemas.UserRead)

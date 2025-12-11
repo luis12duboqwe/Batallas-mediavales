@@ -3,6 +3,7 @@ import random
 from typing import Dict, Tuple
 
 from .. import models
+from . import event as event_service
 
 UNIT_STATS: Dict[str, Dict[str, float]] = {
     "lancero_comun": {"attack": 10, "def_inf": 20, "def_cav": 10, "def_siege": 20, "type": "infantry"},
@@ -106,7 +107,13 @@ def _apply_losses(troops: Dict[str, int], loss_ratio: float) -> Dict[str, int]:
     return losses
 
 
-def resolve_battle(attacker_city: models.City, defender_city: models.City, attacking_troops: Dict[str, int]):
+def resolve_battle(
+    attacker_city: models.City,
+    defender_city: models.City,
+    attacking_troops: Dict[str, int],
+    modifiers: Dict[str, float] | None = None,
+):
+    modifiers = modifiers or event_service.DEFAULT_MODIFIERS
     defender_troops = {troop.unit_type: troop.quantity for troop in defender_city.troops}
 
     attack_distribution, base_attack = _split_attack_by_type(attacking_troops)
@@ -128,10 +135,11 @@ def resolve_battle(attacker_city: models.City, defender_city: models.City, attac
 
     loot = {"wood": 0, "clay": 0, "iron": 0}
     if sum(defender_survivors.values()) == 0 and base_attack > 0:
+        loot_multiplier = modifiers.get("loot_modifier", 1.0)
         loot = {
-            "wood": int(defender_city.wood * 0.3),
-            "clay": int(defender_city.clay * 0.3),
-            "iron": int(defender_city.iron * 0.3),
+            "wood": int(defender_city.wood * 0.3 * loot_multiplier),
+            "clay": int(defender_city.clay * 0.3 * loot_multiplier),
+            "iron": int(defender_city.iron * 0.3 * loot_multiplier),
         }
         defender_city.wood -= loot["wood"]
         defender_city.clay -= loot["clay"]
