@@ -14,12 +14,18 @@ axiosClient.interceptors.request.use((config) => {
 });
 
 export const api = {
-  login: (data) => axiosClient.post('/login', data),
-  register: (data) => axiosClient.post('/register', data),
-  getCity: () => axiosClient.get('/city'),
-  updateCity: (data) => axiosClient.put('/city', data),
-  upgradeBuilding: (building) => axiosClient.post('/city/upgrade', { building }),
-  trainTroops: (payload) => axiosClient.post('/troops/train', payload),
+  login: (data) =>
+    axiosClient.post(
+      '/auth/token',
+      new URLSearchParams({ username: data.username, password: data.password }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    ),
+  register: (data) => axiosClient.post('/auth/register', data),
+  getCities: () => axiosClient.get('/cities'),
+  getCity: (cityId) => axiosClient.get(`/cities/${cityId}`),
+  updateCity: (cityId, data) => axiosClient.put(`/cities/${cityId}`, data),
+  upgradeBuilding: (cityId, building) => axiosClient.post(`/buildings/${cityId}`, { name: building }),
+  trainTroops: (cityId, payload) => axiosClient.post(`/troops/${cityId}`, payload),
   sendMovement: (payload) => axiosClient.post('/movements', payload),
   getMovements: () => axiosClient.get('/movements'),
   getReports: () => axiosClient.get('/reports'),
