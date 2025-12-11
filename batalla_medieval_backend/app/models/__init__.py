@@ -10,6 +10,7 @@ from .alliance_member import AllianceMember
 from .spy_report import SpyReport
 from .message import Message
 from .log import Log
+from .premium import MapBookmark, PremiumStatus
 from .world import World, PlayerWorld
 
 __all__ = [
@@ -28,6 +29,8 @@ __all__ = [
     "AllianceChatMessage",
     "Message",
     "Log",
+    "PremiumStatus",
+    "MapBookmark",
     "World",
     "PlayerWorld",
 ]
