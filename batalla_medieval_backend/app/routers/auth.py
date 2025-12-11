@@ -105,7 +105,8 @@ def login_for_access_token(
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    worlds = db.query(models.World).filter(models.World.is_active.is_(True)).all()
+    return {"access_token": access_token, "token_type": "bearer", "worlds": worlds}
 
 
 @router.get("/me", response_model=schemas.UserRead)
