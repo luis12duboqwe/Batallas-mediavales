@@ -54,21 +54,21 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
       <div className="fixed inset-0 bg-black/50" />
       <div
         ref={popupRef}
-        className="relative w-full max-w-md bg-gray-900 border border-yellow-800/60 rounded-xl shadow-2xl p-6 m-4"
+        className="relative w-full max-w-md bg-gradient-to-br from-emerald-950 via-slate-950 to-amber-950 border border-amber-900/70 rounded-2xl shadow-2xl p-6 m-4"
       >
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-sm text-gray-400">Coordenada {coordinate?.x},{coordinate?.y}</p>
-            <h2 className="text-2xl text-gold">{city?.name || 'Ciudad desconocida'}</h2>
-            <p className="text-sm text-gray-400">
-              Propietario: <span className="text-yellow-200">{city?.owner_name || '---'}</span>
+            <p className="text-sm text-amber-200/80">Coordenadas ({coordinate?.x}, {coordinate?.y})</p>
+            <h2 className="text-3xl font-semibold text-amber-100">{city?.name || 'Ciudad desconocida'}</h2>
+            <p className="text-sm text-amber-100/80">
+              Propietario: <span className="text-amber-200 font-semibold">{city?.owner_name || '---'}</span>
             </p>
-            <p className="text-xs text-gray-500">{relationText[city?.relation] || 'Sin relación'}</p>
+            <p className="text-xs text-amber-300/70">{relationText[city?.relation] || 'Sin relación'}</p>
           </div>
           <button
             type="button"
             aria-label="Cerrar"
-            className="text-gray-400 hover:text-yellow-300"
+            className="text-amber-200/70 hover:text-amber-100"
             onClick={onClose}
           >
             ✕
@@ -76,12 +76,21 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
         </div>
 
         {loading ? (
-          <p className="text-gray-400 mt-4">Cargando información...</p>
+          <p className="text-amber-100/70 mt-4">Cargando información...</p>
         ) : (
-          <div className="mt-4 space-y-2 text-sm text-gray-300">
-            <p>Habitantes: {city?.population ?? 'N/D'}</p>
-            <p>Producción: {city?.production ?? 'N/D'}</p>
-            <p>Defensas: {city?.defense ?? 'N/D'}</p>
+          <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-amber-100/80">
+            <div className="rounded-lg border border-amber-900/60 bg-black/20 p-3">
+              <p className="text-xs uppercase tracking-wide text-amber-300/70">Habitantes</p>
+              <p className="text-lg font-semibold">{city?.population ?? 'N/D'}</p>
+            </div>
+            <div className="rounded-lg border border-amber-900/60 bg-black/20 p-3">
+              <p className="text-xs uppercase tracking-wide text-amber-300/70">Producción</p>
+              <p className="text-lg font-semibold">{city?.production ?? 'N/D'}</p>
+            </div>
+            <div className="rounded-lg border border-amber-900/60 bg-black/20 p-3 col-span-2">
+              <p className="text-xs uppercase tracking-wide text-amber-300/70">Defensas</p>
+              <p className="text-lg font-semibold">{city?.defense ?? 'N/D'}</p>
+            </div>
           </div>
         )}
 
@@ -89,7 +98,7 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
           <button
             type="button"
             onClick={() => sendAction('attack')}
-            className="btn-primary text-center"
+            className="btn-primary text-center bg-gradient-to-r from-red-600 to-amber-600 border-none shadow-[0_10px_25px_-12px_rgba(248,113,113,0.65)]"
             disabled={actionState.status === 'loading'}
           >
             Atacar
@@ -97,7 +106,7 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
           <button
             type="button"
             onClick={() => sendAction('spy')}
-            className="btn-primary bg-gray-800 text-yellow-300"
+            className="btn-primary bg-gradient-to-r from-slate-800 to-emerald-800 text-amber-100 border-none"
             disabled={actionState.status === 'loading'}
           >
             Espiar
@@ -105,7 +114,7 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
           <button
             type="button"
             onClick={() => sendAction('reinforce')}
-            className="btn-primary bg-gray-800 text-yellow-300"
+            className="btn-primary bg-gradient-to-r from-blue-700 to-emerald-700 text-amber-50 border-none"
             disabled={actionState.status === 'loading'}
           >
             Reforzar
@@ -116,10 +125,10 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
           <p
             className={`mt-3 text-sm ${
               actionState.status === 'success'
-                ? 'text-green-400'
+                ? 'text-green-300'
                 : actionState.status === 'error'
-                  ? 'text-red-400'
-                  : 'text-gray-300'
+                  ? 'text-red-300'
+                  : 'text-amber-100/80'
             }`}
           >
             {actionState.message}
