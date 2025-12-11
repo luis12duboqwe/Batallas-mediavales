@@ -5,6 +5,8 @@ from .troop import Troop
 from .movement import Movement
 from .queue import BuildingQueue, TroopQueue
 from .report import Report
+from .achievement import Achievement
+from .achievement_progress import AchievementProgress
 from .alliance import Alliance, AllianceChatMessage, AllianceInvitation
 from .alliance_member import AllianceMember
 from .spy_report import SpyReport
@@ -22,6 +24,8 @@ __all__ = [
     "TroopQueue",
     "Report",
     "SpyReport",
+    "Achievement",
+    "AchievementProgress",
     "Alliance",
     "AllianceMember",
     "AllianceInvitation",

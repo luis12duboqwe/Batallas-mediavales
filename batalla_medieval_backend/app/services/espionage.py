@@ -127,4 +127,13 @@ def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyRepor
     db.commit()
     db.refresh(attacker_report)
     db.refresh(defender_report)
+    if success:
+        from .achievement import update_achievement_progress
+
+        update_achievement_progress(
+            db,
+            attacker_city.owner_id,
+            "spy_success",
+            increment=1,
+        )
     return attacker_report, defender_report
