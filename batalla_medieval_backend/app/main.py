@@ -4,9 +4,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import models
 from .config import get_settings
 from .database import Base, engine
+from .migrations import run_migrations
 from .routers import admin, alliance, auth, building, city, message, movement, report, troop
 
 Base.metadata.create_all(bind=engine)
+run_migrations(engine)
 
 settings = get_settings()
 
