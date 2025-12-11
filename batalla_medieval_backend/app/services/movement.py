@@ -39,3 +39,17 @@ def send_movement(db: Session, origin_city: models.City, target_city_id: int, mo
     db.commit()
     db.refresh(movement)
     return movement
+
+
+def process_movements(db: Session) -> list[models.Movement]:
+    now = datetime.utcnow()
+    arrived_movements = (
+        db.query(models.Movement)
+        .filter(models.Movement.status == "ongoing", models.Movement.arrival_time <= now)
+        .all()
+    )
+    for movement in arrived_movements:
+        movement.status = "arrived"
+        db.add(movement)
+    db.commit()
+    return arrived_movements
