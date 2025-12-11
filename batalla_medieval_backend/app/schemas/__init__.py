@@ -29,6 +29,7 @@ from .conquest import ConquestRequest, ConquestResult, FoundCityRequest
 from .protection import ProtectionStatus
 from .ranking import AllianceRanking, PlayerRanking
 from .log import LogCreate, LogRead
+from .shop import PurchaseResponse, ShopItemRead, UserItemRead
 
 __all__ = [
     "UserCreate",
@@ -71,4 +72,7 @@ __all__ = [
     "AllianceRanking",
     "LogCreate",
     "LogRead",
+    "ShopItemRead",
+    "UserItemRead",
+    "PurchaseResponse",
 ]

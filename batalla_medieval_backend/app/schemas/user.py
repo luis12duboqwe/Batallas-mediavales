@@ -18,6 +18,7 @@ class UserRead(UserBase):
     created_at: datetime
     protection_ends_at: Optional[datetime] = None
     is_admin: bool = False
+    rubies_balance: int
 
     class Config:
         orm_mode = True
