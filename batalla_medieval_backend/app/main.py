@@ -9,6 +9,22 @@ from .routers import alliance, auth, building, city, message, movement, premium,
 from .routers import alliance, auth, building, city, message, movement, premium, ranking, report, troop
 from .routers import alliance, auth, building, city, message, movement, premium, queue, report, troop
 from .routers import admin, alliance, auth, building, city, message, movement, premium, report, troop
+from .routers import (
+    admin,
+    alliance,
+    auth,
+    building,
+    city,
+    conquest,
+    message,
+    movement,
+    protection,
+    queue,
+    ranking,
+    report,
+    troop,
+    world,
+)
 
 Base.metadata.create_all(bind=engine)
 
@@ -38,6 +54,7 @@ app.include_router(conquest.router)
 app.include_router(ranking.router)
 app.include_router(admin.router)
 app.include_router(premium.router)
+app.include_router(world.router)
 
 
 @app.get("/")
