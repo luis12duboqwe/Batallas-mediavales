@@ -23,6 +23,9 @@ from .alliance import (
     AllianceMemberRead,
     AllianceRead,
     AllianceUpdate,
+    RANK_GENERAL,
+    RANK_LEADER,
+    RANK_MEMBER,
 )
 from .spy_report import SpyReportCreate, SpyReportRead
 from .message import MessageCreate, MessageRead
@@ -95,6 +98,9 @@ __all__ = [
     "AllianceChatMessageRead",
     "MessageCreate",
     "MessageRead",
+    "RANK_GENERAL",
+    "RANK_LEADER",
+    "RANK_MEMBER",
     "ConquestRequest",
     "ConquestResult",
     "FoundCityRequest",
