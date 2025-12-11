@@ -11,6 +11,7 @@ from .spy_report import SpyReport
 from .alliance import Alliance, AllianceMember
 from .message import Message
 from .log import Log
+from .admin_bot_log import AdminBotLog
 
 __all__ = [
     "User",
@@ -28,4 +29,5 @@ __all__ = [
     "AllianceChatMessage",
     "Message",
     "Log",
+    "AdminBotLog",
 ]
