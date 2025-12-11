@@ -10,6 +10,8 @@ from .alliance_member import AllianceMember
 from .spy_report import SpyReport
 from .message import Message
 from .log import Log
+from .shop_item import ShopItem
+from .user_item import UserItem
 from .admin_bot_log import AdminBotLog
 from .notification import Notification
 from .anticheat import AntiCheatFlag
@@ -35,6 +37,8 @@ __all__ = [
     "AllianceChatMessage",
     "Message",
     "Log",
+    "ShopItem",
+    "UserItem",
     "AdminBotLog",
     "Notification",
     "AntiCheatFlag",

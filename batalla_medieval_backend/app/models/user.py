@@ -18,6 +18,7 @@ class User(Base):
     last_active_at = Column(DateTime, default=datetime.utcnow)
     protection_ends_at = Column(DateTime, nullable=True)
     is_admin = Column(Boolean, default=False)
+    rubies_balance = Column(Integer, default=0)
     is_frozen = Column(Boolean, default=False)
     email_notifications = Column(Boolean, default=False)
     language = Column(String, default="en", nullable=False)
@@ -57,6 +58,7 @@ class User(Base):
         "Message", back_populates="receiver", foreign_keys="Message.receiver_id", cascade="all, delete-orphan"
     )
     logs = relationship("Log", back_populates="user", cascade="all, delete-orphan")
+    items = relationship("UserItem", back_populates="user", cascade="all, delete-orphan")
     notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
     quest_progress = relationship(
         "QuestProgress", back_populates="user", cascade="all, delete-orphan"

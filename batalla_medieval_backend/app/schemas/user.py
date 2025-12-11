@@ -23,6 +23,7 @@ class UserRead(UserBase):
     last_active_at: datetime
     protection_ends_at: Optional[datetime] = None
     is_admin: bool = False
+    rubies_balance: int
     is_frozen: bool = False
     email_notifications: bool = False
     is_frozen: bool = False

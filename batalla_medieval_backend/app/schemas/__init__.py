@@ -30,6 +30,7 @@ from .conquest import ConquestRequest, ConquestResult, FoundCityRequest
 from .protection import ProtectionStatus
 from .ranking import AllianceRanking, PlayerRanking
 from .log import LogCreate, LogRead
+from .shop import PurchaseResponse, ShopItemRead, UserItemRead
 from .admin_bot import AdminBotLogRead, AdminBotRunResponse
 from .anticheat import AntiCheatFlagRead, AntiCheatResolveRequest
 from .event import EventRead, EventCreate, EventModifiers, ActiveEventResponse
@@ -85,6 +86,9 @@ __all__ = [
     "AllianceRanking",
     "LogCreate",
     "LogRead",
+    "ShopItemRead",
+    "UserItemRead",
+    "PurchaseResponse",
     "AdminBotLogRead",
     "AdminBotRunResponse",
     "AntiCheatFlagRead",
