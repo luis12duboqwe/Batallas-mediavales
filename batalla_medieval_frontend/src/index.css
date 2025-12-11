@@ -39,3 +39,26 @@ a {
 .badge {
   @apply inline-flex items-center gap-2 px-2 py-1 rounded-full text-xs font-semibold bg-gray-800 border border-yellow-700;
 }
+
+.intro-title {
+  display: inline-block;
+  background-image: linear-gradient(120deg, #f5e6c0 0%, #d4af37 40%, #fff8d6 50%, #d4af37 60%, #c89b26 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  animation: metallic-shine 1.4s ease-in-out forwards;
+}
+
+@keyframes metallic-shine {
+  0% {
+    background-position: -120% 0;
+  }
+  50% {
+    background-position: 40% 0;
+  }
+  100% {
+    background-position: 120% 0;
+  }
+}
