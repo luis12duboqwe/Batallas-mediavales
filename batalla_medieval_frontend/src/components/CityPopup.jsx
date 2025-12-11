@@ -8,7 +8,7 @@ const relationText = {
   neutral: 'Neutral',
 };
 
-const CityPopup = ({ cityId, coordinate, onClose }) => {
+const CityPopup = ({ cityId, coordinate, originCityId, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [city, setCity] = useState(null);
   const [actionState, setActionState] = useState({ status: 'idle', message: '' });
@@ -28,7 +28,7 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
     if (!cityId) return;
     setLoading(true);
     axiosClient
-      .get(`/city/${cityId}`)
+      .get(`/cities/${cityId}`)
       .then((response) => {
         setCity(response.data);
       })
@@ -39,10 +39,17 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
   }, [cityId]);
 
   const sendAction = async (type) => {
-    if (!cityId) return;
+    if (!cityId || !originCityId) {
+      setActionState({ status: 'error', message: 'Selecciona una ciudad válida de origen y destino' });
+      return;
+    }
     setActionState({ status: 'loading', message: '' });
     try {
-      await axiosClient.post('/movement/send', { city_id: cityId, type });
+      await axiosClient.post('/movements', {
+        origin_city_id: originCityId,
+        target_city_id: cityId,
+        movement_type: type,
+      });
       setActionState({ status: 'success', message: `Orden enviada: ${type}` });
     } catch (error) {
       setActionState({ status: 'error', message: error.response?.data?.detail || 'No se pudo enviar la orden' });

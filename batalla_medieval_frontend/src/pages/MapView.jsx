@@ -26,14 +26,12 @@ const MapView = () => {
   const loadCities = async () => {
     setLoadingMap(true);
     try {
-      const response = await axiosClient.get('/city/map');
-      const payload = response.data || [];
-      const currentPlayer = payload.current_player;
-      const cityList = Array.isArray(payload) ? payload : payload.cities || [];
+      const response = await axiosClient.get('/cities');
+      const cityList = response.data || [];
       const enriched = cityList.map((city) => ({
         ...city,
-        relation: formatRelation(city, currentPlayer),
-        ownerTag: city.owner_name?.slice(0, 3)?.toUpperCase(),
+        relation: 'own',
+        ownerTag: city.name?.slice(0, 3)?.toUpperCase(),
       }));
       setCities(enriched);
     } catch (error) {
@@ -50,18 +48,13 @@ const MapView = () => {
   const handleCellSelect = async ({ x, y }) => {
     setSelectedCoord({ x, y });
     setMessage('Buscando ciudad...');
-    try {
-      const response = await axiosClient.get('/city/by-coordinates', { params: { x, y } });
-      if (response.data?.id) {
-        setPopupCityId(response.data.id);
-        setMessage(`Ciudad encontrada en (${x}, ${y})`);
-      } else {
-        setPopupCityId(null);
-        setMessage('No city here');
-      }
-    } catch (error) {
+    const city = cities.find((item) => item.x === x && item.y === y);
+    if (city?.id) {
+      setPopupCityId(city.id);
+      setMessage(`Ciudad encontrada en (${x}, ${y})`);
+    } else {
       setPopupCityId(null);
-      setMessage(error.response?.data?.detail || 'No city here');
+      setMessage('No hay ciudad en esta coordenada');
     }
   };
 
@@ -160,6 +153,7 @@ const MapView = () => {
           <CityPopup
             cityId={popupCityId}
             coordinate={selectedCoord}
+            originCityId={cities[0]?.id}
             onClose={() => setPopupCityId(null)}
           />
         )}
