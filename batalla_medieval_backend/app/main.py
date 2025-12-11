@@ -39,11 +39,13 @@ from .routers import (
     world,
 )
 
+# Load configuration and initialize database metadata.
+settings = get_settings()
 Base.metadata.create_all(bind=engine)
 
-settings = get_settings()
-app = FastAPI(title=settings.app_name)
+app = FastAPI(title="Batalla Medieval Backend")
 
+# Global middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -53,35 +55,38 @@ app.add_middleware(
 )
 app.add_middleware(LanguageMiddleware)
 
-app.include_router(auth.router)
-app.include_router(city.router)
-app.include_router(building.router)
-app.include_router(troop.router)
-app.include_router(movement.router)
-app.include_router(queue.router)
-app.include_router(report.router)
-app.include_router(notification.router)
-app.include_router(protection.router)
-app.include_router(alliance.router)
-app.include_router(message.router)
-app.include_router(conquest.router)
-app.include_router(ranking.router)
-app.include_router(theme.router)
-app.include_router(admin.router)
-app.include_router(season.router)
-app.include_router(achievement.router)
-app.include_router(shop.router)
-app.include_router(admin_bot.router)
-app.include_router(anticheat.router)
-app.include_router(event.router)
-app.include_router(quest.router)
-app.include_router(premium.router)
-app.include_router(world.router)
-app.include_router(wiki.router)
-app.include_router(public_api.router)
-app.include_router(chat.router)
-app.include_router(icon.router)
-app.include_router(economy.router)
+# Router registration
+app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+app.include_router(city.router, prefix="/city", tags=["City"])
+app.include_router(building.router, prefix="/building", tags=["Building"])
+app.include_router(troop.router, prefix="/troop", tags=["Troop"])
+app.include_router(movement.router, prefix="/movement", tags=["Movement"])
+app.include_router(alliance.router, prefix="/alliance", tags=["Alliance"])
+app.include_router(message.router, prefix="/message", tags=["Message"])
+app.include_router(ranking.router, prefix="/ranking", tags=["Ranking"])
+app.include_router(report.router, prefix="/report", tags=["Report"])
+app.include_router(protection.router, prefix="/protection", tags=["Protection"])
+app.include_router(premium.router, prefix="/premium", tags=["Premium"])
+app.include_router(chat.router, prefix="/chat", tags=["Chat"])
+app.include_router(notification.router, prefix="/notification", tags=["Notification"])
+app.include_router(event.router, prefix="/event", tags=["Event"])
+app.include_router(season.router, prefix="/season", tags=["Season"])
+app.include_router(quest.router, prefix="/quest", tags=["Quest"])
+app.include_router(wiki.router, prefix="/wiki", tags=["Wiki"])
+
+# Additional routers
+app.include_router(achievement.router, prefix="/achievement", tags=["Achievement"])
+app.include_router(admin.router, prefix="/admin", tags=["Admin"])
+app.include_router(admin_bot.router, prefix="/admin-bot", tags=["Admin Bot"])
+app.include_router(anticheat.router, prefix="/anticheat", tags=["Anticheat"])
+app.include_router(conquest.router, prefix="/conquest", tags=["Conquest"])
+app.include_router(economy.router, prefix="/economy", tags=["Economy"])
+app.include_router(icon.router, prefix="/icon", tags=["Icon"])
+app.include_router(public_api.router, prefix="/public-api", tags=["Public API"])
+app.include_router(queue.router, prefix="/queue", tags=["Queue"])
+app.include_router(shop.router, prefix="/shop", tags=["Shop"])
+app.include_router(theme.router, prefix="/theme", tags=["Theme"])
+app.include_router(world.router, prefix="/world", tags=["World"])
 
 
 @app.get("/")
