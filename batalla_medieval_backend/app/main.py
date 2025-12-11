@@ -1,51 +1,34 @@
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import models
 from .config import get_settings
 from .database import Base, engine
+from .middleware import LanguageMiddleware
 from .routers import (
     achievement,
     admin,
     admin_bot,
-from .middleware import LanguageMiddleware
-from .routers import (
-    admin,
     alliance,
     anticheat,
-from .routers import alliance, auth, building, city, conquest, message, movement, report, troop
-from .routers import alliance, auth, building, city, message, movement, protection, report, troop
-from .routers import alliance, auth, building, city, message, movement, ranking, report, troop
-from .routers import alliance, auth, building, city, message, movement, queue, report, troop
-from .routers import admin, alliance, auth, building, city, event, message, movement, report, troop
-from .routers import admin, alliance, auth, building, city, message, movement, report, troop
-from .routers import quest
-from .routers import alliance, auth, building, city, conquest, message, movement, premium, report, troop
-from .routers import alliance, auth, building, city, message, movement, premium, protection, report, troop
-from .routers import alliance, auth, building, city, message, movement, premium, ranking, report, troop
-from .routers import alliance, auth, building, city, message, movement, premium, queue, report, troop
-from .routers import admin, alliance, auth, building, city, message, movement, premium, report, troop
-from .routers import (
-    admin,
-    alliance,
     auth,
     building,
     city,
     conquest,
+    event,
     message,
     movement,
     notification,
+    premium,
     protection,
+    public_api,
+    quest,
     queue,
     ranking,
     report,
     season,
-    troop,
-    troop,
-    theme,
-    troop,
     shop,
-    troop,
+    theme,
     troop,
     world,
 )
@@ -89,6 +72,7 @@ app.include_router(event.router)
 app.include_router(quest.router)
 app.include_router(premium.router)
 app.include_router(world.router)
+app.include_router(public_api.router)
 
 
 @app.get("/")
