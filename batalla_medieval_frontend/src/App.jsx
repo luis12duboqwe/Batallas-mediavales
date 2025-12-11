@@ -19,41 +19,52 @@ import { useUserStore } from './store/userStore';
 import soundManager from './services/sound';
 
 const sidebarLinks = [
-  { to: '/', label: 'Ciudad' },
-  { to: '/buildings', label: 'Edificios' },
-  { to: '/troops', label: 'Tropas' },
-  { to: '/movements', label: 'Movimientos' },
-  { to: '/map', label: 'Mapa' },
-  { to: '/reports', label: 'Reportes' },
-  { to: '/simulator', label: 'Simulador' },
-  { to: '/alliance', label: 'Alianza' },
-  { to: '/messages', label: 'Mensajes' },
-  { to: '/admin', label: 'Admin' },
+  { to: '/', label: 'Ciudad', icon: '🏰' },
+  { to: '/buildings', label: 'Edificios', icon: '🛠️' },
+  { to: '/troops', label: 'Tropas', icon: '⚔️' },
+  { to: '/movements', label: 'Movimientos', icon: '🧭' },
+  { to: '/map', label: 'Mapa', icon: '🗺️' },
+  { to: '/reports', label: 'Reportes', icon: '📜' },
+  { to: '/simulator', label: 'Simulador', icon: '🎯' },
+  { to: '/alliance', label: 'Alianza', icon: '🤝' },
+  { to: '/messages', label: 'Mensajes', icon: '✉️' },
+  { to: '/admin', label: 'Admin', icon: '👑' },
 ];
 
 const Layout = ({ children }) => {
   const location = useLocation();
   return (
     <div className="min-h-screen bg-gradient-to-br from-midnight via-gray-950 to-black text-gray-100">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(252,211,77,0.12),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(248,180,0,0.08),transparent_30%)]" />
       <Navbar />
       <ResourceBar />
       <div className="flex">
-        <aside className="w-64 bg-gray-950/80 border-r border-yellow-800/30 p-4 hidden md:block">
-          <nav className="space-y-2">
-            {sidebarLinks.map((link) => (
-              <Link
-                key={link.to}
-                to={link.to}
-                className={`block px-3 py-2 rounded hover:bg-gray-800 transition ${
-                  location.pathname === link.to ? 'bg-gray-800 text-yellow-300' : 'text-gray-300'
-                }`}
-              >
-                {link.label}
-              </Link>
-            ))}
+        <aside className="w-64 bg-gray-950/75 border-r border-yellow-800/30 p-4 hidden md:block backdrop-blur-lg">
+          <div className="mb-4 text-xs uppercase tracking-[0.2em] text-gray-500">Navegación</div>
+          <nav className="space-y-1">
+            {sidebarLinks.map((link) => {
+              const active = location.pathname === link.to;
+              return (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  className={`flex items-center gap-3 px-3 py-2 rounded-lg transition duration-150 border border-transparent ${
+                    active
+                      ? 'bg-yellow-500/10 text-yellow-200 border-yellow-700 shadow-[0_0_0_1px_rgba(234,179,8,0.3)]'
+                      : 'text-gray-300 hover:text-yellow-200 hover:bg-gray-800/60'
+                  }`}
+                >
+                  <span className="text-lg" aria-hidden>{link.icon}</span>
+                  <span className="font-medium">{link.label}</span>
+                </Link>
+              );
+            })}
           </nav>
         </aside>
-        <main className="flex-1 p-4 md:p-8 space-y-6">{children}</main>
+        <main className="flex-1 p-4 md:p-8 space-y-6 relative overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_20%,rgba(255,215,128,0.03),transparent_35%)]" />
+          <div className="relative animate-fade-in">{children}</div>
+        </main>
       </div>
     </div>
   );

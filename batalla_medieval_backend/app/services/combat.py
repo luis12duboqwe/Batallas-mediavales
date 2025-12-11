@@ -14,8 +14,8 @@ UNIT_STATS: Dict[str, Dict[str, float]] = {
     "jinete_explorador": {"attack": 60, "def_inf": 20, "def_cav": 20, "def_siege": 20, "type": "cavalry"},
     "caballero_imperial": {"attack": 100, "def_inf": 40, "def_cav": 60, "def_siege": 40, "type": "cavalry"},
     "infiltrador": {"attack": 0, "def_inf": 0, "def_cav": 0, "def_siege": 0, "type": "infantry"},
-    "quebramuros": {"attack": 2, "def_inf": 50, "def_cav": 50, "def_siege": 80, "type": "siege"},
-    "tormenta_de_piedra": {"attack": 2, "def_inf": 100, "def_cav": 100, "def_siege": 120, "type": "siege"},
+    "quebramuros": {"attack": 2, "def_inf": 40, "def_cav": 35, "def_siege": 60, "type": "siege"},
+    "tormenta_de_piedra": {"attack": 2, "def_inf": 70, "def_cav": 70, "def_siege": 90, "type": "siege"},
     # Aliases for backwards compatibility with previous unit naming
     "basic_infantry": {"attack": 10, "def_inf": 20, "def_cav": 10, "def_siege": 20, "type": "infantry"},
     "heavy_infantry": {"attack": 25, "def_inf": 40, "def_cav": 30, "def_siege": 40, "type": "infantry"},
@@ -23,8 +23,8 @@ UNIT_STATS: Dict[str, Dict[str, float]] = {
     "fast_cavalry": {"attack": 60, "def_inf": 20, "def_cav": 20, "def_siege": 20, "type": "cavalry"},
     "heavy_cavalry": {"attack": 100, "def_inf": 40, "def_cav": 60, "def_siege": 40, "type": "cavalry"},
     "spy": {"attack": 0, "def_inf": 0, "def_cav": 0, "def_siege": 0, "type": "infantry"},
-    "ram": {"attack": 2, "def_inf": 50, "def_cav": 50, "def_siege": 80, "type": "siege"},
-    "catapult": {"attack": 2, "def_inf": 100, "def_cav": 100, "def_siege": 120, "type": "siege"},
+    "ram": {"attack": 2, "def_inf": 40, "def_cav": 35, "def_siege": 60, "type": "siege"},
+    "catapult": {"attack": 2, "def_inf": 70, "def_cav": 70, "def_siege": 90, "type": "siege"},
 }
 
 WALL_NAME = "Muralla de Guardia"

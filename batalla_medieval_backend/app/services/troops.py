@@ -48,6 +48,30 @@ def get_training_times() -> Dict[str, int]:
         "ram": 90,
         "catapult": 120,
     }
+from . import production, ranking
+
+UNIT_COSTS: Dict[str, Dict[str, float]] = {
+    "basic_infantry": {"wood": 60, "clay": 40, "iron": 25},
+    "heavy_infantry": {"wood": 90, "clay": 75, "iron": 60},
+    "archer": {"wood": 85, "clay": 50, "iron": 55},
+    "fast_cavalry": {"wood": 150, "clay": 110, "iron": 120},
+    "heavy_cavalry": {"wood": 260, "clay": 200, "iron": 260},
+    "spy": {"wood": 55, "clay": 55, "iron": 50},
+    "ram": {"wood": 360, "clay": 260, "iron": 220},
+    "catapult": {"wood": 380, "clay": 300, "iron": 350},
+    "noble": {"wood": 1200, "clay": 1200, "iron": 1200},
+}
+
+TRAINING_TIMES: Dict[str, int] = {
+    "basic_infantry": 60,
+    "heavy_infantry": 75,
+    "archer": 70,
+    "fast_cavalry": 95,
+    "heavy_cavalry": 130,
+    "spy": 45,
+    "ram": 140,
+    "catapult": 180,
+}
 
 
 def queue_training(db: Session, city: models.City, unit_type: str, quantity: int) -> models.TroopQueue:

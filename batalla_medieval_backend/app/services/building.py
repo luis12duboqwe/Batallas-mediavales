@@ -14,8 +14,13 @@ from . import premium as premium_service
 from . import production, quest as quest_service, ranking
 
 logger = logging.getLogger(__name__)
+BUILDING_COSTS: Dict[str, Dict[str, float]] = {
+    "town_hall": {"wood": 260, "clay": 200, "iron": 150},
+    "barracks": {"wood": 200, "clay": 160, "iron": 170},
+    "stable": {"wood": 320, "clay": 260, "iron": 260},
+}
 
-BASE_BUILD_TIME_SECONDS = 300
+BASE_BUILD_TIME_SECONDS = 420
 
 
 @lru_cache(maxsize=1)

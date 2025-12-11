@@ -14,42 +14,42 @@ from typing import Dict, Mapping
 
 # Base construction cost for every building (level 1).
 BASE_BUILDING_COSTS: Dict[str, Dict[str, float]] = {
-    "Casa Central": {"wood": 200.0, "clay": 150.0, "iron": 100.0},
-    "Aserradero": {"wood": 100.0, "clay": 50.0, "iron": 30.0},
-    "Cantera de Ladrillo": {"wood": 80.0, "clay": 120.0, "iron": 40.0},
-    "Mina Profunda": {"wood": 70.0, "clay": 80.0, "iron": 150.0},
-    "Hacienda": {"wood": 150.0, "clay": 100.0, "iron": 70.0},
-    "Gran Depósito": {"wood": 130.0, "clay": 180.0, "iron": 90.0},
-    "Barracas": {"wood": 160.0, "clay": 120.0, "iron": 140.0},
-    "Establos Imperiales": {"wood": 220.0, "clay": 180.0, "iron": 200.0},
-    "Forja Bélica": {"wood": 250.0, "clay": 200.0, "iron": 220.0},
-    "Muralla de Guardia": {"wood": 200.0, "clay": 250.0, "iron": 180.0},
-    "Plaza Comercial": {"wood": 140.0, "clay": 140.0, "iron": 120.0},
-    "Comandancia Militar": {"wood": 300.0, "clay": 260.0, "iron": 260.0},
+    "Casa Central": {"wood": 260.0, "clay": 200.0, "iron": 150.0},
+    "Aserradero": {"wood": 130.0, "clay": 70.0, "iron": 45.0},
+    "Cantera de Ladrillo": {"wood": 110.0, "clay": 160.0, "iron": 55.0},
+    "Mina Profunda": {"wood": 95.0, "clay": 110.0, "iron": 210.0},
+    "Hacienda": {"wood": 190.0, "clay": 130.0, "iron": 100.0},
+    "Gran Depósito": {"wood": 175.0, "clay": 240.0, "iron": 120.0},
+    "Barracas": {"wood": 200.0, "clay": 150.0, "iron": 180.0},
+    "Establos Imperiales": {"wood": 280.0, "clay": 230.0, "iron": 260.0},
+    "Forja Bélica": {"wood": 320.0, "clay": 250.0, "iron": 280.0},
+    "Muralla de Guardia": {"wood": 250.0, "clay": 300.0, "iron": 220.0},
+    "Plaza Comercial": {"wood": 180.0, "clay": 180.0, "iron": 150.0},
+    "Comandancia Militar": {"wood": 380.0, "clay": 320.0, "iron": 320.0},
 }
 
 # Base recruitment cost and population usage for each troop type.
 BASE_TROOP_COSTS: Dict[str, Dict[str, float]] = {
-    "Lancero Común": {"wood": 50.0, "clay": 30.0, "iron": 10.0, "population": 1.0},
-    "Soldado de Acero": {"wood": 80.0, "clay": 60.0, "iron": 30.0, "population": 1.0},
-    "Arquero Real": {"wood": 70.0, "clay": 40.0, "iron": 40.0, "population": 1.0},
-    "Jinete Explorador": {"wood": 120.0, "clay": 80.0, "iron": 60.0, "population": 2.0},
-    "Caballero Imperial": {"wood": 200.0, "clay": 160.0, "iron": 180.0, "population": 3.0},
-    "Infiltrador": {"wood": 60.0, "clay": 60.0, "iron": 60.0, "population": 1.0},
-    "Quebramuros": {"wood": 300.0, "clay": 240.0, "iron": 200.0, "population": 3.0},
-    "Tormenta de Piedra": {"wood": 320.0, "clay": 280.0, "iron": 300.0, "population": 4.0},
+    "Lancero Común": {"wood": 65.0, "clay": 40.0, "iron": 15.0, "population": 1.0},
+    "Soldado de Acero": {"wood": 95.0, "clay": 75.0, "iron": 45.0, "population": 1.0},
+    "Arquero Real": {"wood": 85.0, "clay": 50.0, "iron": 55.0, "population": 1.0},
+    "Jinete Explorador": {"wood": 150.0, "clay": 100.0, "iron": 85.0, "population": 2.0},
+    "Caballero Imperial": {"wood": 240.0, "clay": 200.0, "iron": 230.0, "population": 3.0},
+    "Infiltrador": {"wood": 70.0, "clay": 70.0, "iron": 70.0, "population": 1.0},
+    "Quebramuros": {"wood": 360.0, "clay": 280.0, "iron": 250.0, "population": 3.0},
+    "Tormenta de Piedra": {"wood": 380.0, "clay": 320.0, "iron": 360.0, "population": 4.0},
 }
 
 # Base training times in seconds when the producing building is level 1.
 BASE_TRAINING_TIMES: Dict[str, float] = {
-    "Lancero Común": 30.0,
-    "Soldado de Acero": 40.0,
-    "Arquero Real": 45.0,
-    "Jinete Explorador": 60.0,
-    "Caballero Imperial": 90.0,
-    "Infiltrador": 35.0,
-    "Quebramuros": 110.0,
-    "Tormenta de Piedra": 130.0,
+    "Lancero Común": 45.0,
+    "Soldado de Acero": 60.0,
+    "Arquero Real": 60.0,
+    "Jinete Explorador": 85.0,
+    "Caballero Imperial": 120.0,
+    "Infiltrador": 50.0,
+    "Quebramuros": 150.0,
+    "Tormenta de Piedra": 170.0,
 }
 
 # ------------------------------
