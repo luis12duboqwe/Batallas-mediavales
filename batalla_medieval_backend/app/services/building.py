@@ -4,6 +4,8 @@ from typing import Dict, List
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import production, ranking, quest as quest_service
+from . import premium as premium_service
 from . import production, ranking
 
 BUILDING_COSTS: Dict[str, Dict[str, float]] = {
@@ -16,9 +18,15 @@ BASE_BUILD_TIME_SECONDS = 300
 
 
 def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.BuildingQueue:
-    existing_queue = db.query(models.BuildingQueue).filter(models.BuildingQueue.city_id == city.id).first()
-    if existing_queue:
-        raise ValueError("A building upgrade is already in progress for this city")
+    status = premium_service.get_or_create_status(db, city.owner)
+    existing_queue = (
+        db.query(models.BuildingQueue)
+        .filter(models.BuildingQueue.city_id == city.id)
+        .count()
+    )
+    allowed_slots = premium_service.get_build_queue_limit(status)
+    if existing_queue >= allowed_slots:
+        raise ValueError("No building queue slots available")
 
     building = (
         db.query(models.Building).filter(models.Building.city_id == city.id, models.Building.name == building_name).first()
@@ -58,17 +66,22 @@ def calculate_upgrade_cost(building: models.Building) -> Dict[str, float]:
     return {resource: value * multiplier for resource, value in base.items()}
 
 
-def process_building_queues(db: Session) -> List[models.BuildingQueue]:
+def process_building_queues(db: Session) -> List[dict]:
     now = datetime.utcnow()
     finished_queues = (
         db.query(models.BuildingQueue)
         .filter(models.BuildingQueue.finish_time <= now)
         .all()
     )
+    finished_info: List[dict] = []
     for queue_entry in finished_queues:
+        city = db.query(models.City).filter(models.City.id == queue_entry.city_id).first()
         building = (
             db.query(models.Building)
-            .filter(models.Building.city_id == queue_entry.city_id, models.Building.name == queue_entry.building_type)
+            .filter(
+                models.Building.city_id == queue_entry.city_id,
+                models.Building.name == queue_entry.building_type,
+            )
             .first()
         )
         if not building:
@@ -80,6 +93,30 @@ def process_building_queues(db: Session) -> List[models.BuildingQueue]:
             db.add(building)
             db.flush()
         building.level = max(building.level, queue_entry.target_level)
+        finished_info.append(
+            {
+                "city_id": queue_entry.city_id,
+                "building_type": queue_entry.building_type,
+                "target_level": queue_entry.target_level,
+            }
+        )
+        city = db.query(models.City).filter(models.City.id == queue_entry.city_id).first()
+        if city and city.owner:
+            quest_service.handle_event(
+                db,
+                city.owner,
+                "building_finished",
+                {"building_type": queue_entry.building_type, "level": building.level},
+            )
         db.delete(queue_entry)
+        if city:
+            from .achievement import update_achievement_progress
+
+            update_achievement_progress(
+                db,
+                city.owner_id,
+                "build_level",
+                absolute_value=building.level,
+            )
     db.commit()
-    return finished_queues
+    return finished_info

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class ReportBase(BaseModel):
     city_id: int
+    world_id: int
     report_type: str
     content: str
     attacker_city_id: int | None = None
