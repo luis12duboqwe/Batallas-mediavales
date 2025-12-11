@@ -12,6 +12,8 @@ from .alliance_member import AllianceMember
 from .spy_report import SpyReport
 from .message import Message
 from .log import Log
+from .season import Season
+from .season_result import SeasonResult
 from .theme import Theme, ThemeOwnership
 from .shop_item import ShopItem
 from .user_item import UserItem
@@ -42,6 +44,8 @@ __all__ = [
     "AllianceChatMessage",
     "Message",
     "Log",
+    "Season",
+    "SeasonResult",
     "Theme",
     "ThemeOwnership",
     "ShopItem",

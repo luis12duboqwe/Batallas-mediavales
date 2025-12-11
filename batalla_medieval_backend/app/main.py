@@ -39,6 +39,8 @@ from .routers import (
     queue,
     ranking,
     report,
+    season,
+    troop,
     troop,
     theme,
     troop,
@@ -78,6 +80,7 @@ app.include_router(conquest.router)
 app.include_router(ranking.router)
 app.include_router(theme.router)
 app.include_router(admin.router)
+app.include_router(season.router)
 app.include_router(achievement.router)
 app.include_router(shop.router)
 app.include_router(admin_bot.router)

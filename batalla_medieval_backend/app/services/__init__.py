@@ -5,6 +5,8 @@ from . import (
     building,
     combat,
     conquest,
+    espionage,
+    movement,
     emailer,
     espionage,
     movement,
@@ -13,6 +15,9 @@ from . import (
     protection,
     queue,
     ranking,
+    season,
+    troops,
+)
     troops,
 )
 from . import admin, building, combat, conquest, espionage, movement, production, troops
@@ -37,6 +42,7 @@ __all__ = [
     "protection",
     "queue",
     "ranking",
+    "season",
     "troops",
     "theme",
     "quest",
