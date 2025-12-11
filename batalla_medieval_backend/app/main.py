@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import models
 from .config import get_settings
 from .database import Base, engine
-from .routers import alliance, auth, building, city, message, movement, report, troop
+from .routers import alliance, auth, building, city, message, movement, ranking, report, troop
 
 Base.metadata.create_all(bind=engine)
 
@@ -30,6 +30,7 @@ app.include_router(movement.router)
 app.include_router(report.router)
 app.include_router(alliance.router)
 app.include_router(message.router)
+app.include_router(ranking.router)
 
 
 @app.get("/")

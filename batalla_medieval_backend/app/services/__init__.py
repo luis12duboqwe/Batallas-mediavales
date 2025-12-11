@@ -1,4 +1,4 @@
-from . import admin, building, combat, espionage, movement, production, troops
+from . import admin, building, combat, espionage, movement, production, ranking, troops
 
 __all__ = [
     "admin",
@@ -7,5 +7,6 @@ __all__ = [
     "espionage",
     "movement",
     "production",
+    "ranking",
     "troops",
 ]

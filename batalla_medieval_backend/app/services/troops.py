@@ -3,7 +3,7 @@ from typing import Dict
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import production
+from . import production, ranking
 
 UNIT_COSTS: Dict[str, Dict[str, float]] = {
     "basic_infantry": {"wood": 50, "clay": 30, "iron": 20},
@@ -31,4 +31,5 @@ def queue_training(db: Session, city: models.City, unit_type: str, quantity: int
     db.add(troop)
     db.commit()
     db.refresh(troop)
+    ranking.recalculate_player_and_alliance_scores(db, city.owner_id)
     return troop
