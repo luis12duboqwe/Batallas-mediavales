@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -15,6 +15,7 @@ class Movement(Base):
     movement_type = Column(String, nullable=False)  # attack, spy, reinforce, return
     arrival_time = Column(DateTime, nullable=False)
     status = Column(String, default="ongoing")
+    troops_payload = Column(JSON, nullable=True, default={})
 
     origin_city = relationship("City", back_populates="origin_movements", foreign_keys=[origin_city_id])
     target_city = relationship("City", back_populates="target_movements", foreign_keys=[target_city_id])

@@ -22,10 +22,36 @@ def calculate_distance(origin: models.City, target: models.City) -> float:
     return math.hypot(origin.x - target.x, origin.y - target.y)
 
 
-def send_movement(db: Session, origin_city: models.City, target_city_id: int, movement_type: str) -> models.Movement:
+def _sanitize_troops_payload(troops_payload: dict[str, int]) -> dict[str, int]:
+    return {unit: max(0, qty) for unit, qty in troops_payload.items() if qty > 0}
+
+
+def _deduct_troops_from_city(db: Session, city: models.City, troops_payload: dict[str, int]):
+    available = {troop.unit_type: troop for troop in city.troops}
+    for unit_type, quantity in troops_payload.items():
+        troop = available.get(unit_type)
+        if troop is None or troop.quantity < quantity:
+            raise ValueError(f"Not enough {unit_type} to send")
+        troop.quantity -= quantity
+        db.add(troop)
+
+
+def send_movement(
+    db: Session,
+    origin_city: models.City,
+    target_city_id: int,
+    movement_type: str,
+    troops_payload: dict[str, int],
+) -> models.Movement:
     target_city = db.query(models.City).filter(models.City.id == target_city_id).first()
     if not target_city:
         raise ValueError("Target city not found")
+
+    sanitized_troops = _sanitize_troops_payload(troops_payload)
+    if not sanitized_troops:
+        raise ValueError("No troops provided for movement")
+
+    _deduct_troops_from_city(db, origin_city, sanitized_troops)
     speed = UNIT_SPEED.get("fast_cavalry" if movement_type == "spy" else "basic_infantry", 0.6)
     distance = calculate_distance(origin_city, target_city)
     hours = distance / speed
@@ -35,6 +61,7 @@ def send_movement(db: Session, origin_city: models.City, target_city_id: int, mo
         target_city_id=target_city.id,
         movement_type=movement_type,
         arrival_time=arrival_time,
+        troops_payload=sanitized_troops,
     )
     db.add(movement)
     db.commit()
@@ -66,7 +93,7 @@ def process_arrived_movements(db: Session):
                 db.add(movement)
                 continue
 
-            attacking_troops = _city_troops_as_dict(attacker_city)
+            attacking_troops = movement.troops_payload or {}
             battle_result = combat.resolve_battle(attacker_city, defender_city, attacking_troops)
 
             _apply_losses_to_city(db, attacker_city, battle_result["attacker_losses"])
