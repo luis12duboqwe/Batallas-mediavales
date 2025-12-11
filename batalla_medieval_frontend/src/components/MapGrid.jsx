@@ -2,11 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import MapCell from './MapCell';
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const BASE_CELL_SIZE = 40;
 
 const MapGrid = ({
-  gridSize = 50,
-  zoom,
-  onZoomChange,
+  gridSize = 20,
   center,
   onCenterChange,
   cities,
@@ -17,10 +16,7 @@ const MapGrid = ({
   const containerRef = useRef(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [origin, setOrigin] = useState({ x: Math.max(0, center.x - 5), y: Math.max(0, center.y - 5) });
-  const [dragging, setDragging] = useState(false);
-  const dragStart = useRef({ x: 0, y: 0, originX: 0, originY: 0 });
-
-  const cellSize = useMemo(() => 36 * zoom, [zoom]);
+  const cellSize = useMemo(() => BASE_CELL_SIZE, []);
 
   useEffect(() => {
     const updateSize = () => {
@@ -61,52 +57,12 @@ const MapGrid = ({
       x: origin.x + colsVisible / 2,
       y: origin.y + rowsVisible / 2,
     };
-    onCenterChange?.({ x: Math.round(newCenter.x), y: Math.round(newCenter.y) });
+    const rounded = { x: Math.round(newCenter.x), y: Math.round(newCenter.y) };
+    onCenterChange?.((prev) => {
+      if (prev?.x === rounded.x && prev?.y === rounded.y) return prev;
+      return rounded;
+    });
   }, [origin.x, origin.y, colsVisible, rowsVisible, onCenterChange]);
-
-  const handleWheel = (event) => {
-    event.preventDefault();
-    const delta = event.deltaY > 0 ? -0.1 : 0.1;
-    const nextZoom = clamp(zoom + delta, 0.5, 3);
-    onZoomChange?.(Number(nextZoom.toFixed(2)));
-  };
-
-  const handleMouseDown = (event) => {
-    setDragging(true);
-    dragStart.current = {
-      x: event.clientX,
-      y: event.clientY,
-      originX: origin.x,
-      originY: origin.y,
-    };
-  };
-
-  const handleMouseMove = (event) => {
-    if (!dragging) return;
-    const dx = event.clientX - dragStart.current.x;
-    const dy = event.clientY - dragStart.current.y;
-    const deltaCells = {
-      x: dx / cellSize,
-      y: dy / cellSize,
-    };
-    setOrigin(clampOrigin({
-      x: dragStart.current.originX - deltaCells.x,
-      y: dragStart.current.originY - deltaCells.y,
-    }));
-  };
-
-  const handleMouseUp = () => setDragging(false);
-
-  useEffect(() => {
-    if (!dragging) return;
-    const handleLeave = () => setDragging(false);
-    window.addEventListener('mouseup', handleLeave);
-    window.addEventListener('mouseleave', handleLeave);
-    return () => {
-      window.removeEventListener('mouseup', handleLeave);
-      window.removeEventListener('mouseleave', handleLeave);
-    };
-  }, [dragging]);
 
   const startX = Math.max(0, Math.floor(origin.x));
   const startY = Math.max(0, Math.floor(origin.y));
@@ -132,22 +88,22 @@ const MapGrid = ({
     return map;
   }, [visibleCities]);
 
-  const cells = [];
-  for (let y = startY; y <= endY; y += 1) {
-    for (let x = startX; x <= endX; x += 1) {
-      cells.push({ x, y, city: cityMap.get(cityKey(x, y)) });
+  const cells = useMemo(() => {
+    const batch = [];
+    for (let y = startY; y <= endY; y += 1) {
+      for (let x = startX; x <= endX; x += 1) {
+        batch.push({ x, y, city: cityMap.get(cityKey(x, y)) });
+      }
     }
-  }
+    return batch;
+  }, [cityMap, endX, endY, startX, startY]);
 
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full overflow-hidden rounded-lg border border-yellow-800/40 bg-gradient-to-br from-gray-950 to-gray-900"
-      onWheel={handleWheel}
-      onMouseMove={handleMouseMove}
-      onMouseDown={handleMouseDown}
-      onMouseUp={handleMouseUp}
+      className="relative w-full h-full overflow-hidden rounded-xl border border-amber-900/60 bg-[radial-gradient(circle_at_top,_#0f2f1f,_#0b1d14_45%,_#0a1812)]"
     >
+      <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(84,62,34,0.18)_1px,transparent_1px),linear-gradient(90deg,rgba(84,62,34,0.18)_1px,transparent_1px)] bg-[size:40px_40px]" />
       <div
         className="absolute"
         style={{
