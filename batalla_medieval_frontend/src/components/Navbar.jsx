@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
+import SoundToggle from './SoundToggle';
 
 const Navbar = () => {
   const navigate = useNavigate();
@@ -21,6 +22,7 @@ const Navbar = () => {
       </div>
       {user && (
         <div className="flex items-center gap-4">
+          <SoundToggle />
           <span className="text-sm text-gray-300">{user.username}</span>
           <button onClick={handleLogout} className="btn-primary text-sm">Salir</button>
         </div>
