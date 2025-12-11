@@ -16,6 +16,7 @@ class UserCreate(UserBase):
 class UserRead(UserBase):
     id: int
     created_at: datetime
+    protection_ends_at: Optional[datetime] = None
     is_admin: bool = False
 
     class Config:

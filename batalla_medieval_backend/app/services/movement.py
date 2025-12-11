@@ -28,6 +28,9 @@ def send_movement(
     origin_city: models.City,
     target_city_id: int,
     movement_type: str,
+    target_city: models.City | None = None,
+) -> models.Movement:
+    target_city = target_city or db.query(models.City).filter(models.City.id == target_city_id).first()
     spy_count: int = 0,
 ) -> models.Movement:
     target_city = db.query(models.City).filter(models.City.id == target_city_id).first()

@@ -77,7 +77,13 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
     hashed_password = get_password_hash(user.password)
-    db_user = models.User(username=user.username, email=user.email, hashed_password=hashed_password)
+    protection_end = datetime.utcnow() + timedelta(hours=settings.protection_hours)
+    db_user = models.User(
+        username=user.username,
+        email=user.email,
+        hashed_password=hashed_password,
+        protection_ends_at=protection_end,
+    )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)

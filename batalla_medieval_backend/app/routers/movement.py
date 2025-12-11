@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
+from ..services import movement, protection
 from ..services import movement, queue as queue_service
 
 router = APIRouter(prefix="/movements", tags=["movements"])
@@ -22,6 +23,21 @@ def create_movement(
     )
     if not origin_city:
         raise HTTPException(status_code=404, detail="Origin city not found")
+    target_city = None
+    if payload.movement_type == "attack":
+        if protection.is_user_protected(current_user):
+            raise HTTPException(status_code=400, detail="Protected players cannot launch attacks")
+        target_city = db.query(models.City).filter(models.City.id == payload.target_city_id).first()
+        if not target_city:
+            raise HTTPException(status_code=404, detail="Target city not found")
+        if protection.is_user_protected(target_city.owner):
+            raise HTTPException(status_code=400, detail="Target city is under protection")
+    try:
+        movement_obj = movement.send_movement(
+            db, origin_city, payload.target_city_id, payload.movement_type, target_city
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     queue_service.process_all_queues(db)
     movement_obj = movement.send_movement(db, origin_city, payload.target_city_id, payload.movement_type)
     try:
