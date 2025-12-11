@@ -29,6 +29,7 @@ from .conquest import ConquestRequest, ConquestResult, FoundCityRequest
 from .protection import ProtectionStatus
 from .ranking import AllianceRanking, PlayerRanking
 from .log import LogCreate, LogRead
+from .event import EventRead, EventCreate, EventModifiers, ActiveEventResponse
 from .quest import QuestClaimResponse, QuestListResponse, QuestRead
 from .premium import (
     GrantRubies,
@@ -80,6 +81,10 @@ __all__ = [
     "AllianceRanking",
     "LogCreate",
     "LogRead",
+    "EventRead",
+    "EventCreate",
+    "EventModifiers",
+    "ActiveEventResponse",
     "QuestRead",
     "QuestListResponse",
     "QuestClaimResponse",

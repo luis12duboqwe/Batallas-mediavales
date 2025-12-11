@@ -4,6 +4,7 @@ from typing import Dict
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import event as event_service
 
 PRODUCTION_RATES = {
     "wood": 30.0,
@@ -17,6 +18,11 @@ LOYALTY_RECOVERY_PER_HOUR = 2.0
 def recalculate_resources(db: Session, city: models.City, return_gains: bool = False) -> models.City | tuple[models.City, Dict[str, float]]:
     now = datetime.utcnow()
     elapsed_minutes = (now - city.last_production).total_seconds() / 60
+    modifiers = event_service.get_active_modifiers(db)
+    for resource, rate in PRODUCTION_RATES.items():
+        current_value = getattr(city, resource)
+        adjusted_rate = rate * modifiers.get("production_speed", 1.0)
+        setattr(city, resource, current_value + adjusted_rate * elapsed_minutes)
     gains: Dict[str, float] = {}
     for resource, rate in PRODUCTION_RATES.items():
         current_value = getattr(city, resource)
