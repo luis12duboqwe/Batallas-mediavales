@@ -53,6 +53,7 @@ from .premium import (
     PremiumUseAction,
 )
 from .world import PlayerWorldRead, WorldCreate, WorldRead
+from .chat import ChatMessageRead, ChatMessageCreate
 
 __all__ = [
     "UserCreate",
@@ -131,4 +132,6 @@ __all__ = [
     "WorldCreate",
     "WorldRead",
     "PlayerWorldRead",
+    "ChatMessageRead",
+    "ChatMessageCreate",
 ]
