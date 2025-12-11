@@ -17,6 +17,7 @@ class City(Base):
     wood = Column(Float, default=500.0)
     clay = Column(Float, default=500.0)
     iron = Column(Float, default=500.0)
+    loyalty = Column(Float, default=100.0)
     last_production = Column(DateTime, default=datetime.utcnow)
 
     owner = relationship("User", back_populates="cities")
