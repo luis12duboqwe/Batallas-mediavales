@@ -17,8 +17,9 @@ const ReportsView = () => {
           <p className="text-gray-400">Resultados de batallas y espionaje</p>
         </div>
       </div>
-      <div className="space-y-3">
-        {reports.length === 0 && <p className="text-gray-400">No hay reportes aún.</p>}
+      <div className="grid md:grid-cols-2 gap-4">
+        {reports.length === 0 && <div className="skeleton h-32 w-full col-span-2" />}
+        {reports.length === 0 && <p className="text-gray-400 col-span-2">No hay reportes aún.</p>}
         {reports.map((r) => (
           <ReportCard key={r.id} report={r} />
         ))}
