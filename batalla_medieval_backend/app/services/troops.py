@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from . import production, ranking, quest as quest_service
+from . import premium as premium_service
+from . import production, ranking
 
 UNIT_COSTS: Dict[str, Dict[str, float]] = {
     "basic_infantry": {"wood": 50, "clay": 30, "iron": 20},
@@ -33,6 +35,16 @@ TRAINING_TIMES: Dict[str, int] = {
 def queue_training(db: Session, city: models.City, unit_type: str, quantity: int) -> models.TroopQueue:
     if quantity <= 0:
         raise ValueError("Quantity must be positive")
+
+    status = premium_service.get_or_create_status(db, city.owner)
+    existing_queue = (
+        db.query(models.TroopQueue)
+        .filter(models.TroopQueue.city_id == city.id)
+        .count()
+    )
+    allowed_slots = premium_service.get_troop_queue_limit(status)
+    if existing_queue >= allowed_slots:
+        raise ValueError("No troop training queue slots available")
 
     total_cost = {
         resource: cost * quantity

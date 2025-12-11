@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from . import production, ranking, quest as quest_service
+from . import premium as premium_service
+from . import production, ranking
 
 BUILDING_COSTS: Dict[str, Dict[str, float]] = {
     "town_hall": {"wood": 200, "clay": 150, "iron": 100},
@@ -16,9 +18,15 @@ BASE_BUILD_TIME_SECONDS = 300
 
 
 def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.BuildingQueue:
-    existing_queue = db.query(models.BuildingQueue).filter(models.BuildingQueue.city_id == city.id).first()
-    if existing_queue:
-        raise ValueError("A building upgrade is already in progress for this city")
+    status = premium_service.get_or_create_status(db, city.owner)
+    existing_queue = (
+        db.query(models.BuildingQueue)
+        .filter(models.BuildingQueue.city_id == city.id)
+        .count()
+    )
+    allowed_slots = premium_service.get_build_queue_limit(status)
+    if existing_queue >= allowed_slots:
+        raise ValueError("No building queue slots available")
 
     building = (
         db.query(models.Building).filter(models.Building.city_id == city.id, models.Building.name == building_name).first()

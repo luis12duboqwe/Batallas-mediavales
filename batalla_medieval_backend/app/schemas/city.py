@@ -11,6 +11,7 @@ class CityBase(BaseModel):
     name: str
     x: int = 0
     y: int = 0
+    world_id: int
 
 
 class CityCreate(CityBase):

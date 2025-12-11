@@ -23,6 +23,10 @@ def recalculate_resources(db: Session, city: models.City, return_gains: bool = F
         gained = rate * elapsed_minutes
         gains[resource] = gained
         setattr(city, resource, current_value + gained)
+    modifier = city.world.resource_modifier if city.world else 1.0
+    for resource, rate in PRODUCTION_RATES.items():
+        current_value = getattr(city, resource)
+        setattr(city, resource, current_value + rate * elapsed_minutes * modifier)
     loyalty_gain = LOYALTY_RECOVERY_PER_HOUR * (elapsed_minutes / 60)
     city.loyalty = min(100.0, city.loyalty + loyalty_gain)
     city.last_production = now

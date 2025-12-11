@@ -35,15 +35,28 @@ def require_membership(db: Session, alliance_id: int, user_id: int) -> models.Al
 
 
 def create_alliance(db: Session, payload: schemas.AllianceCreate, founder: models.User) -> models.Alliance:
-    existing = db.query(models.Alliance).filter(models.Alliance.name == payload.name).first()
+    world = db.query(models.World).filter(models.World.id == payload.world_id, models.World.is_active.is_(True)).first()
+    if not world:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="World not available")
+    existing = (
+        db.query(models.Alliance)
+        .filter(models.Alliance.name == payload.name, models.Alliance.world_id == payload.world_id)
+        .first()
+    )
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Alliance name already used")
+
+    if not db.query(models.PlayerWorld).filter(
+        models.PlayerWorld.user_id == founder.id, models.PlayerWorld.world_id == payload.world_id
+    ).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Player has not joined this world")
 
     alliance = models.Alliance(
         name=payload.name,
         description=payload.description,
         diplomacy="neutral",
         leader_id=founder.id,
+        world_id=payload.world_id,
     )
     db.add(alliance)
     db.commit()

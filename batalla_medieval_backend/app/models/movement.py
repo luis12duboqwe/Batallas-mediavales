@@ -12,6 +12,7 @@ class Movement(Base):
     id = Column(Integer, primary_key=True, index=True)
     origin_city_id = Column(Integer, ForeignKey("cities.id"))
     target_city_id = Column(Integer, ForeignKey("cities.id"))
+    world_id = Column(Integer, ForeignKey("worlds.id"), nullable=False)
     movement_type = Column(String, nullable=False)  # attack, spy, reinforce, return
     spy_count = Column(Integer, default=0)
     arrival_time = Column(DateTime, nullable=False)
@@ -19,3 +20,4 @@ class Movement(Base):
 
     origin_city = relationship("City", back_populates="origin_movements", foreign_keys=[origin_city_id])
     target_city = relationship("City", back_populates="target_movements", foreign_keys=[target_city_id])
+    world = relationship("World", back_populates="movements")
