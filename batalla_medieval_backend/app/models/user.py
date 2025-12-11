@@ -17,6 +17,11 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     protection_ends_at = Column(DateTime, nullable=True)
     is_admin = Column(Boolean, default=False)
+    is_frozen = Column(Boolean, default=False)
+    freeze_reason = Column(String, nullable=True)
+    last_login_ip = Column(String, nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
+    last_action_at = Column(DateTime, nullable=True)
 
     cities = relationship("City", back_populates="owner", cascade="all, delete-orphan")
     alliances = relationship("AllianceMember", back_populates="user", cascade="all, delete-orphan")

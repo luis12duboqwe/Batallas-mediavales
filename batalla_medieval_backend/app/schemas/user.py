@@ -18,6 +18,8 @@ class UserRead(UserBase):
     created_at: datetime
     protection_ends_at: Optional[datetime] = None
     is_admin: bool = False
+    is_frozen: bool = False
+    freeze_reason: Optional[str] = None
 
     class Config:
         orm_mode = True
