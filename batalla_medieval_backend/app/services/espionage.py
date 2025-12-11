@@ -7,6 +7,7 @@ from typing import Dict, Tuple
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import anticheat
 from . import event as event_service
 
 
@@ -75,6 +76,7 @@ def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyRepor
     reported_as_unknown = False
     if not success and random.random() < 0.1:
         reported_as_unknown = True
+    anticheat.check_spy_result(db, attacker_city.owner, success_chance, success)
 
     resources = {
         "wood": defender_city.wood,

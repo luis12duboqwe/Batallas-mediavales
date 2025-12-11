@@ -12,13 +12,15 @@ class MovementBase(BaseModel):
 
 
 class MovementCreate(MovementBase):
-    arrival_time: datetime
+    arrival_time: datetime | None = None
 
 
 class MovementRead(MovementBase):
     id: int
     arrival_time: datetime
+    created_at: datetime
     status: str
+    speed_used: float | None = None
 
     class Config:
         orm_mode = True

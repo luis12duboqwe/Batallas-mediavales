@@ -10,6 +10,7 @@ from .alliance_member import AllianceMember
 from .spy_report import SpyReport
 from .message import Message
 from .log import Log
+from .anticheat import AntiCheatFlag
 from .event import WorldEvent
 from .quest import Quest
 from .quest_progress import QuestProgress
@@ -32,6 +33,7 @@ __all__ = [
     "AllianceChatMessage",
     "Message",
     "Log",
+    "AntiCheatFlag",
     "WorldEvent",
     "Quest",
     "QuestProgress",

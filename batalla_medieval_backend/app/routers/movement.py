@@ -5,6 +5,9 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
+from ..services import movement
+from ..services import protection
+from ..services import queue as queue_service
 from ..services import movement, protection, queue as queue_service
 
 router = APIRouter(prefix="/movements", tags=["movements"])
@@ -27,6 +30,7 @@ def create_movement(
     )
     if not origin_city:
         raise HTTPException(status_code=404, detail="Origin city not found")
+
     target_city = None
     if payload.movement_type == "attack":
         if protection.is_user_protected(current_user):
@@ -40,12 +44,15 @@ def create_movement(
             raise HTTPException(status_code=404, detail="Target city not found")
         if protection.is_user_protected(target_city.owner):
             raise HTTPException(status_code=400, detail="Target city is under protection")
+
+    queue_service.process_all_queues(db)
     try:
         movement_obj = movement.send_movement(
             db,
             origin_city,
             payload.target_city_id,
             payload.movement_type,
+            target_city,
             target_city=target_city,
             spy_count=payload.spy_count,
         )
@@ -78,6 +85,8 @@ def resolve_movements(
     movements = movement.resolve_due_movements(db)
     filtered_movements = [mv for mv in movements if mv.origin_city_id in user_cities]
     return filtered_movements
+
+
 @router.post("/process", response_model=list[schemas.MovementRead])
 def process_movements(
     world_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
