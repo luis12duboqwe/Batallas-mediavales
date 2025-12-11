@@ -1,3 +1,5 @@
+"""Combat resolution helpers for calculating battle outcomes."""
+
 import math
 import random
 from typing import Dict, Tuple
@@ -30,6 +32,8 @@ WALL_BONUS_PER_LEVEL = 0.05
 
 
 def _split_attack_by_type(troops: Dict[str, int]) -> Tuple[Dict[str, float], float]:
+    """Return attack totals split by troop category and total attack value."""
+
     attack_by_type = {"infantry": 0.0, "cavalry": 0.0, "siege": 0.0}
     total_attack = 0.0
     for unit, amount in troops.items():
@@ -44,6 +48,8 @@ def _split_attack_by_type(troops: Dict[str, int]) -> Tuple[Dict[str, float], flo
 
 
 def _defense_values(defender_troops: Dict[str, int]) -> Dict[str, float]:
+    """Calculate defense values per troop category."""
+
     defenses = {"infantry": 0.0, "cavalry": 0.0, "siege": 0.0}
     for unit, amount in defender_troops.items():
         stats = UNIT_STATS.get(unit)
@@ -56,6 +62,8 @@ def _defense_values(defender_troops: Dict[str, int]) -> Dict[str, float]:
 
 
 def _wall_bonus(city: models.City) -> float:
+    """Return defense multiplier provided by the wall level."""
+
     wall = next((b for b in city.buildings if b.name == WALL_NAME), None)
     if not wall:
         return 1.0
@@ -63,16 +71,24 @@ def _wall_bonus(city: models.City) -> float:
 
 
 def _moral(attacker_strength: float, defender_strength: float) -> float:
+    """Calculate morale based on attacker and defender strengths."""
+
     attacker_points = max(attacker_strength, 1)
     defender_points = max(defender_strength, 1)
     return min(1.5, max(0.3, math.sqrt(defender_points / attacker_points)))
 
 
 def _luck() -> float:
+    """Return a random luck modifier."""
+
     return random.uniform(-0.25, 0.25)
 
 
-def _weighted_defense(defenses: Dict[str, float], attack_distribution: Dict[str, float], wall_multiplier: float) -> float:
+def _weighted_defense(
+    defenses: Dict[str, float], attack_distribution: Dict[str, float], wall_multiplier: float
+) -> float:
+    """Weight defense by attack distribution and wall effects."""
+
     total_attack = sum(attack_distribution.values()) or 1
     ratios = {k: v / total_attack for k, v in attack_distribution.items()}
     defense_value = (
@@ -84,6 +100,8 @@ def _weighted_defense(defenses: Dict[str, float], attack_distribution: Dict[str,
 
 
 def _loss_ratios(effective_attack: float, defense_value: float) -> Tuple[float, float]:
+    """Determine attacker and defender loss ratios from strengths."""
+
     if effective_attack <= 0:
         return 1.0, 0.0
     if defense_value <= 0:
@@ -101,6 +119,8 @@ def _loss_ratios(effective_attack: float, defense_value: float) -> Tuple[float, 
 
 
 def _apply_losses(troops: Dict[str, int], loss_ratio: float) -> Dict[str, int]:
+    """Return troop losses by unit using a given ratio."""
+
     losses = {}
     for unit, amount in troops.items():
         losses[unit] = min(amount, int(round(amount * loss_ratio)))
@@ -113,6 +133,8 @@ def resolve_battle(
     attacking_troops: Dict[str, int],
     modifiers: Dict[str, float] | None = None,
 ):
+    """Resolve combat between attacking and defending cities."""
+
     modifiers = modifiers or event_service.DEFAULT_MODIFIERS
     defender_troops = {troop.unit_type: troop.quantity for troop in defender_city.troops}
 
@@ -174,6 +196,8 @@ def resolve_battle(
 
 
 def build_battle_report_html(attacker_city: models.City, defender_city: models.City, battle_result: Dict) -> str:
+    """Generate an HTML battle report for attacker and defender."""
+
     attacker_losses = battle_result.get("attacker_losses", {})
     defender_losses = battle_result.get("defender_losses", {})
     attacker_survivors = battle_result.get("attacker_survivors", {})

@@ -1,16 +1,29 @@
-from sqlalchemy.orm import Session
+"""Helpers to process build, troop, and movement queues."""
+
+import logging
+
+from sqlalchemy.orm import Session, selectinload
 
 from .. import models
 from . import building, movement, notification as notification_service, troops
 
+logger = logging.getLogger(__name__)
+
 
 def process_all_queues(db: Session) -> dict:
+    """Process all queue types and send completion notifications."""
+
     finished_buildings = building.process_building_queues(db)
     finished_troops = troops.process_troop_queues(db)
     finished_movements = movement.process_movements(db)
 
     for finished in finished_buildings:
-        city = db.query(models.City).filter(models.City.id == finished["city_id"]).first()
+        city = (
+            db.query(models.City)
+            .options(selectinload(models.City.owner))
+            .filter(models.City.id == finished["city_id"])
+            .first()
+        )
         if city and city.owner:
             notification_service.create_notification(
                 db,
@@ -21,7 +34,12 @@ def process_all_queues(db: Session) -> dict:
             )
 
     for finished in finished_troops:
-        city = db.query(models.City).filter(models.City.id == finished["city_id"]).first()
+        city = (
+            db.query(models.City)
+            .options(selectinload(models.City.owner))
+            .filter(models.City.id == finished["city_id"])
+            .first()
+        )
         if city and city.owner:
             notification_service.create_notification(
                 db,
@@ -34,6 +52,14 @@ def process_all_queues(db: Session) -> dict:
                 allow_email=False,
             )
 
+    logger.info(
+        "queues_processed",
+        extra={
+            "buildings": len(finished_buildings),
+            "troops": len(finished_troops),
+            "movements": len(finished_movements),
+        },
+    )
     return {
         "buildings": finished_buildings,
         "troops": finished_troops,
@@ -42,6 +68,8 @@ def process_all_queues(db: Session) -> dict:
 
 
 def get_active_queues_for_user(db: Session, user: models.User) -> dict:
+    """Return all active queues owned by a user."""
+
     building_queues = (
         db.query(models.BuildingQueue)
         .join(models.City, models.BuildingQueue.city_id == models.City.id)

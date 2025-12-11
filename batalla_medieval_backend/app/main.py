@@ -1,3 +1,5 @@
+"""Application entrypoint for Batalla Medieval API."""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,28 +13,14 @@ from .routers import (
     admin_bot,
     alliance,
     anticheat,
-from .routers import alliance, auth, building, city, conquest, message, movement, report, troop
-from .routers import alliance, auth, building, city, message, movement, protection, report, troop
-from .routers import alliance, auth, building, city, message, movement, ranking, report, troop
-from .routers import alliance, auth, building, city, message, movement, queue, report, troop
-from .routers import admin, alliance, auth, building, city, event, message, movement, report, troop
-from .routers import icon
-from .routers import admin, alliance, auth, building, city, message, movement, report, troop
-from .routers import quest
-from .routers import alliance, auth, building, city, conquest, message, movement, premium, report, troop
-from .routers import alliance, auth, building, city, message, movement, premium, protection, report, troop
-from .routers import alliance, auth, building, city, message, movement, premium, ranking, report, troop
-from .routers import alliance, auth, building, city, message, movement, premium, queue, report, troop
-from .routers import admin, alliance, auth, building, city, message, movement, premium, report, troop
-from .routers import (
-    admin,
-    alliance,
     auth,
     building,
+    chat,
     city,
     conquest,
     economy,
     event,
+    icon,
     message,
     movement,
     notification,
@@ -47,16 +35,13 @@ from .routers import (
     shop,
     theme,
     troop,
-    quest,
-    world,
     wiki,
+    world,
 )
-from .routers import chat
 
 Base.metadata.create_all(bind=engine)
 
 settings = get_settings()
-
 app = FastAPI(title=settings.app_name)
 
 app.add_middleware(
@@ -101,4 +86,6 @@ app.include_router(economy.router)
 
 @app.get("/")
 async def root():
+    """Health endpoint used to verify API availability."""
+
     return {"message": "Welcome to Batalla Medieval API"}
