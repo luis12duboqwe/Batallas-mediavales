@@ -10,6 +10,8 @@ from .alliance_member import AllianceMember
 from .spy_report import SpyReport
 from .message import Message
 from .log import Log
+from .quest import Quest
+from .quest_progress import QuestProgress
 from .premium import MapBookmark, PremiumStatus
 from .world import World, PlayerWorld
 
@@ -29,6 +31,8 @@ __all__ = [
     "AllianceChatMessage",
     "Message",
     "Log",
+    "Quest",
+    "QuestProgress",
     "PremiumStatus",
     "MapBookmark",
     "World",

@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from . import quest as quest_service
 
 RANK_MEMBER = schemas.RANK_MEMBER
 RANK_GENERAL = schemas.RANK_GENERAL
@@ -125,6 +126,7 @@ def accept_invitation(db: Session, invitation_id: int, user: models.User) -> mod
     invitation.responded_at = datetime.utcnow()
     db.commit()
     db.refresh(membership)
+    quest_service.handle_event(db, user, "alliance_joined")
     return membership
 
 

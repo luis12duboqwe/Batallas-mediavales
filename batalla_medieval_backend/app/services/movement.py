@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import espionage
+from . import combat
+from . import quest as quest_service
 from . import combat, espionage
 
 UNIT_SPEED = {
@@ -68,6 +71,16 @@ def send_movement(
     db.add(movement)
     db.commit()
     db.refresh(movement)
+
+    if origin_city.owner:
+        event_type = None
+        if movement_type == "attack":
+            event_type = "attack_sent"
+        elif movement_type == "spy":
+            event_type = "spy_sent"
+        if event_type:
+            quest_service.handle_event(db, origin_city.owner, event_type, {"movement_id": movement.id})
+
     return movement
 
 
