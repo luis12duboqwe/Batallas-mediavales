@@ -1,0 +1,112 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (production or staging)"
+        required: true
+        default: staging
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/batalla-medieval-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/batalla-medieval-frontend
+  DEPLOY_ENV: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ env.DEPLOY_ENV }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r batalla_medieval_backend/requirements.txt flake8 pytest
+
+      - name: Lint backend
+        run: flake8 batalla_medieval_backend/app
+
+      - name: Test backend
+        run: pytest batalla_medieval_backend
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: batalla_medieval_frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: batalla_medieval_frontend
+        run: npm install
+
+      - name: Lint frontend
+        working-directory: batalla_medieval_frontend
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: batalla_medieval_frontend
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || '/api' }}
+        run: npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push backend image
+        run: |
+          docker build -t $BACKEND_IMAGE:${{ github.sha }} -f batalla_medieval_backend/Dockerfile batalla_medieval_backend
+          docker push $BACKEND_IMAGE:${{ github.sha }}
+          docker tag $BACKEND_IMAGE:${{ github.sha }} $BACKEND_IMAGE:latest
+          docker push $BACKEND_IMAGE:latest
+
+      - name: Build and push frontend image
+        run: |
+          docker build -t $FRONTEND_IMAGE:${{ github.sha }} -f batalla_medieval_frontend/Dockerfile batalla_medieval_frontend
+          docker push $FRONTEND_IMAGE:${{ github.sha }}
+          docker tag $FRONTEND_IMAGE:${{ github.sha }} $FRONTEND_IMAGE:latest
+          docker push $FRONTEND_IMAGE:latest
+
+      - name: Deploy via SSH
+        if: ${{ success() }}
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+            mkdir -p ${{ secrets.REMOTE_APP_DIR }}
+            cd ${{ secrets.REMOTE_APP_DIR }}
+            echo "${{ secrets.ENV_FILE }}" > .env
+            docker login ${{ env.REGISTRY }} -u ${{ secrets.REGISTRY_USERNAME || github.actor }} -p ${{ secrets.REGISTRY_PASSWORD }}
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker system prune -f
