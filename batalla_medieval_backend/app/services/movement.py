@@ -132,7 +132,13 @@ def send_movement(
             notification_type="attack_incoming",
         )
     if origin_city.owner:
-        event_type = "attack_sent" if movement_type == "attack" else "spy_sent" if movement_type == "spy" else None
+        if movement_type == "attack":
+            event_type = "attack_sent"
+        elif movement_type == "spy":
+            event_type = "spy_sent"
+        else:
+            event_type = None
+
         if event_type:
             quest_service.handle_event(db, origin_city.owner, event_type, {"movement_id": movement_obj.id})
 
@@ -239,11 +245,20 @@ def process_arrived_movements(db: Session) -> List[models.Movement]:
                 movement.arrival_time,
                 movement.speed_used or UNIT_SPEED.get("basic_infantry", 0.6),
             )
-            battle_result = combat.resolve_battle(attacker_city, defender_city, attacking_troops, modifiers)
+            battle_result = combat.resolve_battle(
+                attacker_city,
+                defender_city,
+                attacking_troops,
+                modifiers,
+            )
             _apply_losses_to_city(db, attacker_city, battle_result["attacker_losses"])
             _apply_losses_to_city(db, defender_city, battle_result["defender_losses"])
 
-            report_html = combat.build_battle_report_html(attacker_city, defender_city, battle_result)
+            report_html = combat.build_battle_report_html(
+                attacker_city,
+                defender_city,
+                battle_result,
+            )
 
             attacker_report = models.Report(
                 city_id=attacker_city.id,
