@@ -22,6 +22,7 @@ class CityRead(CityBase):
     wood: float
     clay: float
     iron: float
+    loyalty: float
     population_max: int
     last_production: datetime
     is_protected: bool = False

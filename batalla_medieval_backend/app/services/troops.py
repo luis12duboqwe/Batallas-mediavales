@@ -15,6 +15,7 @@ UNIT_COSTS: Dict[str, Dict[str, float]] = {
     "spy": {"wood": 40, "clay": 40, "iron": 40},
     "ram": {"wood": 300, "clay": 200, "iron": 150},
     "catapult": {"wood": 350, "clay": 250, "iron": 300},
+    "noble": {"wood": 1000, "clay": 1000, "iron": 1000},
 }
 
 TRAINING_TIMES: Dict[str, int] = {
