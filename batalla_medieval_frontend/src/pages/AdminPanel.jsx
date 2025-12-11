@@ -5,9 +5,18 @@ const AdminPanel = () => {
   const [form, setForm] = useState({ wood: 0, clay: 0, iron: 0, building: '', level: 1, message: '' });
   const [status, setStatus] = useState('');
 
+  const resolveCityId = async () => {
+    const { data } = await api.getCities();
+    if (!data?.length) {
+      throw new Error('No hay ciudades disponibles');
+    }
+    return data[0].id;
+  };
+
   const handleResources = async () => {
     try {
-      await api.updateCity({ resources: form });
+      const cityId = await resolveCityId();
+      await api.updateCity(cityId, { resources: form });
       setStatus('Recursos modificados.');
     } catch (err) {
       setStatus('Error al modificar recursos');
@@ -16,7 +25,8 @@ const AdminPanel = () => {
 
   const handleBuilding = async () => {
     try {
-      await api.updateCity({ building: form.building, level: form.level });
+      const cityId = await resolveCityId();
+      await api.updateCity(cityId, { building: form.building, level: form.level });
       setStatus('Edificio actualizado.');
     } catch (err) {
       setStatus('Error al modificar edificio');

@@ -39,9 +39,9 @@ export const useUserStore = create((set, get) => ({
     set({ cities });
   },
   async refreshCity() {
-    const { data } = await api.getCity();
-    set({ user: data.user, cities: data.cities });
-    return data;
+    const { data } = await api.getCities();
+    set({ cities: data });
+    return { cities: data };
   },
   isAuthenticated() {
     return Boolean(get().token);

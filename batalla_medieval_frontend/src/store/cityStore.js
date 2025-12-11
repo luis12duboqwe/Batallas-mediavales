@@ -12,13 +12,29 @@ export const useCityStore = create((set, get) => ({
   reports: [],
   alliance: null,
   messages: [],
-  async loadCity() {
-    const { data } = await api.getCity();
+  async loadCity(cityId) {
+    let targetCityId = cityId;
+
+    if (!targetCityId) {
+      const { data: cities } = await api.getCities();
+      if (!cities?.length) {
+        throw new Error('No hay ciudades disponibles');
+      }
+      targetCityId = cities[0].id;
+    }
+
+    const { data } = await api.getCity(targetCityId);
     set({
-      currentCity: data.city,
-      resources: data.resources,
-      buildings: data.buildings,
-      productionRates: data.production,
+      currentCity: data,
+      resources: {
+        wood: data.wood,
+        clay: data.clay,
+        iron: data.iron,
+        population: data.population || 0,
+        populationMax: data.populationMax || 0,
+      },
+      buildings: data.buildings || [],
+      productionRates: data.production || { wood: 0, clay: 0, iron: 0 },
       queues: data.queues || { buildings: [], troops: [] },
     });
     return data;
@@ -29,7 +45,8 @@ export const useCityStore = create((set, get) => ({
     set({ resources: updated });
   },
   async upgrade(building) {
-    const { data } = await api.upgradeBuilding(building);
+    const { currentCity } = get();
+    const { data } = await api.upgradeBuilding(currentCity?.id, building);
     set((state) => ({
       buildings: state.buildings.map((b) => (b.name === building ? data.building : b)),
       queues: { ...state.queues, buildings: data.queue },
@@ -38,7 +55,8 @@ export const useCityStore = create((set, get) => ({
     return data;
   },
   async train(payload) {
-    const { data } = await api.trainTroops(payload);
+    const { currentCity } = get();
+    const { data } = await api.trainTroops(currentCity?.id, payload);
     set((state) => ({
       queues: { ...state.queues, troops: data.queue },
       resources: data.resources,
