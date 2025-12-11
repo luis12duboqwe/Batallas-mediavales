@@ -29,6 +29,7 @@ from .conquest import ConquestRequest, ConquestResult, FoundCityRequest
 from .protection import ProtectionStatus
 from .ranking import AllianceRanking, PlayerRanking
 from .log import LogCreate, LogRead
+from .season import SeasonCreate, SeasonInfo, SeasonRead, SeasonResultRead
 
 __all__ = [
     "UserCreate",
@@ -71,4 +72,8 @@ __all__ = [
     "AllianceRanking",
     "LogCreate",
     "LogRead",
+    "SeasonCreate",
+    "SeasonRead",
+    "SeasonResultRead",
+    "SeasonInfo",
 ]
