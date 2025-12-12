@@ -2,36 +2,38 @@
 
 import math
 import random
+import json
 from typing import Dict, Tuple
 
 from .. import models
 from . import event as event_service
 
 UNIT_STATS: Dict[str, Dict[str, float]] = {
-    "lancero_comun": {"attack": 10, "def_inf": 20, "def_cav": 10, "def_siege": 20, "type": "infantry"},
-    "soldado_de_acero": {"attack": 25, "def_inf": 40, "def_cav": 30, "def_siege": 40, "type": "infantry"},
-    "arquero_real": {"attack": 30, "def_inf": 10, "def_cav": 40, "def_siege": 15, "type": "infantry"},
-    "jinete_explorador": {"attack": 60, "def_inf": 20, "def_cav": 20, "def_siege": 20, "type": "cavalry"},
-    "caballero_imperial": {"attack": 100, "def_inf": 40, "def_cav": 60, "def_siege": 40, "type": "cavalry"},
-    "infiltrador": {"attack": 0, "def_inf": 0, "def_cav": 0, "def_siege": 0, "type": "infantry"},
-    "quebramuros": {"attack": 2, "def_inf": 40, "def_cav": 35, "def_siege": 60, "type": "siege"},
-    "tormenta_de_piedra": {"attack": 2, "def_inf": 70, "def_cav": 70, "def_siege": 90, "type": "siege"},
+    "lancero_comun": {"attack": 10, "def_inf": 20, "def_cav": 10, "def_siege": 20, "type": "infantry", "carry": 40},
+    "soldado_de_acero": {"attack": 25, "def_inf": 40, "def_cav": 30, "def_siege": 40, "type": "infantry", "carry": 30},
+    "arquero_real": {"attack": 30, "def_inf": 10, "def_cav": 40, "def_siege": 15, "type": "infantry", "carry": 35},
+    "jinete_explorador": {"attack": 60, "def_inf": 20, "def_cav": 20, "def_siege": 20, "type": "cavalry", "carry": 80},
+    "caballero_imperial": {"attack": 100, "def_inf": 40, "def_cav": 60, "def_siege": 40, "type": "cavalry", "carry": 60},
+    "infiltrador": {"attack": 0, "def_inf": 0, "def_cav": 0, "def_siege": 0, "type": "infantry", "carry": 0},
+    "quebramuros": {"attack": 2, "def_inf": 40, "def_cav": 35, "def_siege": 60, "type": "siege", "carry": 0},
+    "tormenta_de_piedra": {"attack": 2, "def_inf": 70, "def_cav": 70, "def_siege": 90, "type": "siege", "carry": 0},
+    "noble": {"attack": 30, "def_inf": 50, "def_cav": 50, "def_siege": 50, "type": "infantry", "carry": 0},
     # Aliases for backwards compatibility with previous unit naming
-    "basic_infantry": {"attack": 10, "def_inf": 20, "def_cav": 10, "def_siege": 20, "type": "infantry"},
-    "heavy_infantry": {"attack": 25, "def_inf": 40, "def_cav": 30, "def_siege": 40, "type": "infantry"},
-    "archer": {"attack": 30, "def_inf": 10, "def_cav": 40, "def_siege": 15, "type": "infantry"},
-    "fast_cavalry": {"attack": 60, "def_inf": 20, "def_cav": 20, "def_siege": 20, "type": "cavalry"},
-    "heavy_cavalry": {"attack": 100, "def_inf": 40, "def_cav": 60, "def_siege": 40, "type": "cavalry"},
-    "spy": {"attack": 0, "def_inf": 0, "def_cav": 0, "def_siege": 0, "type": "infantry"},
-    "ram": {"attack": 2, "def_inf": 40, "def_cav": 35, "def_siege": 60, "type": "siege"},
-    "catapult": {"attack": 2, "def_inf": 70, "def_cav": 70, "def_siege": 90, "type": "siege"},
+    "basic_infantry": {"attack": 10, "def_inf": 20, "def_cav": 10, "def_siege": 20, "type": "infantry", "carry": 40},
+    "heavy_infantry": {"attack": 25, "def_inf": 40, "def_cav": 30, "def_siege": 40, "type": "infantry", "carry": 30},
+    "archer": {"attack": 30, "def_inf": 10, "def_cav": 40, "def_siege": 15, "type": "infantry", "carry": 35},
+    "fast_cavalry": {"attack": 60, "def_inf": 20, "def_cav": 20, "def_siege": 20, "type": "cavalry", "carry": 80},
+    "heavy_cavalry": {"attack": 100, "def_inf": 40, "def_cav": 60, "def_siege": 40, "type": "cavalry", "carry": 60},
+    "spy": {"attack": 0, "def_inf": 0, "def_cav": 0, "def_siege": 0, "type": "infantry", "carry": 0},
+    "ram": {"attack": 2, "def_inf": 40, "def_cav": 35, "def_siege": 60, "type": "siege", "carry": 0},
+    "catapult": {"attack": 2, "def_inf": 70, "def_cav": 70, "def_siege": 90, "type": "siege", "carry": 0},
 }
 
 WALL_NAME = "Muralla de Guardia"
 WALL_BONUS_PER_LEVEL = 0.05
 
 
-def _split_attack_by_type(troops: Dict[str, int]) -> Tuple[Dict[str, float], float]:
+def _split_attack_by_type(troops: Dict[str, int], hero: models.Hero | None = None) -> Tuple[Dict[str, float], float]:
     """Return attack totals split by troop category and total attack value."""
 
     attack_by_type = {"infantry": 0.0, "cavalry": 0.0, "siege": 0.0}
@@ -44,10 +46,18 @@ def _split_attack_by_type(troops: Dict[str, int]) -> Tuple[Dict[str, float], flo
         attack_value = unit_attack * amount
         attack_by_type[stats["type"]] += attack_value
         total_attack += attack_value
+    
+    if hero and hero.status == "moving":
+        # Hero bonus: 100 base + 10 per attack point
+        hero_attack = 100 + (hero.attack_points * 10)
+        # Hero counts as infantry for now
+        attack_by_type["infantry"] += hero_attack
+        total_attack += hero_attack
+
     return attack_by_type, total_attack
 
 
-def _defense_values(defender_troops: Dict[str, int]) -> Dict[str, float]:
+def _defense_values(defender_troops: Dict[str, int], hero: models.Hero | None = None) -> Dict[str, float]:
     """Calculate defense values per troop category."""
 
     defenses = {"infantry": 0.0, "cavalry": 0.0, "siege": 0.0}
@@ -58,6 +68,14 @@ def _defense_values(defender_troops: Dict[str, int]) -> Dict[str, float]:
         defenses["infantry"] += stats.get("def_inf", 0) * amount
         defenses["cavalry"] += stats.get("def_cav", 0) * amount
         defenses["siege"] += stats.get("def_siege", stats.get("def_inf", 0)) * amount
+    
+    if hero and hero.status == "home":
+        # Hero bonus: 100 base + 10 per defense point
+        hero_def = 100 + (hero.defense_points * 10)
+        defenses["infantry"] += hero_def
+        defenses["cavalry"] += hero_def
+        defenses["siege"] += hero_def
+
     return defenses
 
 
@@ -132,14 +150,19 @@ def resolve_battle(
     defender_city: models.City,
     attacking_troops: Dict[str, int],
     modifiers: Dict[str, float] | None = None,
+    attacker_hero: models.Hero | None = None,
+    target_building: str | None = None,
 ):
     """Resolve combat between attacking and defending cities."""
 
     modifiers = modifiers or event_service.DEFAULT_MODIFIERS
     defender_troops = {troop.unit_type: troop.quantity for troop in defender_city.troops}
+    defender_hero = defender_city.owner.hero if defender_city.owner else None
+    if defender_hero and defender_hero.city_id != defender_city.id:
+        defender_hero = None # Hero not in city
 
-    attack_distribution, base_attack = _split_attack_by_type(attacking_troops)
-    defenses = _defense_values(defender_troops)
+    attack_distribution, base_attack = _split_attack_by_type(attacking_troops, attacker_hero)
+    defenses = _defense_values(defender_troops, defender_hero)
     wall_multiplier = _wall_bonus(defender_city)
 
     moral = _moral(base_attack, sum(defenses.values()))
@@ -152,33 +175,140 @@ def resolve_battle(
     attacker_losses = _apply_losses(attacking_troops, attacker_loss_ratio)
     defender_losses = _apply_losses(defender_troops, defender_loss_ratio)
 
+    # Hero damage logic
+    if attacker_hero and attacker_loss_ratio > 0.9:
+        attacker_hero.health = 0
+        attacker_hero.status = "dead"
+    elif attacker_hero:
+        attacker_hero.health = max(0, attacker_hero.health - (attacker_loss_ratio * 100))
+        if attacker_hero.health <= 0:
+            attacker_hero.status = "dead"
+            
+    if defender_hero and defender_loss_ratio > 0.9:
+        defender_hero.health = 0
+        defender_hero.status = "dead"
+    elif defender_hero:
+        defender_hero.health = max(0, defender_hero.health - (defender_loss_ratio * 100))
+        if defender_hero.health <= 0:
+            defender_hero.status = "dead"
+
+    # Ranking points
+    attacker_points_gained = sum(defender_losses.values()) # Simplified: 1 point per unit
+    defender_points_gained = sum(attacker_losses.values())
+    
+    xp_gained = 0
+    if attacker_city.owner:
+        attacker_city.owner.attacker_points += attacker_points_gained
+        xp_gained = attacker_points_gained
+
+    if defender_city.owner:
+        defender_city.owner.defender_points += defender_points_gained
+        if defender_hero and defender_hero.status != "dead":
+             defender_hero.xp += defender_points_gained
+
     attacker_survivors = {u: max(0, attacking_troops.get(u, 0) - attacker_losses.get(u, 0)) for u in attacking_troops}
     defender_survivors = {u: max(0, defender_troops.get(u, 0) - defender_losses.get(u, 0)) for u in defender_troops}
 
+    # Loot Logic
     loot = {"wood": 0, "clay": 0, "iron": 0}
     if sum(defender_survivors.values()) == 0 and base_attack > 0:
-        loot_multiplier = modifiers.get("loot_modifier", 1.0)
-        loot = {
-            "wood": int(defender_city.wood * 0.3 * loot_multiplier),
-            "clay": int(defender_city.clay * 0.3 * loot_multiplier),
-            "iron": int(defender_city.iron * 0.3 * loot_multiplier),
-        }
-        defender_city.wood -= loot["wood"]
-        defender_city.clay -= loot["clay"]
-        defender_city.iron -= loot["iron"]
-        attacker_city.wood += loot["wood"]
-        attacker_city.clay += loot["clay"]
-        attacker_city.iron += loot["iron"]
+        # Calculate total carry capacity
+        total_carry = 0
+        for unit, amount in attacker_survivors.items():
+            stats = UNIT_STATS.get(unit)
+            if stats:
+                total_carry += stats.get("carry", 0) * amount
+        
+        # Available resources
+        available_wood = defender_city.wood
+        available_clay = defender_city.clay
+        available_iron = defender_city.iron
+        
+        # Simple distribution: take proportional to what is available
+        total_resources = available_wood + available_clay + available_iron
+        if total_resources > 0:
+            take_ratio = min(1.0, total_carry / total_resources)
+            loot = {
+                "wood": int(available_wood * take_ratio),
+                "clay": int(available_clay * take_ratio),
+                "iron": int(available_iron * take_ratio),
+            }
+            
+            defender_city.wood -= loot["wood"]
+            defender_city.clay -= loot["clay"]
+            defender_city.iron -= loot["iron"]
+            attacker_city.wood += loot["wood"]
+            attacker_city.clay += loot["clay"]
+            attacker_city.iron += loot["iron"]
 
+    # Siege & Loyalty Logic
     wall_damage = None
-    siege_survivors = attacker_survivors.get("quebramuros", 0) + attacker_survivors.get("tormenta_de_piedra", 0)
-    if siege_survivors > 0 and sum(defender_survivors.values()) == 0:
-        wall = next((b for b in defender_city.buildings if b.name == WALL_NAME), None)
-        if wall and wall.level > 0:
-            damage = max(1, int(siege_survivors ** 0.5))
-            old_level = wall.level
-            wall.level = max(0, wall.level - damage)
-            wall_damage = (old_level, wall.level)
+    building_damage = None
+    loyalty_change = 0.0
+    conquest = False
+    
+    if sum(defender_survivors.values()) == 0:
+        # Wall damage (Rams)
+        siege_survivors = attacker_survivors.get("quebramuros", 0) + attacker_survivors.get("ram", 0)
+        if siege_survivors > 0:
+            wall = next((b for b in defender_city.buildings if b.name == WALL_NAME), None)
+            if wall and wall.level > 0:
+                damage = max(1, int(siege_survivors ** 0.5))
+                old_level = wall.level
+                wall.level = max(0, wall.level - damage)
+                wall_damage = (old_level, wall.level)
+        
+        # Catapult damage (Target Building)
+        catapult_survivors = attacker_survivors.get("catapult", 0)
+        if catapult_survivors > 0 and target_building:
+            # If target is wall, we add to the damage (or damage it again if rams already hit it)
+            # If target is something else, we find it and damage it
+            
+            target_b = next((b for b in defender_city.buildings if b.name == target_building), None)
+            
+            # Special case: if target is wall and we already damaged it with rams, we use the current (reduced) level
+            if target_b and target_b.level > 0:
+                # Damage formula for catapults
+                catapult_damage = max(1, int(catapult_survivors ** 0.5))
+                
+                old_b_level = target_b.level
+                target_b.level = max(0, target_b.level - catapult_damage)
+                
+                # If it was the wall, update wall_damage tuple to reflect total change
+                if target_building == WALL_NAME and wall_damage:
+                    # wall_damage is (original_level, level_after_rams)
+                    # We want (original_level, level_after_catapults)
+                    wall_damage = (wall_damage[0], target_b.level)
+                elif target_building == WALL_NAME:
+                    wall_damage = (old_b_level, target_b.level)
+                else:
+                    building_damage = {
+                        "building": target_building,
+                        "old_level": old_b_level,
+                        "new_level": target_b.level
+                    }
+
+        # Loyalty reduction (Nobles)
+        nobles = attacker_survivors.get("noble", 0)
+        # Only allow conquest if defender is barbarian (owner_id is None)
+        if nobles > 0 and defender_city.owner_id is None:
+            # Each noble reduces loyalty by 20-35
+            reduction = 0
+            for _ in range(nobles):
+                reduction += random.randint(20, 35)
+            
+            old_loyalty = defender_city.loyalty
+            defender_city.loyalty -= reduction
+            loyalty_change = reduction
+            
+            if defender_city.loyalty <= 0:
+                conquest = True
+                defender_city.owner_id = attacker_city.owner_id
+                defender_city.loyalty = 25.0 # Reset loyalty for new owner
+                # Troops in the city (if any survivors, which is 0 here) belong to old owner? 
+                # But they are dead.
+                # What about support troops? They should be sent back?
+                # For simplicity, we assume all defenders are dead.
 
     report = {
         "attacker_losses": attacker_losses,
@@ -187,16 +317,20 @@ def resolve_battle(
         "defender_survivors": defender_survivors,
         "loot": loot,
         "wall_damage": wall_damage,
+        "building_damage": building_damage,
+        "loyalty_change": loyalty_change,
+        "conquest": conquest,
         "moral": moral,
         "luck": luck_factor,
         "effective_attack": effective_attack,
         "defense_value": defense_value,
+        "xp_gained": xp_gained,
     }
     return report
 
 
-def build_battle_report_html(attacker_city: models.City, defender_city: models.City, battle_result: Dict) -> str:
-    """Generate an HTML battle report for attacker and defender."""
+def build_battle_report_content(attacker_city: models.City, defender_city: models.City, battle_result: Dict) -> str:
+    """Generate a JSON battle report for attacker and defender."""
 
     attacker_losses = battle_result.get("attacker_losses", {})
     defender_losses = battle_result.get("defender_losses", {})
@@ -204,28 +338,154 @@ def build_battle_report_html(attacker_city: models.City, defender_city: models.C
     defender_survivors = battle_result.get("defender_survivors", {})
     loot = battle_result.get("loot", {})
     wall_damage = battle_result.get("wall_damage")
+    building_damage = battle_result.get("building_damage")
+    loyalty_change = battle_result.get("loyalty_change", 0)
+    conquest = battle_result.get("conquest", False)
+    xp_gained = battle_result.get("xp_gained", 0)
 
-    def _format_troops(troops: Dict[str, int]):
-        return "".join(f"<li>{unit}: {amount}</li>" for unit, amount in troops.items()) or "<li>Ninguna tropa</li>"
+    # Calculate initial troops
+    attacker_initial = {
+        unit: attacker_survivors.get(unit, 0) + attacker_losses.get(unit, 0)
+        for unit in set(attacker_survivors) | set(attacker_losses)
+    }
+    defender_initial = {
+        unit: defender_survivors.get(unit, 0) + defender_losses.get(unit, 0)
+        for unit in set(defender_survivors) | set(defender_losses)
+    }
 
-    wall_section = ""
-    if wall_damage:
-        wall_section = f"<p>Muralla dañada: Nivel {wall_damage[0]} → Nivel {wall_damage[1]}</p>"
+    report_data = {
+        "type": "battle",
+        "attacker": {
+            "id": attacker_city.id,
+            "name": attacker_city.name,
+            "owner": attacker_city.owner.username if attacker_city.owner else "Bárbaros",
+            "initial": attacker_initial,
+            "losses": attacker_losses,
+            "xp_gained": xp_gained
+        },
+        "defender": {
+            "id": defender_city.id,
+            "name": defender_city.name,
+            "owner": defender_city.owner.username if defender_city.owner else "Bárbaros",
+            "initial": defender_initial,
+            "losses": defender_losses
+        },
+        "loot": loot,
+        "wall_damage": wall_damage,
+        "building_damage": building_damage,
+        "loyalty_change": loyalty_change,
+        "conquest": conquest,
+        "moral": battle_result.get("moral"),
+        "luck": battle_result.get("luck"),
+        "effective_attack": battle_result.get("effective_attack"),
+        "defense_value": battle_result.get("defense_value")
+    }
+    
+    return json.dumps(report_data)
 
-    html = f"""
-<h2>Informe de batalla</h2>
-<p><strong>Atacante:</strong> {attacker_city.name} (Jugador {attacker_city.owner.username})</p>
-<p><strong>Defensor:</strong> {defender_city.name} (Jugador {defender_city.owner.username})</p>
-<h3>Tropas desplegadas</h3>
-<p>Atacante:</p><ul>{_format_troops(attacker_survivors)}</ul>
-<p>Defensor:</p><ul>{_format_troops(defender_survivors)}</ul>
-<h3>Bajas</h3>
-<p>Atacante:</p><ul>{_format_troops(attacker_losses)}</ul>
-<p>Defensor:</p><ul>{_format_troops(defender_losses)}</ul>
-<h3>Botín</h3>
-<p>Madera: {loot.get('wood', 0)} | Barro: {loot.get('clay', 0)} | Hierro: {loot.get('iron', 0)}</p>
-{wall_section}
-<p>Moral aplicada: {battle_result.get('moral'):.2f} | Suerte: {battle_result.get('luck'):.2f}</p>
-<p>Ataque efectivo: {battle_result.get('effective_attack'):.2f} | Defensa efectiva: {battle_result.get('defense_value'):.2f}</p>
-"""
-    return html.strip()
+
+def resolve_oasis_battle(
+    attacker_city: models.City,
+    oasis: models.Oasis,
+    attacking_troops: Dict[str, int],
+    modifiers: Dict[str, float] | None = None,
+    attacker_hero: models.Hero | None = None,
+):
+    """Resolve combat between attacking city and a defending oasis."""
+
+    modifiers = modifiers or event_service.DEFAULT_MODIFIERS
+    defender_troops = oasis.troops or {}
+    
+    attack_distribution, base_attack = _split_attack_by_type(attacking_troops, attacker_hero)
+    defenses = _defense_values(defender_troops, None) # No hero in oasis
+    wall_multiplier = 1.0 # No wall in oasis
+
+    moral = 1.0 # No moral penalty against nature
+    luck_factor = _luck()
+
+    effective_attack = base_attack * moral * (1 + luck_factor)
+    defense_value = _weighted_defense(defenses, attack_distribution, wall_multiplier)
+
+    attacker_loss_ratio, defender_loss_ratio = _loss_ratios(effective_attack, defense_value)
+    attacker_losses = _apply_losses(attacking_troops, attacker_loss_ratio)
+    defender_losses = _apply_losses(defender_troops, defender_loss_ratio)
+
+    # Hero damage logic
+    if attacker_hero and attacker_loss_ratio > 0.9:
+        attacker_hero.health = 0
+        attacker_hero.status = "dead"
+    elif attacker_hero:
+        attacker_hero.health = max(0, attacker_hero.health - (attacker_loss_ratio * 100))
+        if attacker_hero.health <= 0:
+            attacker_hero.status = "dead"
+
+    # Ranking points
+    attacker_points_gained = sum(defender_losses.values()) # Simplified
+    
+    xp_gained = 0
+    if attacker_city.owner:
+        xp_gained = attacker_points_gained # 1 XP per unit killed
+
+    attacker_survivors = {
+        u: q - attacker_losses.get(u, 0) for u, q in attacking_troops.items()
+    }
+    defender_survivors = {
+        u: q - defender_losses.get(u, 0) for u, q in defender_troops.items()
+    }
+
+    return {
+        "attacker_losses": attacker_losses,
+        "defender_losses": defender_losses,
+        "attacker_survivors": attacker_survivors,
+        "defender_survivors": defender_survivors,
+        "xp_gained": xp_gained,
+        "loot": {}, 
+        "conquered": sum(defender_survivors.values()) == 0 and attacker_hero and attacker_hero.health > 0
+    }
+
+
+def build_oasis_report_content(attacker_city: models.City, oasis: models.Oasis, battle_result: Dict) -> str:
+    """Generate a JSON battle report for oasis combat."""
+    
+    attacker_losses = battle_result.get("attacker_losses", {})
+    defender_losses = battle_result.get("defender_losses", {})
+    attacker_survivors = battle_result.get("attacker_survivors", {})
+    defender_survivors = battle_result.get("defender_survivors", {})
+    conquest = battle_result.get("conquest", False)
+    xp_gained = battle_result.get("xp_gained", 0)
+
+    attacker_initial = {
+        unit: attacker_survivors.get(unit, 0) + attacker_losses.get(unit, 0)
+        for unit in set(attacker_survivors) | set(attacker_losses)
+    }
+    defender_initial = {
+        unit: defender_survivors.get(unit, 0) + defender_losses.get(unit, 0)
+        for unit in set(defender_survivors) | set(defender_losses)
+    }
+
+    report_data = {
+        "type": "oasis_battle",
+        "attacker": {
+            "id": attacker_city.id,
+            "name": attacker_city.name,
+            "owner": attacker_city.owner.username if attacker_city.owner else "Bárbaros",
+            "initial": attacker_initial,
+            "losses": attacker_losses,
+            "xp_gained": xp_gained
+        },
+        "defender": {
+            "id": oasis.id,
+            "name": f"Oasis ({oasis.resource_type})",
+            "owner": "Naturaleza",
+            "initial": defender_initial,
+            "losses": defender_losses
+        },
+        "conquest": conquest,
+        "loot": {},
+        "moral": 1.0,
+        "luck": 0.0,
+    }
+    
+    return json.dumps(report_data)
+
+

@@ -1,16 +1,37 @@
 import Timer from './Timer';
 import { formatNumber } from '../utils/format';
 
-const buildingIcons = {
-  Ayuntamiento: '🏛️',
-  Cuartel: '🛡️',
-  Mina: '⛏️',
-  Aserradero: '🪵',
-  Ladrillar: '🧱',
+const buildingNames = {
+  town_hall: 'Ayuntamiento',
+  barracks: 'Cuartel',
+  stable: 'Establo',
+  wall: 'Muralla',
+  market: 'Mercado',
+  farm: 'Granja',
+  warehouse: 'Almacén',
+  smithy: 'Herrería',
+  workshop: 'Taller',
+  world_wonder: 'Maravilla del Mundo',
 };
 
-const BuildingCard = ({ building, onUpgrade }) => (
-  <div className="card p-5 flex flex-col gap-4 relative overflow-hidden group transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(0,0,0,0.45)]">
+const buildingIcons = {
+  town_hall: '🏛️',
+  barracks: '🛡️',
+  stable: '🐎',
+  wall: '🧱',
+  market: '⚖️',
+  farm: '🌾',
+  warehouse: '📦',
+  smithy: '⚒️',
+  workshop: '⚙️',
+  world_wonder: '🌟',
+};
+
+const BuildingCard = ({ building, onUpgrade }) => {
+  const displayName = buildingNames[building.name] || building.name;
+  const safeName = building.name.toLowerCase().replace(/\s+/g, '-');
+  return (
+  <div className={`card p-5 flex flex-col gap-4 relative overflow-hidden group transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(0,0,0,0.45)] building-card-${safeName}`}>
     <div className="absolute inset-0 bg-gradient-to-br from-yellow-500/5 via-transparent to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition" />
     <div className="flex items-start justify-between gap-3">
       <div className="flex items-center gap-3">
@@ -18,7 +39,7 @@ const BuildingCard = ({ building, onUpgrade }) => (
           {buildingIcons[building.name] || '🏰'}
         </div>
         <div>
-          <h3 className="text-lg leading-tight">{building.name}</h3>
+          <h3 className="text-lg leading-tight">{displayName}</h3>
           <p className="text-sm text-gray-400">Nivel {building.level}</p>
         </div>
       </div>
@@ -34,19 +55,26 @@ const BuildingCard = ({ building, onUpgrade }) => (
     </div>
     <div className="flex items-center justify-between text-xs text-gray-400">
       <span>Tiempo de mejora</span>
-      <span className="text-yellow-200">{building.cost?.time ? `${building.cost.time}s` : 'Instantáneo'}</span>
+      <span className="text-yellow-200">{building.build_time ? `${building.build_time}s` : 'Instantáneo'}</span>
     </div>
     <button
       onClick={() => onUpgrade(building.name)}
-      className="btn-primary w-full"
+      disabled={building.requirements_met === false}
+      className={`btn-primary w-full upgrade-btn-${safeName} ${building.requirements_met === false ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
-      Mejorar
+      {building.level === 0 ? 'Construir' : 'Mejorar'}
     </button>
+    {building.requirements_met === false && (
+      <div className="text-xs text-red-400 mt-2">
+        Requisitos: {Object.entries(building.requirements || {}).map(([k, v]) => `${k} ${v}`).join(', ')}
+      </div>
+    )}
     <div className="floating-panel">
       <span className="text-yellow-200">Próximo nivel</span>
       <span className="font-semibold">Nivel {building.level + 1}</span>
     </div>
   </div>
 );
+};
 
 export default BuildingCard;

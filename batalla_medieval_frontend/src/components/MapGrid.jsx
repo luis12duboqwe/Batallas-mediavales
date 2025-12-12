@@ -9,6 +9,7 @@ const MapGrid = ({
   center,
   onCenterChange,
   cities,
+  tiles = [],
   filter,
   selected,
   onCellClick,
@@ -88,15 +89,28 @@ const MapGrid = ({
     return map;
   }, [visibleCities]);
 
+  const tileMap = useMemo(() => {
+    const map = new Map();
+    tiles.forEach((tile) => {
+      map.set(cityKey(tile.x, tile.y), tile.type);
+    });
+    return map;
+  }, [tiles]);
+
   const cells = useMemo(() => {
     const batch = [];
     for (let y = startY; y <= endY; y += 1) {
       for (let x = startX; x <= endX; x += 1) {
-        batch.push({ x, y, city: cityMap.get(cityKey(x, y)) });
+        batch.push({ 
+          x, 
+          y, 
+          city: cityMap.get(cityKey(x, y)),
+          tileType: tileMap.get(cityKey(x, y))
+        });
       }
     }
     return batch;
-  }, [cityMap, endX, endY, startX, startY]);
+  }, [cityMap, tileMap, endX, endY, startX, startY]);
 
   return (
     <div
@@ -119,6 +133,7 @@ const MapGrid = ({
             y={cell.y - startY}
             size={cellSize}
             city={cell.city}
+            tileType={cell.tileType}
             selected={selected?.x === cell.x && selected?.y === cell.y}
             onClick={({ city }) => onCellClick({ x: cell.x, y: cell.y, city })}
           />

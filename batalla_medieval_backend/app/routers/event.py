@@ -6,7 +6,7 @@ from ..database import get_db
 from ..routers.admin import require_admin
 from ..services import event as event_service
 
-router = APIRouter(prefix="/event", tags=["events"])
+router = APIRouter(tags=["events"])
 
 
 @router.get("/active", response_model=schemas.ActiveEventResponse)

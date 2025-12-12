@@ -6,7 +6,7 @@ from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services import notification as notification_service
 
-router = APIRouter(prefix="/notification", tags=["notification"])
+router = APIRouter(tags=["notification"])
 
 
 @router.get("/list", response_model=list[schemas.NotificationRead])

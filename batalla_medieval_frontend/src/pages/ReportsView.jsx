@@ -15,16 +15,9 @@ const ReportsView = () => {
         <h1 className="text-3xl font-semibold text-amber-50">Reportes</h1>
         <p className="text-amber-100/80">Resultados de batallas y misiones de espionaje</p>
       </div>
-      <div className="grid md:grid-cols-2 gap-4">
-        {reports.length === 0 && <div className="skeleton h-32 w-full col-span-2" />}
-        {reports.length === 0 && <p className="text-gray-400 col-span-2">No hay reportes aún.</p>}
-
-      <div className="space-y-4">
-        {reports.length === 0 && (
-          <p className="rounded-xl border border-amber-400/20 bg-black/20 p-4 text-amber-100/70 shadow-inner shadow-black/30">
-            No hay reportes aún.
-          </p>
-        )}
+      <div className="grid gap-4 md:grid-cols-2">
+        {reports.length === 0 && <div className="skeleton col-span-2 h-32 w-full" />}
+        {reports.length === 0 && <p className="col-span-2 text-gray-400">No hay reportes aún.</p>}
         {reports.map((r) => (
           <ReportCard key={r.id} report={r} />
         ))}

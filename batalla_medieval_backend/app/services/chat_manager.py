@@ -63,7 +63,7 @@ class ChatManager:
             self.private_connections[key].discard(websocket)
 
     def allow_message(self, user_id: int) -> bool:
-        now = datetime.utcnow()
+        now = utc_now()
         last_sent = self.last_message_at.get(user_id)
         if last_sent and now - last_sent < timedelta(seconds=1):
             return False

@@ -1,8 +1,10 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useUserStore } from '../store/userStore';
 import SoundToggle from './SoundToggle';
 
 const Navbar = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { user, logout } = useUserStore();
 
@@ -27,8 +29,10 @@ const Navbar = () => {
       {user && (
         <div className="flex items-center gap-4">
           <SoundToggle />
-          <div className="text-sm text-gray-200">{user.username}</div>
-          <button onClick={handleLogout} className="btn-ghost text-sm">Salir</button>
+          <Link to="/profile" className="text-sm text-gray-200 hover:text-amber-400 font-bold">
+            {user.username}
+          </Link>
+          <button onClick={handleLogout} className="btn-ghost text-sm">{t('nav.logout')}</button>
         </div>
       )}
     </nav>

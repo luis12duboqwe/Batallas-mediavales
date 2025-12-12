@@ -6,7 +6,7 @@ from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services import premium as premium_service
 
-router = APIRouter(prefix="/premium", tags=["premium"])
+router = APIRouter(tags=["premium"])
 
 
 def require_admin(current_user: models.User = Depends(get_current_user)) -> models.User:

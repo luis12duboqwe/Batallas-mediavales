@@ -1,7 +1,8 @@
 import httpx
+from app import models
 
 
-def test_register_and_login(client: httpx.Client):
+def test_register_and_login(client: httpx.Client, db_session):
     register_payload = {
         "username": "player1",
         "email": "player1@example.com",
@@ -13,6 +14,15 @@ def test_register_and_login(client: httpx.Client):
     assert register_response.status_code == 200
     data = register_response.json()
     assert data["username"] == "player1"
+
+    # Get verification token from DB
+    user = db_session.query(models.User).filter(models.User.username == "player1").first()
+    assert user is not None
+    assert user.verification_token is not None
+    
+    # Verify email
+    verify_response = client.post(f"/auth/verify-email?token={user.verification_token}")
+    assert verify_response.status_code == 200
 
     token_resp = client.post(
         "/auth/token",

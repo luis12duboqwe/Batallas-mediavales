@@ -10,7 +10,7 @@ from ..routers.responses import error_response
 from ..services import movement, protection
 from ..services import queue as queue_service
 
-router = APIRouter(prefix="/movements", tags=["movements"])
+router = APIRouter(tags=["movements"])
 
 
 @router.post("/", response_model=schemas.MovementRead)
@@ -35,19 +35,32 @@ def create_movement(
         raise error_response(404, "origin_not_found", "Origin city not found", {"city_id": payload.origin_city_id})
 
     target_city = None
-    if payload.movement_type == "attack":
-        if protection.is_user_protected(current_user):
-            raise error_response(400, "protection_active", "Protected players cannot launch attacks")
-        target_city = (
-            db.query(models.City)
-            .options(selectinload(models.City.owner), selectinload(models.City.world))
-            .filter(models.City.id == payload.target_city_id, models.City.world_id == payload.world_id)
+    target_oasis = None
+    
+    if payload.target_city_id:
+        if payload.movement_type == "attack":
+            if protection.is_user_protected(current_user):
+                raise error_response(400, "protection_active", "Protected players cannot launch attacks")
+            target_city = (
+                db.query(models.City)
+                .options(selectinload(models.City.owner), selectinload(models.City.world))
+                .filter(models.City.id == payload.target_city_id, models.City.world_id == payload.world_id)
+                .first()
+            )
+            if not target_city:
+                raise error_response(404, "target_not_found", "Target city not found", {"city_id": payload.target_city_id})
+            if protection.is_user_protected(target_city.owner):
+                raise error_response(400, "target_protected", "Target city is under protection")
+    elif payload.target_oasis_id:
+        target_oasis = (
+            db.query(models.Oasis)
+            .filter(models.Oasis.id == payload.target_oasis_id, models.Oasis.world_id == payload.world_id)
             .first()
         )
-        if not target_city:
-            raise error_response(404, "target_not_found", "Target city not found", {"city_id": payload.target_city_id})
-        if protection.is_user_protected(target_city.owner):
-            raise error_response(400, "target_protected", "Target city is under protection")
+        if not target_oasis:
+            raise error_response(404, "target_not_found", "Target oasis not found", {"oasis_id": payload.target_oasis_id})
+    else:
+        raise error_response(400, "invalid_target", "Must specify target_city_id or target_oasis_id")
 
     queue_service.process_all_queues(db)
     try:
@@ -56,8 +69,11 @@ def create_movement(
             origin_city,
             payload.target_city_id,
             payload.movement_type,
+            troops=payload.troops,
             spy_count=payload.spy_count,
             target_city=target_city,
+            target_building=payload.target_building,
+            target_oasis_id=payload.target_oasis_id
         )
     except ValueError as exc:
         raise error_response(400, "movement_creation_failed", str(exc)) from exc
@@ -69,14 +85,19 @@ def create_movement(
 def list_movements(
     world_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
 ):
-    """List all ongoing movements initiated by the current user in a world."""
+    """List all ongoing movements related to the current user (outgoing and incoming)."""
 
     queue_service.process_all_queues(db)
     movement.resolve_due_movements(db)
+    
+    user_city_ids = [city.id for city in current_user.cities]
+    
     movements = (
         db.query(models.Movement)
-        .join(models.City, models.Movement.origin_city_id == models.City.id)
-        .filter(models.City.owner_id == current_user.id, models.Movement.world_id == world_id)
+        .filter(
+            models.Movement.world_id == world_id,
+            (models.Movement.origin_city_id.in_(user_city_ids)) | (models.Movement.target_city_id.in_(user_city_ids))
+        )
         .all()
     )
     return movements

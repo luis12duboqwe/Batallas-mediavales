@@ -5,11 +5,13 @@ import { useCityStore } from '../store/cityStore';
 import { troopList } from '../utils/gameMath';
 
 const TroopsView = () => {
-  const { queues, train, loadCity } = useCityStore();
+  const { queues, train, loadCity, cancelTroop, currentCity } = useCityStore();
 
   useEffect(() => {
     loadCity().catch(() => {});
   }, [loadCity]);
+
+  const researchedUnits = currentCity?.researched_units || ["basic_infantry"];
 
   const troops = troopList.map((name) => ({
     name,
@@ -31,7 +33,12 @@ const TroopsView = () => {
       <div className="grid lg:grid-cols-[2fr,1fr] gap-6">
         <div className="grid md:grid-cols-2 gap-4">
           {troops.map((t) => (
-            <TroopCard key={t.name} troop={t} onTrain={train} />
+            <TroopCard 
+                key={t.name} 
+                troop={t} 
+                onTrain={train} 
+                isResearched={researchedUnits.includes(t.name)}
+            />
           ))}
         </div>
         <div className="card p-5 space-y-4 sticky top-32 h-fit">
@@ -50,10 +57,18 @@ const TroopsView = () => {
             {queues.troops?.map((q, idx) => (
               <div key={idx} className="glass-panel p-3 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-semibold text-yellow-200">{q.amount}x {q.unit}</p>
+                  <p className="text-sm font-semibold text-yellow-200">{q.amount}x {q.troop_type || q.unit}</p>
                   <p className="text-xs text-gray-400">Entrenamiento en curso</p>
                 </div>
-                <Timer endTime={q.finishAt} />
+                <div className="flex items-center gap-2">
+                  <Timer endTime={q.finish_time || q.finishAt} />
+                  <button 
+                    onClick={() => cancelTroop(q.id)}
+                    className="text-red-400 hover:text-red-300 text-xs underline"
+                  >
+                    X
+                  </button>
+                </div>
               </div>
             ))}
           </div>

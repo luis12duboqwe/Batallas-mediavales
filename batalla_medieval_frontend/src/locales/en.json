@@ -1,0 +1,43 @@
+{
+  "nav": {
+    "city": "City",
+    "buildings": "Buildings",
+    "troops": "Troops",
+    "movements": "Movements",
+    "map": "Map",
+    "reports": "Reports",
+    "quests": "Quests",
+    "ranking": "Ranking",
+    "alliance": "Alliance",
+    "shop": "Shop",
+    "wiki": "Help",
+    "messages": "Messages",
+    "simulator": "Simulator",
+    "market": "Market",
+    "academy": "Academy",
+    "admin": "Admin",
+    "profile": "Profile",
+    "logout": "Logout"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm"
+  },
+  "dashboard": {
+    "welcome": "Welcome, {{name}}",
+    "resources": "Resources",
+    "production": "Production per hour"
+  },
+  "basic_infantry": "Spearman",
+  "heavy_infantry": "Swordsman",
+  "archer": "Archer",
+  "fast_cavalry": "Scout",
+  "heavy_cavalry": "Knight",
+  "spy": "Spy",
+  "ram": "Ram",
+  "catapult": "Catapult",
+  "noble": "Noble"
+}

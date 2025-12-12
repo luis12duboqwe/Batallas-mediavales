@@ -3,7 +3,7 @@ import { useCityStore } from '../store/cityStore';
 import { buildingList } from '../utils/gameMath';
 
 const CityView = () => {
-  const { buildings, loadCity } = useCityStore();
+  const { buildings, loadCity, currentCity } = useCityStore();
 
   useEffect(() => {
     loadCity().catch(() => {});
@@ -47,6 +47,37 @@ const CityView = () => {
           </div>
         ))}
       </div>
+
+      {/* Oases Section */}
+      {currentCity?.oases && currentCity.oases.length > 0 && (
+        <div className="mt-8 border-t border-gray-700 pt-6">
+            <h2 className="text-xl font-bold text-amber-500 mb-4">Oasis Conquistados</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {currentCity.oases.map(oasis => (
+                    <div key={oasis.id} className="bg-gray-800 p-4 rounded border border-green-700/50 shadow-lg relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-1 bg-green-900/50 rounded-bl text-xs text-green-200">
+                            Activo
+                        </div>
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="text-3xl filter drop-shadow-lg">
+                                {oasis.resource_type === 'wood' ? '🌲' : 
+                                 oasis.resource_type === 'clay' ? '🧱' : 
+                                 oasis.resource_type === 'iron' ? '⛏️' : '🌾'}
+                            </div>
+                            <div>
+                                <div className="font-bold capitalize text-white text-lg">{oasis.resource_type}</div>
+                                <div className="text-green-400 font-bold text-sm">+{oasis.bonus_percent}% Producción</div>
+                            </div>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-2 flex justify-between">
+                            <span>Coordenadas:</span>
+                            <span className="font-mono text-gray-300">({oasis.x}, {oasis.y})</span>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+      )}
     </div>
   );
 };

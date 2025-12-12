@@ -5,7 +5,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from ..utils import utc_now
 from . import quest as quest_service
+from . import notification as notification_service
 
 RANK_MEMBER = schemas.RANK_MEMBER
 RANK_GENERAL = schemas.RANK_GENERAL
@@ -126,7 +128,7 @@ def accept_invitation(db: Session, invitation_id: int, user: models.User) -> mod
     )
     db.add(membership)
     invitation.status = "accepted"
-    invitation.responded_at = datetime.utcnow()
+    invitation.responded_at = utc_now()
     db.commit()
     db.refresh(membership)
     from .achievement import update_achievement_progress
@@ -302,3 +304,50 @@ def list_chat_messages(db: Session, alliance_id: int, viewer: models.User) -> Li
             )
         )
     return result
+
+
+def get_user_invitations(db: Session, user_id: int, world_id: int) -> List[schemas.AllianceInvitationRead]:
+    invitations = (
+        db.query(models.AllianceInvitation)
+        .join(models.Alliance, models.Alliance.id == models.AllianceInvitation.alliance_id)
+        .filter(
+            models.AllianceInvitation.invited_user_id == user_id,
+            models.AllianceInvitation.status == "pending",
+            models.Alliance.world_id == world_id
+        )
+        .all()
+    )
+    return invitations
+
+def send_mass_message(db: Session, alliance_id: int, sender: models.User, subject: str, content: str):
+    membership = require_membership(db, alliance_id, sender.id)
+    if membership.rank not in [RANK_LEADER, RANK_GENERAL]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient rank")
+
+    memberships = (
+        db.query(models.AllianceMember)
+        .join(models.User, models.User.id == models.AllianceMember.user_id)
+        .filter(models.AllianceMember.alliance_id == alliance_id)
+        .all()
+    )
+
+    count = 0
+    for mem in memberships:
+        msg = models.Message(
+            sender_id=sender.id,
+            receiver_id=mem.user_id,
+            subject=f"[ALLIANCE] {subject}",
+            content=content,
+            timestamp=utc_now()
+        )
+        db.add(msg)
+        notification_service.create_notification(
+            db,
+            mem.user,
+            "New Alliance Message",
+            f"Alliance message: {subject}"
+        )
+        count += 1
+    
+    db.commit()
+    return {"count": count}

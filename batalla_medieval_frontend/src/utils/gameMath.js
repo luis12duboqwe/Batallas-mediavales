@@ -7,16 +7,19 @@ export const calculateProduction = (resources, productionRates, seconds) => {
   return updated;
 };
 
-export const troopList = [
-  'Lancero Común',
-  'Soldado de Acero',
-  'Arquero Real',
-  'Jinete Explorador',
-  'Caballero Imperial',
-  'Infiltrador',
-  'Quebramuros',
-  'Tormenta de Piedra',
-];
+export const TROOP_TYPES = {
+  basic_infantry: 'Lancero Común',
+  heavy_infantry: 'Soldado de Acero',
+  archer: 'Arquero Real',
+  fast_cavalry: 'Jinete Explorador',
+  heavy_cavalry: 'Caballero Imperial',
+  spy: 'Infiltrador',
+  ram: 'Quebramuros',
+  catapult: 'Tormenta de Piedra',
+  noble: 'Noble',
+};
+
+export const troopList = Object.keys(TROOP_TYPES);
 
 export const buildingList = [
   'Casa Central',

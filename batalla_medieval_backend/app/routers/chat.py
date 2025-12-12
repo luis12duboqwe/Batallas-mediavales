@@ -8,8 +8,9 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services.chat_manager import chat_manager
+from ..utils import utc_now
 
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(tags=["chat"])
 
 ALLOWED_CHANNELS = {"global", "alliance", "world", "private"}
 
@@ -97,7 +98,7 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
                 channel=channel,
                 receiver_id=receiver_id if channel == "private" else None,
                 content=filtered_content,
-                timestamp=datetime.utcnow(),
+                timestamp=utc_now(),
             )
             db.add(chat_message)
             db.commit()

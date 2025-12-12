@@ -15,3 +15,8 @@ class TroopRead(TroopBase):
 
     class Config:
         orm_mode = True
+
+
+class ResearchRequest(BaseModel):
+    city_id: int
+    unit_type: str

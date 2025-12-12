@@ -70,6 +70,8 @@ def get_player_ranking(db: Session, world_id: int) -> List[Dict[str, int | str |
             "user_id": user.id,
             "username": user.username,
             "points": calculate_player_points(db, user, world_id),
+            "attacker_points": user.attacker_points,
+            "defender_points": user.defender_points,
             "world_id": world_id,
         }
         for user in users
@@ -113,3 +115,18 @@ def recalculate_player_and_alliance_scores(db: Session, user_id: int, world_id: 
     calculate_player_points(db, user, world_id)
     for membership in user.alliances:
         calculate_alliance_points(db, membership.alliance, world_id)
+
+
+def search_players(db: Session, world_id: int, query: str) -> List[models.User]:
+    users = (
+        db.query(models.User)
+        .join(models.City, models.City.owner_id == models.User.id)
+        .filter(
+            models.City.world_id == world_id,
+            models.User.username.ilike(f"%{query}%")
+        )
+        .distinct()
+        .limit(20)
+        .all()
+    )
+    return users

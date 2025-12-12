@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, T
 from sqlalchemy.orm import relationship
 
 from ..database import Base
+from ..utils import get_utc_now
 
 
 class AntiCheatFlag(Base):
@@ -14,7 +15,7 @@ class AntiCheatFlag(Base):
     type_of_violation = Column(String, nullable=False)
     severity = Column(String, nullable=False)
     details = Column(Text, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime, default=get_utc_now, nullable=False)
     reviewed_by_admin = Column(Boolean, default=False, nullable=False)
     resolved_status = Column(String, default="pending", nullable=False)
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)

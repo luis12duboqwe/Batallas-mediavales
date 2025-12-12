@@ -7,13 +7,16 @@ export const useUserStore = create((set, get) => ({
   cities: [],
   loading: false,
   error: null,
+  isAuthenticated: () => !!get().token,
   async login(credentials) {
     set({ loading: true, error: null });
     try {
       const { data } = await api.login(credentials);
-      localStorage.setItem('bm_token', data.token);
-      set({ token: data.token, user: data.user, cities: data.cities, loading: false });
-      return data;
+      const accessToken = data.access_token;
+      localStorage.setItem('bm_token', accessToken);
+      const profileResp = await api.getProfile();
+      set({ token: accessToken, user: profileResp.data, loading: false });
+      return { token: accessToken, user: profileResp.data };
     } catch (err) {
       set({ error: err.response?.data?.detail || 'Error al iniciar sesión', loading: false });
       throw err;
@@ -22,10 +25,8 @@ export const useUserStore = create((set, get) => ({
   async register(payload) {
     set({ loading: true, error: null });
     try {
-      const { data } = await api.register(payload);
-      localStorage.setItem('bm_token', data.token);
-      set({ token: data.token, user: data.user, cities: data.cities, loading: false });
-      return data;
+      await api.register(payload);
+      set({ loading: false });
     } catch (err) {
       set({ error: err.response?.data?.detail || 'Error al registrarse', loading: false });
       throw err;
@@ -42,6 +43,15 @@ export const useUserStore = create((set, get) => ({
     const { data } = await api.getCity();
     set({ user: data.user, cities: data.cities });
     return data;
+  },
+  async loadUser() {
+    try {
+      const { data } = await api.getProfile();
+      set({ user: data });
+      return data;
+    } catch (err) {
+      console.error(err);
+    }
   },
   isAuthenticated() {
     return Boolean(get().token);

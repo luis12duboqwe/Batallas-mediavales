@@ -4,6 +4,7 @@ from typing import Dict, Tuple
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from ..utils import utc_now
 
 DEFAULT_MODIFIERS: Dict[str, float] = {
     "production_speed": 1.0,
@@ -51,7 +52,7 @@ def _merge_modifiers(custom: Dict[str, float] | None) -> Dict[str, float]:
 
 
 def get_active_event(db: Session, world_id: int = 1) -> models.WorldEvent | None:
-    now = datetime.utcnow()
+    now = utc_now()
     return (
         db.query(models.WorldEvent)
         .filter(

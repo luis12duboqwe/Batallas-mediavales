@@ -5,7 +5,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
 
-router = APIRouter(prefix="/reports", tags=["reports"])
+router = APIRouter(tags=["reports"])
 
 
 @router.get("/", response_model=list[schemas.ReportRead])

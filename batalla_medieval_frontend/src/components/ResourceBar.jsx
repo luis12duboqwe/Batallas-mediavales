@@ -14,7 +14,7 @@ const ResourceItem = ({ label, value, icon, tip }) => (
 );
 
 const ResourceBar = () => {
-  const { resources, tickResources } = useCityStore();
+  const { resources, storageLimit, tickResources } = useCityStore();
 
   useEffect(() => {
     const interval = setInterval(() => tickResources(1), 1000);
@@ -23,9 +23,9 @@ const ResourceBar = () => {
 
   return (
     <div className="sticky top-[52px] z-30 bg-gray-950/90 backdrop-blur border-b border-yellow-800/30 px-6 py-2 flex items-center gap-3 overflow-x-auto shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
-      <ResourceItem label="Madera" value={resources.wood} icon="🪵" tip="Recurso producido por Aserradero" />
-      <ResourceItem label="Ladrillo" value={resources.clay} icon="🧱" tip="Recurso producido por Ladrillar" />
-      <ResourceItem label="Hierro" value={resources.iron} icon="⛓️" tip="Recurso producido por Mina" />
+      <ResourceItem label="Madera" value={`${formatNumber(resources.wood)}/${formatNumber(storageLimit)}`} icon="🪵" tip="Recurso producido por Aserradero" />
+      <ResourceItem label="Ladrillo" value={`${formatNumber(resources.clay)}/${formatNumber(storageLimit)}`} icon="🧱" tip="Recurso producido por Ladrillar" />
+      <ResourceItem label="Hierro" value={`${formatNumber(resources.iron)}/${formatNumber(storageLimit)}`} icon="⛓️" tip="Recurso producido por Mina" />
       <ResourceItem
         label="Población"
         value={`${formatNumber(resources.population)}/${formatNumber(resources.populationMax)}`}

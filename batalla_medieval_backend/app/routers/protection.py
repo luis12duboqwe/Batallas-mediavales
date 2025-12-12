@@ -4,7 +4,7 @@ from .. import models, schemas
 from ..routers.auth import get_current_user
 from ..services import protection
 
-router = APIRouter(prefix="/protection", tags=["protection"])
+router = APIRouter(tags=["protection"])
 
 
 @router.get("/status", response_model=schemas.ProtectionStatus)

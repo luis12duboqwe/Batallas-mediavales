@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 from ..config import get_settings
 from ..models import User
+from ..utils import utc_now
 
 settings = get_settings()
 
@@ -20,7 +21,7 @@ def get_protection_seconds_left(user: User) -> int:
     protection_end = get_protection_end(user)
     if not protection_end:
         return 0
-    remaining = (protection_end - datetime.utcnow()).total_seconds()
+    remaining = (protection_end - utc_now()).total_seconds()
     return int(remaining) if remaining > 0 else 0
 
 

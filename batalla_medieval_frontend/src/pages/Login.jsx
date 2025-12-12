@@ -49,9 +49,16 @@ const Login = () => {
             {loading ? 'Entrando...' : 'Entrar'}
           </button>
         </form>
-        <p className="text-sm text-center text-gray-400">
-          ¿No tienes cuenta? <Link to="/register" className="text-yellow-400">Regístrate</Link>
-        </p>
+        <div className="text-sm text-center space-y-2">
+          <p className="text-gray-400">
+            ¿No tienes cuenta? <Link to="/register" className="text-yellow-400">Regístrate</Link>
+          </p>
+          <p>
+            <Link to="/forgot-password" className="text-gray-500 hover:text-yellow-400">
+              ¿Olvidaste tu contraseña?
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );

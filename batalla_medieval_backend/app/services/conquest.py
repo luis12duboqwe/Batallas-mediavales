@@ -3,7 +3,7 @@ from typing import Dict, Tuple
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import combat, production
+from . import combat, production, world_gen
 
 LOYALTY_DROP_PER_SUCCESS = 25.0
 FOUNDING_COST = {"wood": 800.0, "clay": 800.0, "iron": 800.0}
@@ -87,7 +87,8 @@ def found_city(
             raise ValueError("Not enough resources to found a new city")
     production.pay_cost(origin_city, FOUNDING_COST)
 
-    new_city = models.City(name=name, x=x, y=y, owner_id=owner.id, loyalty=100.0)
+    tile_type = world_gen.get_tile_type(x, y)
+    new_city = models.City(name=name, x=x, y=y, owner_id=owner.id, loyalty=100.0, tile_type=tile_type)
     db.add(new_city)
     db.commit()
     db.refresh(new_city)

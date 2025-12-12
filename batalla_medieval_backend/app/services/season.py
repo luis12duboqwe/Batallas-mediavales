@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..utils import utc_now
 from . import ranking as ranking_service
 
 
@@ -16,19 +17,19 @@ def _deactivate_existing_seasons(db: Session, world_id: str) -> None:
     )
     for season in existing:
         season.is_active = False
-        season.end_date = datetime.utcnow()
+        season.end_date = utc_now()
 
 
 def start_new_season(db: Session, world_id: str, name: str) -> models.Season:
     _deactivate_existing_seasons(db, world_id)
     db.commit()
 
-    season_identifier = f"{world_id}-{int(datetime.utcnow().timestamp())}"
+    season_identifier = f"{world_id}-{int(utc_now().timestamp())}"
     new_season = models.Season(
         season_id=season_identifier,
         world_id=world_id,
         name=name,
-        start_date=datetime.utcnow(),
+        start_date=utc_now(),
         is_active=True,
     )
     db.add(new_season)
@@ -102,7 +103,7 @@ def end_current_season(db: Session, world_id: str) -> List[models.SeasonResult]:
     if not season:
         raise HTTPException(status_code=404, detail="No active season found for this world")
 
-    season.end_date = datetime.utcnow()
+    season.end_date = utc_now()
     season.is_active = False
     results = _snapshot_rankings(db, season)
     _reset_world_state(db)

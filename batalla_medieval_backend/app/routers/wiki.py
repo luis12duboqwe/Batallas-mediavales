@@ -10,8 +10,9 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services import combat, economy, conquest, event as event_service
+from ..utils import utc_now
 
-router = APIRouter(prefix="/wiki", tags=["wiki"])
+router = APIRouter(tags=["wiki"])
 
 _seed_lock = threading.Lock()
 _builtin_seeded = False
@@ -313,7 +314,7 @@ def edit_article(
 
     for field, value in payload.dict(exclude_unset=True).items():
         setattr(article, field, value)
-    article.updated_at = datetime.utcnow()
+    article.updated_at = utc_now()
     db.add(article)
     db.commit()
     db.refresh(article)

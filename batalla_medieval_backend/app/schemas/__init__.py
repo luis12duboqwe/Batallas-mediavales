@@ -1,7 +1,17 @@
-from .user import Token, TokenData, UserCreate, UserRead
-from .city import CityCreate, CityRead
-from .building import BuildingCreate, BuildingRead
-from .troop import TroopCreate, TroopRead
+from .user import (
+    Token,
+    TokenData,
+    UserCreate,
+    UserRead,
+    UserPublic,
+    UserUpdate,
+    PasswordResetRequest,
+    PasswordResetConfirm,
+)
+
+from .city import CityCreate, CityRead, CityResourceStatus
+from .building import BuildingCreate, BuildingRead, BuildingAvailability
+from .troop import TroopCreate, TroopRead, ResearchRequest
 from .movement import MovementCreate, MovementRead
 from .queue import (
     BuildingQueueCreate,
@@ -11,6 +21,7 @@ from .queue import (
     TroopQueueRead,
 )
 from .report import ReportCreate, ReportRead
+from .oasis import OasisRead
 from .notification import NotificationRead
 from .user import Token, TokenData, UserCreate, UserRead
 from .alliance import (
@@ -23,16 +34,22 @@ from .alliance import (
     AllianceMemberRead,
     AllianceRead,
     AllianceUpdate,
+    AllianceMassMessage,
     RANK_GENERAL,
     RANK_LEADER,
     RANK_MEMBER,
 )
+from .diplomacy import DiplomacyCreate, DiplomacyRead
 from .spy_report import SpyReportCreate, SpyReportRead
+from .item import ItemTemplateRead, HeroItemRead
 from .message import MessageCreate, MessageRead
 from .conquest import ConquestRequest, ConquestResult, FoundCityRequest
 from .protection import ProtectionStatus
 from .ranking import AllianceRanking, PlayerRanking
 from .log import LogCreate, LogRead
+from .market import MarketOfferCreate, MarketOfferResponse, TransportRequest
+from .hero import HeroRead, HeroDistributePoints
+from .adventure import AdventureRead, AdventureClaimResponse
 from .season import SeasonCreate, SeasonInfo, SeasonRead, SeasonResultRead
 from .achievement import AchievementRead, AchievementProgressRead, AchievementWithProgress
 from .theme import (
@@ -44,6 +61,7 @@ from .theme import (
     ThemeUpdate,
 )
 from .shop import PurchaseResponse, ShopItemRead, UserItemRead
+from .research import ResearchCreate, ResearchRead
 from .admin_bot import AdminBotLogRead, AdminBotRunResponse
 from .anticheat import AntiCheatFlagRead, AntiCheatResolveRequest
 from .event import EventRead, EventCreate, EventModifiers, ActiveEventResponse
@@ -55,7 +73,7 @@ from .premium import (
     PremiumStatusRead,
     PremiumUseAction,
 )
-from .world import PlayerWorldRead, WorldCreate, WorldRead
+from .world import PlayerWorldRead, WorldCreate, WorldRead, WorldSelect
 from .wiki import (
     WIKI_CATEGORIES,
     WikiArticleCreate,
@@ -71,6 +89,7 @@ __all__ = [
     "TokenData",
     "CityCreate",
     "CityRead",
+    "CityResourceStatus",
     "BuildingCreate",
     "BuildingRead",
     "TroopCreate",
@@ -109,6 +128,11 @@ __all__ = [
     "AllianceRanking",
     "LogCreate",
     "LogRead",
+    "MarketOfferCreate",
+    "MarketOfferResponse",
+    "TransportRequest",
+    "HeroRead",
+    "HeroDistributePoints",
     "SeasonCreate",
     "SeasonRead",
     "SeasonResultRead",
@@ -143,11 +167,29 @@ __all__ = [
     "MapBookmarkRead",
     "WorldCreate",
     "WorldRead",
+    "WorldSelect",
     "PlayerWorldRead",
+    "MapTile",
     "WikiArticleCreate",
     "WikiArticleRead",
     "WikiArticleUpdate",
     "WIKI_CATEGORIES",
     "ChatMessageRead",
     "ChatMessageCreate",
+    "MapResponse",
+    "ForumThreadCreate",
+    "ForumThreadRead",
+    "ForumThreadDetail",
+    "ForumPostCreate",
+    "ForumPostRead",
 ]
+
+from .map import MapResponse, MapTile
+
+from .forum import (
+    ForumThreadCreate,
+    ForumThreadRead,
+    ForumThreadDetail,
+    ForumPostCreate,
+    ForumPostRead
+)

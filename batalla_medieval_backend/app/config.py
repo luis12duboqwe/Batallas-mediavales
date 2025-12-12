@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
     from_email: str = ""
+    frontend_url: str = "http://localhost:5173"
 
     class Config:
         env_file = ".env"

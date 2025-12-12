@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, U
 from sqlalchemy.orm import relationship
 
 from ..database import Base
+from ..utils import get_utc_now
 
 
 class Theme(Base):
@@ -30,7 +31,7 @@ class ThemeOwnership(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     theme_id = Column(Integer, ForeignKey("themes.id"), nullable=False)
     source = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
     user = relationship("User", back_populates="theme_ownerships")
     theme = relationship("Theme", back_populates="ownerships")

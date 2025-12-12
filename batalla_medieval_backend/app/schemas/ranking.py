@@ -5,6 +5,8 @@ class PlayerRanking(BaseModel):
     user_id: int
     username: str
     points: int
+    attacker_points: int = 0
+    defender_points: int = 0
     world_id: int
 
     class Config:

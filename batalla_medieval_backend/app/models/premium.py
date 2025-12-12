@@ -25,9 +25,6 @@ class PremiumStatus(Base):
     selected_banner = Column(String, nullable=True)
 
     user = relationship("User", back_populates="premium_status")
-    bookmarks = relationship(
-        "MapBookmark", back_populates="owner", cascade="all, delete-orphan"
-    )
 
 
 class MapBookmark(Base):

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..utils import utc_now
 
 
 def _persist(db: Session, *instances: object):
@@ -48,7 +49,7 @@ def log_action(db: Session, user: models.User, action: str, details: str) -> mod
 
 
 def check_action_speed(db: Session, user: models.User, action_name: str):
-    now = datetime.utcnow()
+    now = utc_now()
     if user.last_action_at:
         delta = (now - user.last_action_at).total_seconds()
         if delta < 0.1:
@@ -102,7 +103,7 @@ def check_multiaccount_ip(db: Session, user: models.User, client_ip: str | None)
             f"IP {client_ip} also used by {[u.username for u in other_users]}",
         )
     user.last_login_ip = client_ip
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = utc_now()
     db.add(user)
     db.commit()
 
@@ -146,7 +147,7 @@ def check_movement_legitimacy(
     speed_used: float,
     spy_count: int = 0,
 ):
-    now = datetime.utcnow()
+    now = utc_now()
     distance = ((origin_city.x - target_city.x) ** 2 + (origin_city.y - target_city.y) ** 2) ** 0.5
     min_hours = distance / max(speed_used, 0.01)
     actual_hours = max(0.0, (arrival_time - now).total_seconds() / 3600)

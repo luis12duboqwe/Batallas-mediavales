@@ -4,6 +4,7 @@ from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Uniq
 from sqlalchemy.orm import relationship
 
 from ..database import Base
+from ..utils import get_utc_now
 
 
 class Alliance(Base):
@@ -15,14 +16,14 @@ class Alliance(Base):
     diplomacy = Column(String, default="neutral")
     leader_id = Column(Integer, ForeignKey("users.id"))
     world_id = Column(Integer, ForeignKey("worlds.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
     __table_args__ = (UniqueConstraint("name", "world_id", name="uq_alliance_name_world"),)
 
     members = relationship("AllianceMember", back_populates="alliance", cascade="all, delete-orphan")
     invitations = relationship("AllianceInvitation", back_populates="alliance", cascade="all, delete-orphan")
     chat_messages = relationship("AllianceChatMessage", back_populates="alliance", cascade="all, delete-orphan")
-    world = relationship("World", back_populates="alliances")
+    world = relationship("World", back_populates="alliances", foreign_keys=[world_id])
 
 
 class AllianceInvitation(Base):
@@ -34,7 +35,7 @@ class AllianceInvitation(Base):
     invited_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     invited_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     status = Column(String, default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
     responded_at = Column(DateTime, nullable=True)
 
     alliance = relationship("Alliance", back_populates="invitations")
@@ -57,7 +58,7 @@ class AllianceChatMessage(Base):
     alliance_id = Column(Integer, ForeignKey("alliances.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     message = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
     alliance = relationship("Alliance", back_populates="chat_messages")
     user = relationship("User", back_populates="alliance_chat_messages")

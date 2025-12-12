@@ -21,6 +21,7 @@ def create_alliance(db: Session, payload: schemas.AllianceCreate, leader: models
         description=payload.description,
         diplomacy="neutral",
         leader_id=leader.id,
+        world_id=payload.world_id,
     )
     db.add(alliance)
     db.commit()
@@ -28,7 +29,7 @@ def create_alliance(db: Session, payload: schemas.AllianceCreate, leader: models
     member = models.AllianceMember(alliance_id=alliance.id, user_id=leader.id, rank=schemas.RANK_LEADER)
     db.add(member)
     db.commit()
-    ranking.recalculate_player_and_alliance_scores(db, leader.id)
+    ranking.recalculate_player_and_alliance_scores(db, leader.id, payload.world_id)
     return alliance
 
 

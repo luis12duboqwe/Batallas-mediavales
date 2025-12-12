@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from app import models
 from app.services import event
@@ -9,8 +9,8 @@ def test_event_modifiers_and_creation(db_session):
         world_id=1,
         name="Doble de Recursos",
         description="",
-        start_time=datetime.utcnow() - timedelta(hours=1),
-        end_time=datetime.utcnow() + timedelta(hours=1),
+        start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+        end_time=datetime.now(timezone.utc) + timedelta(hours=1),
         modifiers={"production_speed": 2.0},
     )
     db_session.add(payload)

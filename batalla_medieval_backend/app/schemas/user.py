@@ -17,6 +17,13 @@ class UserCreate(UserBase):
     password: str
 
 
+class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+    email_notifications: Optional[bool] = None
+    language: Optional[str] = None
+
+
 class UserRead(UserBase):
     id: int
     created_at: datetime
@@ -25,8 +32,6 @@ class UserRead(UserBase):
     is_admin: bool = False
     rubies_balance: int
     is_frozen: bool = False
-    email_notifications: bool = False
-    is_frozen: bool = False
     freeze_reason: Optional[str] = None
     rename_tokens: int = 0
     premium_theme_unlocked: bool = False
@@ -34,6 +39,23 @@ class UserRead(UserBase):
 
     class Config:
         orm_mode = True
+
+
+class UserPublic(BaseModel):
+    id: int
+    username: str
+
+    class Config:
+        orm_mode = True
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str
 
 
 class Token(BaseModel):

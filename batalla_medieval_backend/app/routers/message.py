@@ -7,7 +7,7 @@ from ..routers.auth import get_current_user
 from ..services import notification as notification_service
 from ..services import premium as premium_service
 
-router = APIRouter(prefix="/message", tags=["message"])
+router = APIRouter(tags=["message"])
 
 
 @router.post("/send", response_model=schemas.MessageRead)

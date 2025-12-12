@@ -6,7 +6,7 @@ from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services import season as season_service
 
-router = APIRouter(prefix="/season", tags=["season"])
+router = APIRouter(tags=["season"])
 
 
 def require_admin(current_user: models.User = Depends(get_current_user)):

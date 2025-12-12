@@ -1,8 +1,8 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 import pytest
-import httpx
+from fastapi.testclient import TestClient
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 
@@ -44,7 +44,7 @@ def client(db_session):
             pass
 
     app.dependency_overrides[get_db] = _get_db_override
-    with httpx.Client(app=app, base_url="http://testserver") as test_client:
+    with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
 
@@ -55,7 +55,7 @@ def user(db_session):
         username="tester",
         email="tester@example.com",
         hashed_password="placeholder",
-        protection_ends_at=datetime.utcnow() + timedelta(hours=48),
+        protection_ends_at=datetime.now(timezone.utc) + timedelta(hours=48),
     )
     db_session.add(user)
     db_session.commit()

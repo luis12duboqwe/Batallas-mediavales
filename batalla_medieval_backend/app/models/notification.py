@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, T
 from sqlalchemy.orm import relationship
 
 from ..database import Base
+from ..utils import get_utc_now
 
 
 class Notification(Base):
@@ -14,7 +15,7 @@ class Notification(Base):
     title = Column(String, nullable=False)
     body = Column(Text, nullable=False)
     type = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
     read = Column(Boolean, default=False)
 
     user = relationship("User", back_populates="notifications")

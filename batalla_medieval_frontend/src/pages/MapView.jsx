@@ -1,148 +1,256 @@
-import { useEffect, useMemo, useState } from 'react';
-import MapGrid from '../components/MapGrid';
-import CityPopup from '../components/CityPopup';
-import axiosClient from '../api/axiosClient';
+import { useEffect, useState } from 'react';
+import { api } from '../api/axiosClient';
+import { useUserStore } from '../store/userStore';
+import { useCityStore } from '../store/cityStore';
+import { useNavigate } from 'react-router-dom';
 
-const DEFAULT_SIZE = 20;
-
-const formatRelation = (city, currentPlayer) => {
-  if (!city) return 'neutral';
-  if (city.owner_id === currentPlayer?.id) return 'own';
-  if (city.relation) return city.relation;
-  return city.status || 'neutral';
-};
+const TILE_SIZE = 50;
+const RADIUS = 7; // 15x15 grid
 
 const MapView = () => {
-  const [center, setCenter] = useState({ x: Math.floor(DEFAULT_SIZE / 2), y: Math.floor(DEFAULT_SIZE / 2) });
-  const [cities, setCities] = useState([]);
-  const [selectedCoord, setSelectedCoord] = useState(null);
-  const [popupCityId, setPopupCityId] = useState(null);
-  const [filter, setFilter] = useState('all');
-  const [jump, setJump] = useState('');
-  const [message, setMessage] = useState('Selecciona una coordenada para ver detalles.');
-  const [loadingMap, setLoadingMap] = useState(false);
-
-  const loadCities = async () => {
-    setLoadingMap(true);
-    try {
-      const response = await axiosClient.get('/city/map');
-      const payload = response.data || [];
-      const currentPlayer = payload.current_player;
-      const cityList = Array.isArray(payload) ? payload : payload.cities || [];
-      const enriched = cityList.map((city) => ({
-        ...city,
-        relation: formatRelation(city, currentPlayer),
-        ownerTag: city.owner_name?.slice(0, 3)?.toUpperCase(),
-      }));
-      setCities(enriched);
-    } catch (error) {
-      setMessage(error.response?.data?.detail || 'No se pudo cargar el mapa');
-    } finally {
-      setLoadingMap(false);
-    }
-  };
+  const { user } = useUserStore();
+  const { currentCity } = useCityStore();
+  const navigate = useNavigate();
+  
+  const [center, setCenter] = useState({ x: 0, y: 0 });
+  const [tiles, setTiles] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedTile, setSelectedTile] = useState(null);
+  const [jumpCoords, setJumpCoords] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
-    loadCities();
-  }, []);
+    if (currentCity) {
+      setCenter({ x: currentCity.x ?? 0, y: currentCity.y ?? 0 });
+      setJumpCoords({ x: currentCity.x ?? 0, y: currentCity.y ?? 0 });
+    }
+  }, [currentCity]);
 
-  const handleCellSelect = async ({ x, y }) => {
-    setSelectedCoord({ x, y });
-    setMessage('Buscando ciudad...');
+  useEffect(() => {
+    if (user?.world_id) {
+      fetchTiles();
+    }
+  }, [center, user?.world_id]);
+
+  const fetchTiles = async () => {
+    setLoading(true);
     try {
-      const response = await axiosClient.get('/city/by-coordinates', { params: { x, y } });
-      if (response.data?.id) {
-        setPopupCityId(response.data.id);
-        setMessage(`Ciudad encontrada en (${x}, ${y})`);
-      } else {
-        setPopupCityId(null);
-        setMessage('No city here');
-      }
+      const res = await api.getMapTiles(user.world_id, center.x, center.y, RADIUS);
+      setTiles(res.data.tiles);
     } catch (error) {
-      setPopupCityId(null);
-      setMessage(error.response?.data?.detail || 'No city here');
+      console.error("Failed to load map", error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const filteredCities = useMemo(() => {
-    if (filter === 'all') return cities;
-    if (filter === 'own') return cities.filter((city) => city.relation === 'own');
-    if (filter === 'alliance') return cities.filter((city) => city.relation === 'alliance');
-    return cities;
-  }, [cities, filter]);
+  const handleJump = (e) => {
+    e.preventDefault();
+    setCenter({ x: parseInt(jumpCoords.x), y: parseInt(jumpCoords.y) });
+  };
 
-  const handleJump = () => {
-    const [xStr, yStr] = jump.split(',').map((v) => v.trim());
-    const x = Number(xStr);
-    const y = Number(yStr);
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      setCenter({ x, y });
+  const handleMove = (dx, dy) => {
+    setCenter(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+  };
+
+  const getTileColor = (type) => {
+    switch (type) {
+      case 'water': return 'bg-blue-500';
+      case 'mountain': return 'bg-gray-600';
+      case 'forest': return 'bg-green-800';
+      default: return 'bg-green-500'; // grass
     }
   };
+
+  const renderTile = (tile) => {
+    const isCenter = tile.x === center.x && tile.y === center.y;
+    const isSelected = selectedTile && selectedTile.x === tile.x && selectedTile.y === tile.y;
+    const isMyCity = currentCity && tile.city_id === currentCity.id;
+    const isOasis = !!tile.oasis_id;
+
+    let content = null;
+    if (tile.city_id) {
+        content = (
+          <div className={`
+            w-8 h-8 mx-auto mt-2 rounded-full shadow-lg flex items-center justify-center text-xs font-bold
+            ${isMyCity ? 'bg-blue-600 text-white' : tile.owner_id ? 'bg-red-600 text-white' : 'bg-gray-400 text-black'}
+          `}>
+            {tile.points > 1000 ? '🏰' : '🏠'}
+          </div>
+        );
+    } else if (isOasis) {
+        const resourceIcons = { wood: '🌲', clay: '🧱', iron: '⛏️', crop: '🌾' };
+        content = (
+            <div className={`
+                w-8 h-8 mx-auto mt-2 rounded-full shadow-lg flex items-center justify-center text-xs font-bold
+                ${tile.is_conquered ? (tile.owner_id === user?.id ? 'bg-blue-500 ring-2 ring-blue-300' : 'bg-red-500 ring-2 ring-red-300') : 'bg-green-600 ring-2 ring-green-300'}
+            `}>
+                {resourceIcons[tile.resource_type] || '🌴'}
+            </div>
+        );
+    }
+
+    return (
+      <div
+        key={`${tile.x},${tile.y}`}
+        className={`
+          w-12 h-12 border border-black/20 relative cursor-pointer hover:brightness-110 transition
+          ${getTileColor(tile.type)}
+          ${isSelected ? 'ring-2 ring-yellow-400 z-10' : ''}
+        `}
+        onClick={() => setSelectedTile(tile)}
+        title={`(${tile.x}, ${tile.y}) ${tile.type}`}
+      >
+        {content}
+        {isCenter && <div className="absolute inset-0 border-2 border-white/50 pointer-events-none"></div>}
+      </div>
+    );
+  };
+
+  // Organize tiles into a grid
+  // We need to sort them by Y then X to render in rows
+  const sortedTiles = [...tiles].sort((a, b) => {
+    if (a.y !== b.y) return b.y - a.y; // Top to bottom (Max Y first)
+    return a.x - b.x; // Left to right (Min X first)
+  });
+
+  // Group by Y
+  const rows = {};
+  sortedTiles.forEach(tile => {
+    if (!rows[tile.y]) rows[tile.y] = [];
+    rows[tile.y].push(tile);
+  });
+  
+  // Sort rows by Y descending
+  const sortedY = Object.keys(rows).sort((a, b) => b - a);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[320px,1fr] gap-6 h-[calc(100vh-120px)]">
-      <div className="card p-4 space-y-4 h-full bg-gradient-to-b from-emerald-950/80 via-slate-950 to-amber-950/60 border border-amber-900/50">
-        <div>
-          <h1 className="text-3xl text-amber-100">Mapa del mundo</h1>
-          <p className="text-amber-200/80">Explora las coordenadas y selecciona objetivos</p>
-        </div>
-        <div className="space-y-2">
-          <label className="text-sm text-amber-200/80">Ir a coordenada</label>
-          <div className="flex gap-2">
-            <input
-              className="input w-full"
-              placeholder="x,y"
-              value={jump}
-              onChange={(e) => setJump(e.target.value)}
-            />
-            <button type="button" className="btn-primary" onClick={handleJump}>
-              Ir
-            </button>
-          </div>
-        </div>
-        <div className="space-y-2">
-          <label className="text-sm text-amber-200/80">Filtros</label>
-          <div className="flex flex-col gap-2">
-            <label className="flex items-center gap-2 text-sm">
-              <input type="radio" checked={filter === 'all'} onChange={() => setFilter('all')} />
-              <span>Todos</span>
-            </label>
-            <label className="flex items-center gap-2 text-sm text-blue-300">
-              <input type="radio" checked={filter === 'own'} onChange={() => setFilter('own')} />
-              <span>Mis ciudades</span>
-            </label>
-            <label className="flex items-center gap-2 text-sm text-green-300">
-              <input type="radio" checked={filter === 'alliance'} onChange={() => setFilter('alliance')} />
-              <span>Alianza</span>
-            </label>
-          </div>
-        </div>
-        <div className="space-y-1 text-sm text-amber-100/80">
-          <p>Centro actual: {center.x}, {center.y}</p>
-          <p>Selección: {selectedCoord ? `${selectedCoord.x}, ${selectedCoord.y}` : '---'}</p>
-          <p className="text-yellow-200">{message}</p>
-          {loadingMap && <p className="text-xs text-amber-200/80">Actualizando mapa...</p>}
-        </div>
+    <div className="p-4 h-full flex flex-col">
+      <div className="flex justify-between items-center mb-4 bg-black/40 p-4 rounded">
+        <h1 className="text-2xl font-bold text-amber-500">Mapa Global</h1>
+        
+        <form onSubmit={handleJump} className="flex gap-2">
+          <input 
+            type="number" 
+            className="input input-sm w-20 bg-black/50" 
+            placeholder="X"
+            value={jumpCoords.x}
+            onChange={e => setJumpCoords({...jumpCoords, x: e.target.value})}
+          />
+          <input 
+            type="number" 
+            className="input input-sm w-20 bg-black/50" 
+            placeholder="Y"
+            value={jumpCoords.y}
+            onChange={e => setJumpCoords({...jumpCoords, y: e.target.value})}
+          />
+          <button type="submit" className="btn btn-sm btn-primary">Ir</button>
+        </form>
       </div>
 
-      <div className="relative h-full">
-        <MapGrid
-          gridSize={DEFAULT_SIZE}
-          center={center}
-          onCenterChange={setCenter}
-          cities={filteredCities}
-          filter={filter}
-          selected={selectedCoord}
-          onCellClick={handleCellSelect}
-        />
-        {popupCityId && selectedCoord && (
-          <CityPopup
-            cityId={popupCityId}
-            coordinate={selectedCoord}
-            onClose={() => setPopupCityId(null)}
-          />
-        )}
+      <div className="flex flex-1 gap-4 overflow-hidden">
+        {/* Map Area */}
+        <div className="flex-1 relative bg-gray-900 rounded overflow-auto flex items-center justify-center p-4">
+          {loading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20">Cargando...</div>}
+          
+          <div className="relative">
+            {/* Navigation Arrows Overlay */}
+            <button onClick={() => handleMove(0, 5)} className="absolute top-0 left-1/2 -translate-x-1/2 -mt-8 btn btn-xs btn-circle">⬆️</button>
+            <button onClick={() => handleMove(0, -5)} className="absolute bottom-0 left-1/2 -translate-x-1/2 -mb-8 btn btn-xs btn-circle">⬇️</button>
+            <button onClick={() => handleMove(-5, 0)} className="absolute left-0 top-1/2 -translate-y-1/2 -ml-8 btn btn-xs btn-circle">⬅️</button>
+            <button onClick={() => handleMove(5, 0)} className="absolute right-0 top-1/2 -translate-y-1/2 -mr-8 btn btn-xs btn-circle">➡️</button>
+
+            <div className="grid gap-0.5 bg-black/50 p-1">
+              {sortedY.map(y => (
+                <div key={y} className="flex gap-0.5">
+                  {rows[y].sort((a, b) => a.x - b.x).map(tile => renderTile(tile))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Info Panel */}
+        <div className="w-80 bg-gray-800 p-4 rounded shadow-lg border border-gray-700 flex flex-col">
+          <h2 className="text-xl font-bold text-amber-400 mb-4">Detalles</h2>
+          
+          {selectedTile ? (
+            <div className="space-y-4">
+              <div className="bg-gray-700 p-3 rounded">
+                <div className="text-sm text-gray-400">Coordenadas</div>
+                <div className="text-2xl font-mono text-white">({selectedTile.x}, {selectedTile.y})</div>
+                <div className="text-sm text-green-400 capitalize mt-1">{selectedTile.type}</div>
+              </div>
+
+              {selectedTile.city_id ? (
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-sm text-gray-400">Ciudad</div>
+                    <div className="font-bold text-lg text-white">{selectedTile.city_name}</div>
+                    <div className="text-xs text-yellow-500">{selectedTile.points} puntos</div>
+                  </div>
+                  
+                  <div>
+                    <div className="text-sm text-gray-400">Jugador</div>
+                    <div className="font-bold text-white">{selectedTile.owner_name || 'Bárbaros'}</div>
+                  </div>
+
+                  {selectedTile.alliance_name && (
+                    <div>
+                      <div className="text-sm text-gray-400">Alianza</div>
+                      <div className="font-bold text-blue-400">[{selectedTile.alliance_name}]</div>
+                    </div>
+                  )}
+
+                  <div className="divider"></div>
+
+                  {currentCity && selectedTile.city_id !== currentCity.id && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button 
+                        className="btn btn-sm btn-error w-full"
+                        onClick={() => navigate(`/send-movement/${selectedTile.city_id}`)}
+                      >
+                        Atacar
+                      </button>
+                      <button className="btn btn-sm btn-info w-full">Espiar</button>
+                      <button className="btn btn-sm btn-success w-full">Comerciar</button>
+                      <button className="btn btn-sm btn-warning w-full">Mensaje</button>
+                    </div>
+                  )}
+                </div>
+              ) : selectedTile.oasis_id ? (
+                <div className="space-y-3">
+                    <div>
+                        <div className="text-sm text-gray-400">Oasis</div>
+                        <div className="font-bold text-lg text-white capitalize">{selectedTile.resource_type} (+{selectedTile.bonus_percent}%)</div>
+                    </div>
+                    <div>
+                        <div className="text-sm text-gray-400">Estado</div>
+                        <div className="font-bold text-white">{selectedTile.is_conquered ? (selectedTile.owner_id ? 'Conquistado' : 'Ocupado') : 'Salvaje'}</div>
+                    </div>
+                     {currentCity && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button 
+                        className="btn btn-sm btn-error w-full"
+                        onClick={() => navigate(`/send-movement/${selectedTile.oasis_id}?type=oasis`)}
+                      >
+                        Atacar
+                      </button>
+                      <button className="btn btn-sm btn-info w-full">Espiar</button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-gray-500 italic mt-4">
+                  Terreno salvaje. No hay asentamientos aquí.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-gray-500 text-center mt-10">
+              Selecciona una casilla en el mapa para ver información.
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

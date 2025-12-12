@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { formatNumber } from '../utils/format';
 import Timer from './Timer';
 
-const TroopCard = ({ troop, onTrain }) => {
+const TroopCard = ({ troop, onTrain, isResearched = true }) => {
   const [amount, setAmount] = useState(1);
 
   const handleTrain = () => {
-    onTrain({ unit: troop.name, amount: Number(amount) });
+    onTrain({ troopType: troop.name, amount: Number(amount) });
   };
 
   return (
@@ -32,8 +32,16 @@ const TroopCard = ({ troop, onTrain }) => {
         <span className="text-yellow-200 text-xs">Tiempo: {troop.cost?.time ? `${troop.cost.time}s` : 'Instantáneo'}</span>
       </div>
       <div className="flex items-center gap-2">
-        <input type="number" min="1" value={amount} onChange={(e) => setAmount(e.target.value)} className="input w-24" />
-        <button onClick={handleTrain} className="btn-primary">Entrenar</button>
+        {isResearched ? (
+            <>
+                <input type="number" min="1" value={amount} onChange={(e) => setAmount(e.target.value)} className="input w-24" />
+                <button onClick={handleTrain} className={`btn-primary recruit-btn-${troop.name}`}>Entrenar</button>
+            </>
+        ) : (
+            <div className="text-red-400 text-sm font-bold w-full text-center border border-red-400/30 rounded p-2 bg-red-400/10">
+                🔒 Requiere Investigación
+            </div>
+        )}
       </div>
       <div className="floating-panel">
         <span className="text-yellow-200">Requisitos</span>

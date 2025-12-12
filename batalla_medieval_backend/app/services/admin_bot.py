@@ -6,6 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..utils import utc_now
 
 
 WELCOME_MESSAGE_SUBJECT = "Welcome to Batalla Medieval!"
@@ -26,7 +27,7 @@ def _ensure_admin_bot_user(db: Session) -> models.User:
         email="adminbot@batallamedieval.local",
         hashed_password="!",
         is_admin=True,
-        last_active_at=datetime.utcnow(),
+        last_active_at=utc_now(),
         is_frozen=False,
     )
     db.add(bot_user)
@@ -42,7 +43,7 @@ def _log_action(db: Session, action: str, details: Dict, user_id: Optional[int] 
 
 
 def _remove_old_notifications(db: Session, bot_user: models.User, retention_days: int = 30) -> str:
-    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    cutoff = utc_now() - timedelta(days=retention_days)
     deleted = (
         db.query(models.Message)
         .filter(models.Message.sender_id == bot_user.id, models.Message.timestamp < cutoff)
@@ -57,7 +58,7 @@ def _remove_old_notifications(db: Session, bot_user: models.User, retention_days
 
 
 def _delete_old_logs(db: Session, retention_days: int = 90) -> str:
-    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    cutoff = utc_now() - timedelta(days=retention_days)
     deleted_admin_logs = (
         db.query(models.AdminBotLog)
         .filter(models.AdminBotLog.timestamp < cutoff)
@@ -77,7 +78,7 @@ def _delete_old_logs(db: Session, retention_days: int = 90) -> str:
 
 
 def _clear_inactive_players(db: Session, inactivity_days: int = 30) -> str:
-    cutoff = datetime.utcnow() - timedelta(days=inactivity_days)
+    cutoff = utc_now() - timedelta(days=inactivity_days)
     inactive_users = (
         db.query(models.User)
         .filter(
@@ -134,7 +135,7 @@ def _send_auto_messages(db: Session, bot_user: models.User) -> str:
         .filter(
             models.User.is_admin.is_(False),
             models.User.username != bot_user.username,
-            models.User.created_at >= datetime.utcnow() - timedelta(days=1),
+            models.User.created_at >= utc_now() - timedelta(days=1),
         )
         .all()
     )

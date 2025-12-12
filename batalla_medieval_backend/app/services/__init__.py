@@ -15,5 +15,8 @@ __all__ = [
     "premium",
     "quest",
     "wiki",
-    "notification"
+    "notification",
+    "adventure",
+    "oasis",
+    "report"
 ]

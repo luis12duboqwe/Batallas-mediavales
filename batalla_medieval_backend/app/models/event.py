@@ -4,6 +4,7 @@ from typing import Dict, Any
 from sqlalchemy import JSON, Column, DateTime, Integer, String
 
 from ..database import Base
+from ..utils import get_utc_now
 
 
 class WorldEvent(Base):
@@ -13,7 +14,7 @@ class WorldEvent(Base):
     world_id = Column(Integer, nullable=False, index=True, default=1)
     name = Column(String, nullable=False)
     description = Column(String, nullable=False)
-    start_time = Column(DateTime, default=datetime.utcnow, nullable=False)
+    start_time = Column(DateTime, default=get_utc_now, nullable=False)
     end_time = Column(DateTime, nullable=False)
     modifiers = Column(
         JSON,

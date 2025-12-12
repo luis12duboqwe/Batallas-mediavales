@@ -1,23 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { formatDate, formatNumber } from '../utils/format';
+import { TROOP_TYPES } from '../utils/gameMath';
 
-const ReportCard = ({ report }) => (
-  <div className="card p-5 flex flex-col gap-3 relative overflow-hidden">
-    <div className="absolute inset-0 bg-gradient-to-r from-gray-800/40 via-gray-900/0 to-gray-800/40 pointer-events-none" />
-    <div className="flex items-center justify-between relative z-10">
-      <div className="flex items-center gap-3">
-        <span className="h-10 w-10 rounded-full bg-gray-800/80 border border-yellow-800/40 flex items-center justify-center text-lg">📜</span>
-        <div>
-          <h3 className="text-lg">{report.title}</h3>
-          <p className="text-xs text-gray-400">{formatDate(report.createdAt)}</p>
-        </div>
-      </div>
-      <span className="badge">Resumen</span>
-    </div>
-    <div
-      className="prose prose-invert max-w-none relative z-10 md:columns-2 gap-6 report-body"
-      dangerouslySetInnerHTML={{ __html: report.body }}
-    />
 const ArrowIcon = () => (
   <svg viewBox="0 0 24 24" className="h-5 w-5 text-amber-300" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M5 12h14m0 0-4-4m4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
@@ -45,6 +29,30 @@ const SpyIcon = () => (
         strokeLinejoin="round"
       />
       <circle cx="12" cy="12" r="2.75" />
+    </svg>
+  </span>
+);
+
+const TradeIcon = () => (
+  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-green-500/15 ring-1 ring-green-400/50">
+    <svg viewBox="0 0 24 24" className="h-6 w-6 text-green-200" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  </span>
+);
+
+const ReturnIcon = () => (
+  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-500/15 ring-1 ring-blue-400/50">
+    <svg viewBox="0 0 24 24" className="h-6 w-6 text-blue-200" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  </span>
+);
+
+const ReinforceIcon = () => (
+  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-purple-500/15 ring-1 ring-purple-400/50">
+    <svg viewBox="0 0 24 24" className="h-6 w-6 text-purple-200" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   </span>
 );
@@ -95,351 +103,322 @@ const CrackedWallIcon = () => (
   </svg>
 );
 
-const parseNumber = (value) => {
-  const parsed = Number(String(value).replace(/[^0-9.-]/g, ''));
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const parseTroopList = (ul) => {
-  const troops = {};
-  if (!ul) return troops;
-  ul.querySelectorAll('li').forEach((li) => {
-    const [unit, amountRaw] = li.textContent.split(':');
-    if (!amountRaw) return;
-    const amount = parseNumber(amountRaw);
-    troops[unit.trim()] = amount;
-  });
-  return troops;
-};
-
-const parseBattleContent = (content) => {
-  if (typeof window === 'undefined') return {};
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(content || '', 'text/html');
-  const paragraphs = Array.from(doc.querySelectorAll('p'));
-
-  const getCityFromLabel = (label) => {
-    const line = paragraphs.find((p) => p.textContent.toLowerCase().includes(label));
-    if (!line) return '';
-    const [, value = ''] = line.textContent.split(':');
-    return value.split('(')[0].trim();
-  };
-
-  const uls = Array.from(doc.querySelectorAll('ul'));
-  const survivorsAtt = parseTroopList(uls[0]);
-  const survivorsDef = parseTroopList(uls[1]);
-  const lossesAtt = parseTroopList(uls[2]);
-  const lossesDef = parseTroopList(uls[3]);
-
-  const lootLine = paragraphs.find((p) => p.textContent.toLowerCase().includes('madera'));
-  const loot = lootLine
-    ? {
-        wood: parseNumber(/Madera:\s*([0-9]+)/i.exec(lootLine.textContent)?.[1]),
-        clay: parseNumber(/Barro:\s*([0-9]+)/i.exec(lootLine.textContent)?.[1]),
-        iron: parseNumber(/Hierro:\s*([0-9]+)/i.exec(lootLine.textContent)?.[1]),
-      }
-    : null;
-
-  const wallParagraph = paragraphs.find((p) => p.textContent.includes('Muralla dañada'));
-  const wallDamage = wallParagraph
-    ? (() => {
-        const match = /Muralla dañada: Nivel\s*([0-9]+)\s*→\s*Nivel\s*([0-9]+)/.exec(wallParagraph.textContent);
-        if (!match) return null;
-        return { from: parseNumber(match[1]), to: parseNumber(match[2]) };
-      })()
-    : null;
-
-  const moraleLine = paragraphs.find((p) => p.textContent.toLowerCase().includes('moral aplicada'));
-  const morale = moraleLine ? parseFloat(/Moral aplicada:\s*([0-9.]+)/i.exec(moraleLine.textContent)?.[1]) : null;
-  const luck = moraleLine ? parseFloat(/Suerte:\s*([0-9.]+)/i.exec(moraleLine.textContent)?.[1]) : null;
-
-  const powerLine = paragraphs.find((p) => p.textContent.toLowerCase().includes('ataque efectivo'));
-  const attackPower = powerLine ? parseFloat(/Ataque efectivo:\s*([0-9.]+)/i.exec(powerLine.textContent)?.[1]) : null;
-  const defensePower = powerLine ? parseFloat(/Defensa efectiva:\s*([0-9.]+)/i.exec(powerLine.textContent)?.[1]) : null;
-
-  return {
-    attacker: getCityFromLabel('atacante'),
-    defender: getCityFromLabel('defensor'),
-    survivors: { attacker: survivorsAtt, defender: survivorsDef },
-    losses: { attacker: lossesAtt, defender: lossesDef },
-    loot,
-    wallDamage,
-    morale,
-    luck,
-    attackPower,
-    defensePower,
-  };
-};
-
-const parseSpyContent = (content) => {
-  if (typeof window === 'undefined') return {};
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(content || '', 'text/html');
-  const paragraphs = Array.from(doc.querySelectorAll('p'));
-
-  const textFromLabel = (label) => {
-    const line = paragraphs.find((p) => p.textContent.toLowerCase().includes(label));
-    if (!line) return '';
-    const [, value = ''] = line.textContent.split(':');
-    return value.trim();
-  };
-
-  const success = textFromLabel('resultado').toLowerCase().includes('éxito');
-
-  const resources = {};
-  const troops = {};
-  const buildings = {};
-
-  const listByHeading = (heading) => {
-    const h3s = Array.from(doc.querySelectorAll('h3'));
-    const target = h3s.find((h) => h.textContent.toLowerCase().includes(heading));
-    if (!target) return null;
-    const list = target.nextElementSibling?.tagName === 'UL' ? target.nextElementSibling : null;
-    return list;
-  };
-
-  const resourceList = listByHeading('recursos');
-  resourceList?.querySelectorAll('li').forEach((li) => {
-    const [name, amountRaw] = li.textContent.split(':');
-    resources[name?.toLowerCase()] = parseNumber(amountRaw);
-  });
-
-  const troopList = listByHeading('tropas');
-  troopList?.querySelectorAll('li').forEach((li) => {
-    const [unit, amountRaw] = li.textContent.split(':');
-    troops[unit?.trim()] = parseNumber(amountRaw);
-  });
-
-  const buildingList = listByHeading('edificios');
-  buildingList?.querySelectorAll('li').forEach((li) => {
-    const [name, levelRaw] = li.textContent.split(':');
-    buildings[name?.trim()] = parseNumber(levelRaw);
-  });
-
-  return {
-    attacker: textFromLabel('atacante'),
-    defender: textFromLabel('defensor'),
-    success,
-    resources,
-    troops,
-    buildings,
-    spies: textFromLabel('espías atacantes'),
-  };
-};
-
-const TroopTable = ({ title, survivors = {}, losses = {} }) => {
-  const units = Array.from(new Set([...Object.keys(survivors), ...Object.keys(losses)]));
-
-  return (
-    <div className="flex-1 rounded-xl border border-amber-400/20 bg-amber-900/20 px-4 py-3 shadow-inner shadow-black/30">
-      <div className="flex items-center justify-between pb-2">
-        <p className="text-sm uppercase tracking-wide text-amber-200/90">{title}</p>
-        <span className="text-xs text-amber-100/70">Enviado / Perdido / Vivo</span>
-      </div>
-      <div className="space-y-2">
-        {units.length === 0 && <p className="text-sm text-amber-100/60">Sin tropas</p>}
-        {units.map((unit) => {
-          const survived = survivors[unit] ?? 0;
-          const lost = losses[unit] ?? 0;
-          const sent = survived + lost;
-          return (
-            <div key={unit} className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
-              <div className="flex items-center gap-2 text-amber-50">
-                <span className="text-xs font-semibold uppercase tracking-wide text-amber-200/90">{unit}</span>
-              </div>
-              <div className="flex items-center gap-3 text-sm font-medium text-amber-100">
-                <span className="min-w-[72px] text-right text-amber-50/90">{formatNumber(sent)}</span>
-                <span className="min-w-[72px] text-right text-rose-200/90">{formatNumber(lost)}</span>
-                <span className="min-w-[72px] text-right text-emerald-200/90">{formatNumber(survived)}</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
-const ResourcePill = ({ type, amount }) => (
-  <div className="flex flex-1 items-center gap-2 rounded-lg border border-amber-400/30 bg-black/25 px-3 py-2 text-amber-50 shadow-inner shadow-black/20">
-    <ResourceIcon type={type} />
-    <span className="text-sm capitalize text-amber-100/90">{type}</span>
-    <span className="ml-auto text-base font-semibold text-amber-50">{formatNumber(amount || 0)}</span>
-  </div>
-);
-
-const SectionTitle = ({ children }) => (
-  <h4 className="text-sm uppercase tracking-[0.2em] text-amber-200/80">{children}</h4>
-);
-
 const ReportCard = ({ report }) => {
-  const parsed = useMemo(() => {
-    if (report.report_type === 'battle') {
-      return parseBattleContent(report.content);
+  const [expanded, setExpanded] = useState(false);
+
+  const parsedContent = useMemo(() => {
+    try {
+      return JSON.parse(report.content);
+    } catch (e) {
+      return null; // Legacy HTML content
     }
-    if (report.report_type === 'spy') {
-      return parseSpyContent(report.content);
-    }
-    return {};
-  }, [report]);
+  }, [report.content]);
 
   const isBattle = report.report_type === 'battle';
-  const headerIcon = isBattle ? <BattleIcon /> : <SpyIcon />;
+  const isSpy = report.report_type === 'spy';
+
+  if (!parsedContent) {
+    // Legacy HTML rendering
+    return (
+      <div className="card bg-black/40 border border-amber-900/30 p-4">
+        <div className="flex justify-between items-center mb-2">
+          <h3 className="font-bold text-amber-100">Reporte #{report.id}</h3>
+          <span className="text-xs text-gray-400">{formatDate(report.created_at)}</span>
+        </div>
+        <div 
+          className="prose prose-invert prose-sm max-w-none"
+          dangerouslySetInnerHTML={{ __html: report.content }} 
+        />
+      </div>
+    );
+  }
+
+  // New JSON rendering
+  const { 
+    attacker, defender, loot, wall_damage, loyalty_change, conquest, moral, luck, success, 
+    resources, troops, buildings,
+    sender, receiver, from // New fields
+  } = parsedContent;
+
+  const isTrade = report.report_type === 'trade';
+  const isReturn = report.report_type === 'return';
+  const isReinforce = report.report_type === 'reinforce';
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-amber-400/30 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.08),_rgba(109,72,27,0.08))] shadow-2xl shadow-amber-900/30">
-      <div className="flex flex-col gap-3 border-b border-amber-400/20 bg-amber-900/30 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
-          {headerIcon}
-          <div>
-            <div className="flex flex-wrap items-center gap-2 text-amber-50">
-              <span className="rounded-full bg-black/30 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-amber-200">
-                {isBattle ? 'Batalla' : 'Espionaje'}
-              </span>
-              <div className="flex items-center gap-2 text-base font-semibold">
-                <span className="text-amber-50/90">{parsed.attacker || 'Ciudad atacante'}</span>
-                <ArrowIcon />
-                <span className="text-amber-50">{parsed.defender || 'Ciudad objetivo'}</span>
-              </div>
-            </div>
-            <p className="text-sm text-amber-100/70">{formatDate(report.created_at || report.createdAt)}</p>
+    <div className={`card bg-black/40 border border-amber-900/30 overflow-hidden transition-all duration-300 ${expanded ? 'ring-1 ring-amber-500/50' : ''}`}>
+      {/* Header Summary */}
+      <div 
+        className="p-4 cursor-pointer hover:bg-white/5 flex items-center gap-4"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {isBattle && <BattleIcon />}
+        {isSpy && <SpyIcon />}
+        {isTrade && <TradeIcon />}
+        {isReturn && <ReturnIcon />}
+        {isReinforce && <ReinforceIcon />}
+        
+        <div className="flex-1">
+          <div className="flex justify-between items-center">
+            <h3 className="font-bold text-amber-100 text-lg">
+              {isBattle && `Batalla en ${defender.name}`}
+              {isSpy && `Espionaje en ${defender.name}`}
+              {isTrade && `Comercio`}
+              {isReturn && `Tropas regresaron`}
+              {isReinforce && `Refuerzos`}
+            </h3>
+            <span className="text-xs text-gray-400">{formatDate(report.created_at)}</span>
+          </div>
+          
+          <div className="flex items-center gap-2 text-sm mt-1">
+            {isBattle && (
+              <>
+                <span className="text-red-400 font-semibold">{attacker.name}</span>
+                <span className="text-gray-500">vs</span>
+                <span className="text-blue-400 font-semibold">{defender.name}</span>
+              </>
+            )}
+            {isSpy && (
+              <>
+                <span className="text-red-400 font-semibold">{attacker.name}</span>
+                <span className="text-gray-500">vs</span>
+                <span className="text-blue-400 font-semibold">{defender.name}</span>
+              </>
+            )}
+            {isTrade && (
+              <>
+                <span className="text-green-400 font-semibold">{sender?.name}</span>
+                <span className="text-gray-500">→</span>
+                <span className="text-green-400 font-semibold">{receiver?.name}</span>
+              </>
+            )}
+            {isReturn && (
+              <>
+                <span className="text-gray-400">Desde:</span>
+                <span className="text-blue-400 font-semibold">{from?.name}</span>
+              </>
+            )}
+            {isReinforce && (
+              <>
+                <span className="text-purple-400 font-semibold">{sender?.name}</span>
+                <span className="text-gray-500">→</span>
+                <span className="text-purple-400 font-semibold">{receiver?.name}</span>
+              </>
+            )}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 text-xs">
-          {isBattle && parsed.morale !== null && !Number.isNaN(parsed.morale) && (
-            <span className="rounded-full bg-amber-500/15 px-3 py-1 font-semibold text-amber-100">
-              Moral {parsed.morale}
-            </span>
-          )}
-          {isBattle && parsed.luck !== null && !Number.isNaN(parsed.luck) && (
-            <span className="rounded-full bg-sky-500/15 px-3 py-1 font-semibold text-sky-100">
-              Suerte {parsed.luck}
-            </span>
-          )}
-          {isBattle && parsed.attackPower !== null && (
-            <span className="rounded-full bg-emerald-500/15 px-3 py-1 font-semibold text-emerald-100">
-              Ataque {parsed.attackPower}
-            </span>
-          )}
-          {isBattle && parsed.defensePower !== null && (
-            <span className="rounded-full bg-indigo-500/15 px-3 py-1 font-semibold text-indigo-100">
-              Defensa {parsed.defensePower}
-            </span>
-          )}
-          {!isBattle && (
-            <span
-              className={`rounded-full px-3 py-1 font-semibold ${
-                parsed.success ? 'bg-emerald-500/15 text-emerald-100' : 'bg-rose-500/15 text-rose-100'
-              }`}
-            >
-              {parsed.success ? 'Misión exitosa' : 'Misión fallida'}
-            </span>
-          )}
+
+        <div className={`transform transition-transform ${expanded ? 'rotate-180' : ''}`}>
+          <svg viewBox="0 0 24 24" className="h-6 w-6 text-gray-500" fill="none" stroke="currentColor">
+            <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+          </svg>
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 p-5">
-        {isBattle ? (
-          <div className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2">
-              <TroopTable title="Atacante" survivors={parsed.survivors?.attacker} losses={parsed.losses?.attacker} />
-              <TroopTable title="Defensor" survivors={parsed.survivors?.defender} losses={parsed.losses?.defender} />
+      {/* Expanded Details */}
+      {expanded && (
+        <div className="p-4 border-t border-gray-800 bg-black/20 space-y-6">
+          
+          {/* Trade Details */}
+          {isTrade && resources && (
+            <div className="bg-green-900/10 border border-green-900/30 rounded p-3">
+              <h4 className="font-bold text-green-400 mb-2">Recursos Transferidos</h4>
+              <div className="flex gap-6 text-sm">
+                <div className="flex items-center gap-2"><ResourceIcon type="wood" /> {formatNumber(resources.wood)}</div>
+                <div className="flex items-center gap-2"><ResourceIcon type="clay" /> {formatNumber(resources.clay)}</div>
+                <div className="flex items-center gap-2"><ResourceIcon type="iron" /> {formatNumber(resources.iron)}</div>
+              </div>
             </div>
+          )}
 
-            {parsed.loot && (
-              <div className="rounded-2xl border border-amber-400/25 bg-amber-900/20 p-4 shadow-inner shadow-black/30">
-                <div className="mb-3 flex items-center gap-2">
-                  <SectionTitle>Botín obtenido</SectionTitle>
-                  <span className="text-xs text-amber-100/70">Recursos saqueados durante la batalla</span>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <ResourcePill type="wood" amount={parsed.loot.wood} />
-                  <ResourcePill type="clay" amount={parsed.loot.clay} />
-                  <ResourcePill type="iron" amount={parsed.loot.iron} />
-                </div>
-              </div>
-            )}
-
-            {parsed.wallDamage && (
-              <div className="flex items-center gap-3 rounded-xl border border-amber-400/25 bg-black/30 px-4 py-3 text-amber-50 shadow-inner shadow-black/40">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/15 ring-1 ring-amber-400/40">
-                  <CrackedWallIcon />
-                </span>
-                <div>
-                  <p className="text-sm font-semibold">Muralla dañada</p>
-                  <p className="text-sm text-amber-100/80">
-                    Nivel {parsed.wallDamage.from} → Nivel {parsed.wallDamage.to}
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border border-sky-400/25 bg-sky-900/20 p-3 text-sky-50 shadow-inner shadow-black/30">
-                <SectionTitle>Detalles</SectionTitle>
-                <ul className="mt-2 space-y-1 text-sm text-sky-100/90">
-                  <li>
-                    <span className="text-sky-200">Atacante:</span> {parsed.attacker || '—'}
-                  </li>
-                  <li>
-                    <span className="text-sky-200">Defensor:</span> {parsed.defender || '—'}
-                  </li>
-                  <li>
-                    <span className="text-sky-200">Espías enviados:</span> {parsed.spies || '—'}
-                  </li>
-                </ul>
-              </div>
-
-              {(parsed.resources && Object.keys(parsed.resources).length > 0) || (
-                parsed.troops && Object.keys(parsed.troops).length > 0
-              ) ? (
-                <div className="rounded-xl border border-amber-400/25 bg-amber-900/20 p-3 text-amber-50 shadow-inner shadow-black/30">
-                  <SectionTitle>Descubrimientos</SectionTitle>
-                  <div className="mt-2 space-y-2 text-sm text-amber-100/90">
-                    {Object.keys(parsed.resources || {}).length > 0 && (
-                      <p>
-                        <span className="text-amber-200">Recursos:</span>{' '}
-                        {Object.entries(parsed.resources)
-                          .map(([name, amount]) => `${name}: ${formatNumber(amount)}`)
-                          .join(' | ')}
-                      </p>
-                    )}
-                    {Object.keys(parsed.troops || {}).length > 0 && (
-                      <p>
-                        <span className="text-amber-200">Tropas:</span>{' '}
-                        {Object.entries(parsed.troops)
-                          .map(([name, qty]) => `${name}: ${formatNumber(qty)}`)
-                          .join(' | ')}
-                      </p>
-                    )}
-                    {Object.keys(parsed.buildings || {}).length > 0 && (
-                      <p>
-                        <span className="text-amber-200">Edificios:</span>{' '}
-                        {Object.entries(parsed.buildings)
-                          .map(([name, lvl]) => `${name}: Nivel ${formatNumber(lvl)}`)
-                          .join(' | ')}
-                      </p>
-                    )}
+          {/* Return Details */}
+          {isReturn && (
+            <div className="bg-blue-900/10 border border-blue-900/30 rounded p-3">
+              <h4 className="font-bold text-blue-400 mb-2">Tropas Retornadas</h4>
+              <div className="space-y-1 text-sm">
+                {troops && Object.entries(troops).map(([unit, count]) => (
+                  <div key={unit} className="flex justify-between">
+                    <span className="text-gray-300">{TROOP_TYPES[unit] || unit}</span>
+                    <span className="text-gray-200">{count}</span>
                   </div>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-amber-400/25 bg-black/20 p-3 text-sm text-amber-100/90 shadow-inner shadow-black/30">
-                  Sin información adicional recopilada.
+                ))}
+                {(!troops || Object.keys(troops).length === 0) && <p className="text-gray-500 italic">Sin tropas</p>}
+              </div>
+              {resources && Object.values(resources).some(v => v > 0) && (
+                <div className="mt-4 pt-2 border-t border-blue-900/30">
+                  <h5 className="font-bold text-blue-300 mb-2 text-xs uppercase">Recursos Traídos</h5>
+                  <div className="flex gap-4 text-sm">
+                    {resources.wood > 0 && <div className="flex items-center gap-1"><ResourceIcon type="wood" /> {formatNumber(resources.wood)}</div>}
+                    {resources.clay > 0 && <div className="flex items-center gap-1"><ResourceIcon type="clay" /> {formatNumber(resources.clay)}</div>}
+                    {resources.iron > 0 && <div className="flex items-center gap-1"><ResourceIcon type="iron" /> {formatNumber(resources.iron)}</div>}
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-        )}
+          )}
 
-        <div className="rounded-xl border border-amber-400/15 bg-black/25 p-3 text-xs text-amber-100/60">
-          <p>
-            Informe original:
-            <span className="ml-1 text-amber-50" dangerouslySetInnerHTML={{ __html: report.content || report.body }} />
-          </p>
+          {/* Reinforce Details */}
+          {isReinforce && troops && (
+            <div className="bg-purple-900/10 border border-purple-900/30 rounded p-3">
+              <h4 className="font-bold text-purple-400 mb-2">Tropas de Refuerzo</h4>
+              <div className="space-y-1 text-sm">
+                {Object.entries(troops).map(([unit, count]) => (
+                  <div key={unit} className="flex justify-between">
+                    <span className="text-gray-300">{TROOP_TYPES[unit] || unit}</span>
+                    <span className="text-gray-200">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Battle Details */}
+          {isBattle && (
+            <>
+              {/* Troops Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Attacker */}
+                <div className="bg-red-900/10 border border-red-900/30 rounded p-3">
+                  <h4 className="font-bold text-red-400 mb-2 border-b border-red-900/30 pb-1">Atacante</h4>
+                  <div className="space-y-1 text-sm">
+                    {Object.entries(attacker.initial).map(([unit, count]) => {
+                      const loss = attacker.losses[unit] || 0;
+                      if (count === 0) return null;
+                      return (
+                        <div key={unit} className="flex justify-between">
+                          <span className="text-gray-300">{TROOP_TYPES[unit] || unit}</span>
+                          <span className="text-gray-400">
+                            {count} <span className="text-red-500">(-{loss})</span>
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {Object.keys(attacker.initial).length === 0 && <p className="text-gray-500 italic">Sin tropas</p>}
+                  </div>
+                </div>
+
+                {/* Defender */}
+                <div className="bg-blue-900/10 border border-blue-900/30 rounded p-3">
+                  <h4 className="font-bold text-blue-400 mb-2 border-b border-blue-900/30 pb-1">Defensor</h4>
+                  <div className="space-y-1 text-sm">
+                    {Object.entries(defender.initial).map(([unit, count]) => {
+                      const loss = defender.losses[unit] || 0;
+                      if (count === 0) return null;
+                      return (
+                        <div key={unit} className="flex justify-between">
+                          <span className="text-gray-300">{TROOP_TYPES[unit] || unit}</span>
+                          <span className="text-gray-400">
+                            {count} <span className="text-red-500">(-{loss})</span>
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {Object.keys(defender.initial).length === 0 && <p className="text-gray-500 italic">Sin tropas</p>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Loot & Outcome */}
+              <div className="bg-amber-900/10 border border-amber-900/30 rounded p-3">
+                <h4 className="font-bold text-amber-400 mb-2">Resultado</h4>
+                <div className="flex flex-wrap gap-4 text-sm">
+                  {loot && (
+                    <div className="flex gap-3 items-center bg-black/30 px-3 py-1 rounded">
+                      <span className="text-gray-400">Botín:</span>
+                      <div className="flex items-center gap-1"><ResourceIcon type="wood" /> {formatNumber(loot.wood)}</div>
+                      <div className="flex items-center gap-1"><ResourceIcon type="clay" /> {formatNumber(loot.clay)}</div>
+                      <div className="flex items-center gap-1"><ResourceIcon type="iron" /> {formatNumber(loot.iron)}</div>
+                    </div>
+                  )}
+                  
+                  {wall_damage && (
+                    <div className="flex items-center gap-2 text-amber-200">
+                      <CrackedWallIcon />
+                      <span>Muralla: {wall_damage[0]} → {wall_damage[1]}</span>
+                    </div>
+                  )}
+
+                  {loyalty_change > 0 && (
+                    <div className="text-red-400 font-bold">
+                      Lealtad reducida en {loyalty_change}
+                    </div>
+                  )}
+
+                  {conquest && (
+                    <div className="w-full text-center py-2 bg-amber-500/20 text-amber-200 font-bold rounded border border-amber-500/50 animate-pulse">
+                      ¡CIUDAD CONQUISTADA!
+                    </div>
+                  )}
+                </div>
+                
+                <div className="mt-3 pt-2 border-t border-gray-800 flex gap-4 text-xs text-gray-500">
+                  <span>Moral: {(moral * 100).toFixed(0)}%</span>
+                  <span>Suerte: {(luck * 100).toFixed(1)}%</span>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Spy Details */}
+          {isSpy && (
+            <div className="space-y-4">
+              <div className={`p-3 rounded border ${success ? 'bg-green-900/10 border-green-900/30' : 'bg-red-900/10 border-red-900/30'}`}>
+                <h4 className={`font-bold ${success ? 'text-green-400' : 'text-red-400'} mb-2`}>
+                  {success ? '¡Espionaje Exitoso!' : 'Misión Fallida'}
+                </h4>
+                <div className="flex justify-between text-sm text-gray-300">
+                  <span>Espías enviados: {attacker.spies}</span>
+                  <span>Espías defensores: {defender.spies}</span>
+                </div>
+              </div>
+
+              {success && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {resources && (
+                    <div className="bg-black/20 p-3 rounded border border-gray-800">
+                      <h5 className="font-bold text-amber-200 mb-2 text-sm">Recursos</h5>
+                      <div className="space-y-1 text-sm">
+                        <div className="flex justify-between"><span>Madera</span><span>{formatNumber(resources.wood)}</span></div>
+                        <div className="flex justify-between"><span>Barro</span><span>{formatNumber(resources.clay)}</span></div>
+                        <div className="flex justify-between"><span>Hierro</span><span>{formatNumber(resources.iron)}</span></div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {troops && (
+                    <div className="bg-black/20 p-3 rounded border border-gray-800">
+                      <h5 className="font-bold text-amber-200 mb-2 text-sm">Tropas</h5>
+                      <div className="space-y-1 text-sm">
+                        {Object.entries(troops).map(([unit, count]) => (
+                          <div key={unit} className="flex justify-between">
+                            <span className="text-gray-400">{TROOP_TYPES[unit] || unit}</span>
+                            <span className="text-gray-200">{count}</span>
+                          </div>
+                        ))}
+                        {Object.keys(troops).length === 0 && <span className="text-gray-500 italic">Sin tropas</span>}
+                      </div>
+                    </div>
+                  )}
+
+                  {buildings && (
+                    <div className="bg-black/20 p-3 rounded border border-gray-800">
+                      <h5 className="font-bold text-amber-200 mb-2 text-sm">Edificios</h5>
+                      <div className="space-y-1 text-sm">
+                        {Object.entries(buildings).map(([name, level]) => (
+                          <div key={name} className="flex justify-between">
+                            <span className="text-gray-400">{name}</span>
+                            <span className="text-amber-500">Nivel {level}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
-      </div>
+      )}
     </div>
   );
 };

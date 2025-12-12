@@ -4,6 +4,7 @@ from enum import Enum
 from sqlalchemy import Column, DateTime, Enum as SAEnum, Integer, String, Text
 
 from ..database import Base
+from ..utils import get_utc_now
 
 
 class WikiCategory(str, Enum):
@@ -23,5 +24,5 @@ class WikiArticle(Base):
     title = Column(String, nullable=False, unique=True)
     category = Column(SAEnum(WikiCategory), nullable=False, index=True)
     content_markdown = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=get_utc_now, nullable=False)
+    updated_at = Column(DateTime, default=get_utc_now, onupdate=get_utc_now, nullable=False)

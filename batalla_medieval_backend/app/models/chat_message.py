@@ -4,6 +4,7 @@ from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from ..database import Base
+from ..utils import get_utc_now
 
 
 class ChatMessage(Base):
@@ -16,7 +17,7 @@ class ChatMessage(Base):
     channel = Column(String, nullable=False)
     receiver_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     content = Column(Text, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=get_utc_now)
 
     user = relationship("User", foreign_keys=[user_id])
     receiver = relationship("User", foreign_keys=[receiver_id])

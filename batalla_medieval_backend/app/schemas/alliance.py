@@ -84,3 +84,11 @@ class AllianceChatMessageRead(BaseModel):
 
     class Config:
         orm_mode = True
+
+class AllianceMassMessage(BaseModel):
+    subject: str
+    content: str
+
+class AllianceMassMessage(BaseModel):
+    subject: str
+    content: str

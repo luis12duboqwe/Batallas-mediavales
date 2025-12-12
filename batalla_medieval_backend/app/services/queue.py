@@ -15,7 +15,7 @@ def process_all_queues(db: Session) -> dict:
 
     finished_buildings = building.process_building_queues(db)
     finished_troops = troops.process_troop_queues(db)
-    finished_movements = movement.process_movements(db)
+    finished_movements = movement.resolve_due_movements(db)
 
     for finished in finished_buildings:
         city = (
@@ -67,29 +67,32 @@ def process_all_queues(db: Session) -> dict:
     }
 
 
-def get_active_queues_for_user(db: Session, user: models.User) -> dict:
-    """Return all active queues owned by a user."""
+def get_active_queues_for_user(db: Session, user: models.User, world_id: int | None = None) -> dict:
+    """Return all active queues owned by a user, optionally scoped to a world."""
 
-    building_queues = (
+    building_query = (
         db.query(models.BuildingQueue)
         .join(models.City, models.BuildingQueue.city_id == models.City.id)
         .filter(models.City.owner_id == user.id)
-        .all()
     )
-    troop_queues = (
+    troop_query = (
         db.query(models.TroopQueue)
         .join(models.City, models.TroopQueue.city_id == models.City.id)
         .filter(models.City.owner_id == user.id)
-        .all()
     )
-    movements = (
+    movement_query = (
         db.query(models.Movement)
         .join(models.City, models.Movement.origin_city_id == models.City.id)
         .filter(models.City.owner_id == user.id, models.Movement.status == "ongoing")
-        .all()
     )
+
+    if world_id is not None:
+        building_query = building_query.filter(models.City.world_id == world_id)
+        troop_query = troop_query.filter(models.City.world_id == world_id)
+        movement_query = movement_query.filter(models.City.world_id == world_id)
+
     return {
-        "building_queues": building_queues,
-        "troop_queues": troop_queues,
-        "movements": movements,
+        "building_queues": building_query.all(),
+        "troop_queues": troop_query.all(),
+        "movements": movement_query.all(),
     }

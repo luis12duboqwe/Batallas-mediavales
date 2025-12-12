@@ -6,7 +6,7 @@ from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services import quest as quest_service
 
-router = APIRouter(prefix="/quest", tags=["quest"])
+router = APIRouter(tags=["quest"])
 
 
 @router.get("/list", response_model=schemas.QuestListResponse)

@@ -1,5 +1,6 @@
 """Building endpoints for handling upgrades."""
 
+from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, selectinload
 
@@ -9,7 +10,31 @@ from ..routers.auth import get_current_user
 from ..routers.responses import error_response
 from ..services import building, production, queue as queue_service
 
-router = APIRouter(prefix="/building", tags=["buildings"])
+router = APIRouter(tags=["buildings"])
+
+
+@router.get("/available", response_model=List[schemas.BuildingAvailability])
+def get_available_buildings(
+    city_id: int,
+    world_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Get all available buildings and their status for a city."""
+    city = (
+        db.query(models.City)
+        .options(selectinload(models.City.buildings))
+        .filter(
+            models.City.id == city_id,
+            models.City.owner_id == current_user.id,
+            models.City.world_id == world_id,
+        )
+        .first()
+    )
+    if not city:
+        raise error_response(404, "city_not_found", "City not found", {"city_id": city_id})
+        
+    return building.get_available_buildings(db, city)
 
 
 @router.post("/upgrade", response_model=schemas.BuildingQueueRead)
@@ -40,3 +65,16 @@ def upgrade_building(
     except ValueError as exc:
         raise error_response(400, "upgrade_failed", str(exc)) from exc
     return building_queue
+
+
+@router.delete("/queue/{queue_id}", status_code=204)
+def cancel_queue(
+    queue_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Cancel a building upgrade queue."""
+    success = building.cancel_building_queue(db, queue_id, current_user.id)
+    if not success:
+        raise error_response(404, "queue_not_found", "Queue entry not found or not owned by user")
+    return None

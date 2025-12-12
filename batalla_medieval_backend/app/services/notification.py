@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from typing import Iterable
+import asyncio
+import logging
 
 from sqlalchemy.orm import Session
+from asgiref.sync import async_to_sync
 
 from .. import models
-from . import emailer
+from . import emailer, socket_manager
+
+logger = logging.getLogger(__name__)
 
 EMAIL_NOTIFICATION_TYPES = {"attack_incoming", "building_complete", "event_started"}
 
@@ -28,6 +33,30 @@ def create_notification(
     db.add(notification)
     db.commit()
     db.refresh(notification)
+
+    # Send WebSocket notification
+    try:
+        payload = {
+            "id": notification.id,
+            "title": notification.title,
+            "body": notification.body,
+            "type": notification.type,
+            "created_at": notification.created_at.isoformat(),
+            "read": notification.read
+        }
+        
+        # Check if there is a running event loop
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(socket_manager.notify_user(user.id, "notification", payload))
+        except RuntimeError:
+            # No running loop (e.g. sync thread), use async_to_sync or run_until_complete
+            # However, async_to_sync requires the loop to be running in main thread usually?
+            # Or it creates a new loop.
+            # A simpler way for fire-and-forget in sync context:
+            asyncio.run(socket_manager.notify_user(user.id, "notification", payload))
+    except Exception as e:
+        logger.error(f"Failed to send websocket notification: {e}")
 
     if allow_email and user.email_notifications and notification_type in EMAIL_NOTIFICATION_TYPES:
         emailer.send_email(user.email, title, body)

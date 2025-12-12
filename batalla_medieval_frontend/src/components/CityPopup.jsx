@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import axiosClient from '../api/axiosClient';
+import { useCityStore } from '../store/cityStore';
+import { troopList, TROOP_TYPES } from '../utils/gameMath';
 
 const relationText = {
   own: 'Tus dominios',
@@ -12,7 +14,10 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [city, setCity] = useState(null);
   const [actionState, setActionState] = useState({ status: 'idle', message: '' });
+  const [showTroopSelector, setShowTroopSelector] = useState(false);
+  const [selectedTroops, setSelectedTroops] = useState({});
   const popupRef = useRef(null);
+  const { currentCity } = useCityStore();
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -27,6 +32,8 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
   useEffect(() => {
     if (!cityId) return;
     setLoading(true);
+    setSelectedTroops({});
+    setShowTroopSelector(false);
     axiosClient
       .get(`/city/${cityId}`)
       .then((response) => {
@@ -38,101 +45,124 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
       .finally(() => setLoading(false));
   }, [cityId]);
 
+  const handleTroopChange = (unit, value) => {
+    setSelectedTroops(prev => ({
+      ...prev,
+      [unit]: parseInt(value) || 0
+    }));
+  };
+
   const sendAction = async (type) => {
-    if (!cityId) return;
+    if (!cityId || !currentCity) return;
+    
+    if (type === 'attack' && !showTroopSelector) {
+      setShowTroopSelector(true);
+      return;
+    }
+
     setActionState({ status: 'loading', message: '' });
     try {
-      await axiosClient.post('/movement/send', { city_id: cityId, type });
+      const payload = {
+        origin_city_id: currentCity.id,
+        target_city_id: cityId,
+        movement_type: type,
+        world_id: currentCity.world_id,
+        troops: type === 'attack' ? selectedTroops : {},
+        spy_count: type === 'spy' ? 1 : 0 // Default spy count for now
+      };
+      
+      await axiosClient.post('/movements/', payload);
       setActionState({ status: 'success', message: `Orden enviada: ${type}` });
+      setShowTroopSelector(false);
+      setSelectedTroops({});
     } catch (error) {
       setActionState({ status: 'error', message: error.response?.data?.detail || 'No se pudo enviar la orden' });
     }
   };
 
+  if (!cityId) return null;
+
   return (
-    <div className="absolute inset-0 flex items-start justify-center md:items-center z-40">
-      <div className="fixed inset-0 bg-black/50" />
-      <div
-        ref={popupRef}
-        className="relative w-full max-w-md bg-gradient-to-br from-emerald-950 via-slate-950 to-amber-950 border border-amber-900/70 rounded-2xl shadow-2xl p-6 m-4"
-      >
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-sm text-amber-200/80">Coordenadas ({coordinate?.x}, {coordinate?.y})</p>
-            <h2 className="text-3xl font-semibold text-amber-100">{city?.name || 'Ciudad desconocida'}</h2>
-            <p className="text-sm text-amber-100/80">
-              Propietario: <span className="text-amber-200 font-semibold">{city?.owner_name || '---'}</span>
-            </p>
-            <p className="text-xs text-amber-300/70">{relationText[city?.relation] || 'Sin relación'}</p>
-          </div>
-          <button
-            type="button"
-            aria-label="Cerrar"
-            className="text-amber-200/70 hover:text-amber-100"
-            onClick={onClose}
-          >
-            ✕
-          </button>
-        </div>
-
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div ref={popupRef} className="w-full max-w-md rounded-xl border border-amber-700/50 bg-gray-900 p-6 shadow-2xl">
         {loading ? (
-          <p className="text-amber-100/70 mt-4">Cargando información...</p>
-        ) : (
-          <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-amber-100/80">
-            <div className="rounded-lg border border-amber-900/60 bg-black/20 p-3">
-              <p className="text-xs uppercase tracking-wide text-amber-300/70">Habitantes</p>
-              <p className="text-lg font-semibold">{city?.population ?? 'N/D'}</p>
-            </div>
-            <div className="rounded-lg border border-amber-900/60 bg-black/20 p-3">
-              <p className="text-xs uppercase tracking-wide text-amber-300/70">Producción</p>
-              <p className="text-lg font-semibold">{city?.production ?? 'N/D'}</p>
-            </div>
-            <div className="rounded-lg border border-amber-900/60 bg-black/20 p-3 col-span-2">
-              <p className="text-xs uppercase tracking-wide text-amber-300/70">Defensas</p>
-              <p className="text-lg font-semibold">{city?.defense ?? 'N/D'}</p>
-            </div>
+          <div className="flex justify-center py-8">
+            <span className="loading loading-spinner text-amber-500"></span>
           </div>
-        )}
+        ) : city ? (
+          <div className="space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-amber-100">{city.name}</h2>
+                <p className="text-amber-200/60">
+                  Jugador: <span className="text-amber-100">{city.owner?.username || 'Bárbaro'}</span>
+                </p>
+                <p className="text-sm text-gray-400">Coordenadas: ({city.x}, {city.y})</p>
+              </div>
+              <button onClick={onClose} className="btn btn-ghost btn-sm text-gray-400 hover:text-white">✕</button>
+            </div>
 
-        <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <button
-            type="button"
-            onClick={() => sendAction('attack')}
-            className="btn-primary text-center bg-gradient-to-r from-red-600 to-amber-600 border-none shadow-[0_10px_25px_-12px_rgba(248,113,113,0.65)]"
-            disabled={actionState.status === 'loading'}
-          >
-            Atacar
-          </button>
-          <button
-            type="button"
-            onClick={() => sendAction('spy')}
-            className="btn-primary bg-gradient-to-r from-slate-800 to-emerald-800 text-amber-100 border-none"
-            disabled={actionState.status === 'loading'}
-          >
-            Espiar
-          </button>
-          <button
-            type="button"
-            onClick={() => sendAction('reinforce')}
-            className="btn-primary bg-gradient-to-r from-blue-700 to-emerald-700 text-amber-50 border-none"
-            disabled={actionState.status === 'loading'}
-          >
-            Reforzar
-          </button>
-        </div>
+            {showTroopSelector ? (
+              <div className="space-y-3 bg-gray-800/50 p-3 rounded">
+                <h3 className="text-sm font-bold text-amber-200">Seleccionar Tropas</h3>
+                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                  {troopList.map(unit => (
+                    <div key={unit} className="flex items-center gap-2">
+                      <label className="text-xs text-gray-300 w-20 truncate" title={TROOP_TYPES[unit]}>
+                        {TROOP_TYPES[unit]}
+                      </label>
+                      <input 
+                        type="number" 
+                        className="input input-xs w-16 bg-gray-900 border-gray-700"
+                        min="0"
+                        placeholder="0"
+                        onChange={(e) => handleTroopChange(unit, e.target.value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button 
+                    className="btn btn-sm btn-error flex-1"
+                    onClick={() => setShowTroopSelector(false)}
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    className="btn btn-sm btn-primary flex-1"
+                    onClick={() => sendAction('attack')}
+                  >
+                    Confirmar Ataque
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button 
+                  className="btn bg-red-900/40 hover:bg-red-800/60 text-red-100 border-red-800/50"
+                  onClick={() => sendAction('attack')}
+                >
+                  ⚔️ Atacar
+                </button>
+                <button 
+                  className="btn bg-blue-900/40 hover:bg-blue-800/60 text-blue-100 border-blue-800/50"
+                  onClick={() => sendAction('spy')}
+                >
+                  👁️ Espiar
+                </button>
+              </div>
+            )}
 
-        {actionState.message && (
-          <p
-            className={`mt-3 text-sm ${
-              actionState.status === 'success'
-                ? 'text-green-300'
-                : actionState.status === 'error'
-                  ? 'text-red-300'
-                  : 'text-amber-100/80'
-            }`}
-          >
-            {actionState.message}
-          </p>
+            {actionState.message && (
+              <div className={`alert ${actionState.status === 'error' ? 'alert-error' : 'alert-success'} py-2 text-sm`}>
+                {actionState.message}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-400">
+            No se pudo cargar la información de la ciudad.
+          </div>
         )}
       </div>
     </div>
@@ -140,3 +170,4 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
 };
 
 export default CityPopup;
+

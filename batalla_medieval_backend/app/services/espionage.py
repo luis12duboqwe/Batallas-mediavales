@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import random
+import json
 from datetime import datetime
 from typing import Dict, Tuple
 
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..utils import utc_now
 from . import notification as notification_service
 from . import anticheat
 from . import event as event_service
@@ -29,36 +31,27 @@ def build_report_content(
     buildings: Dict[str, int] | None = None,
 ) -> str:
     attacker_name = "Desconocido" if reported_as_unknown else attacker_city.name
-    html = ["<h2>Informe de Espionaje</h2>"]
-    html.append(f"<p><strong>Atacante:</strong> {attacker_name}</p>")
-    html.append(f"<p><strong>Defensor:</strong> {defender_city.name}</p>")
-    html.append(f"<p><strong>Resultado:</strong> {'Éxito' if success else 'Fallo'}</p>")
-    html.append(
-        f"<p><strong>Espías Atacantes:</strong> {attacker_spies} | "
-        f"<strong>Espías Defensores:</strong> {defender_spies}</p>"
-    )
-    if success:
-        if resources:
-            html.append("<h3>Recursos</h3><ul>")
-            for resource, amount in resources.items():
-                html.append(f"<li>{resource.title()}: {amount:.0f}</li>")
-            html.append("</ul>")
-        if troops:
-            html.append("<h3>Tropas</h3><ul>")
-            for troop, qty in troops.items():
-                html.append(f"<li>{troop}: {qty}</li>")
-            html.append("</ul>")
-        if buildings:
-            html.append("<h3>Edificios</h3><ul>")
-            for building, lvl in buildings.items():
-                html.append(f"<li>{building}: Nivel {lvl}</li>")
-            html.append("</ul>")
-    else:
-        html.append("<p>La misión ha fracasado y los espías han sido capturados.</p>")
-    return "\n".join(html)
+    
+    report_data = {
+        "type": "spy",
+        "attacker": {
+            "name": attacker_name,
+            "spies": attacker_spies
+        },
+        "defender": {
+            "name": defender_city.name,
+            "spies": defender_spies
+        },
+        "success": success,
+        "resources": resources,
+        "troops": troops,
+        "buildings": buildings
+    }
+    
+    return json.dumps(report_data)
 
 
-def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyReport, models.SpyReport]:
+def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyReport, models.SpyReport, int]:
     attacker_city = db.query(models.City).filter(models.City.id == movement.origin_city_id).first()
     defender_city = db.query(models.City).filter(models.City.id == movement.target_city_id).first()
     attacker_spies = movement.spy_count
@@ -74,6 +67,9 @@ def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyRepor
     success_chance *= modifiers.get("spy_modifier", 1.0)
     success_chance = min(1.0, success_chance)
     success = random.random() < success_chance
+    
+    surviving_spies = attacker_spies if success else 0
+    
     reported_as_unknown = False
     if not success and random.random() < 0.1:
         reported_as_unknown = True
@@ -96,9 +92,9 @@ def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyRepor
         defender_spies=defender_spies,
         resources=resources if success else None,
         troops=troops if success else None,
-        buildings=buildings if success and attacker_spies >= 5 else None,
+        buildings=buildings if success else None,
     )
-
+    
     defender_content = build_report_content(
         attacker_city=attacker_city,
         defender_city=defender_city,
@@ -106,64 +102,29 @@ def resolve_spy(db: Session, movement: models.Movement) -> Tuple[models.SpyRepor
         reported_as_unknown=reported_as_unknown,
         attacker_spies=attacker_spies,
         defender_spies=defender_spies,
-        resources=resources if success else None,
-        troops=troops if success else None,
-        buildings=buildings if success and attacker_spies >= 5 else None,
+        resources=None,
+        troops=None,
+        buildings=None,
     )
 
-    attacker_report = models.SpyReport(
+    attacker_report = models.Report(
         city_id=attacker_city.id,
-        attacker_city_id=attacker_city.id,
-        defender_city_id=defender_city.id,
-        success=success,
-        reported_as_unknown=False,
+        world_id=movement.world_id,
+        report_type="spy",
         content=attacker_content,
-        created_at=datetime.utcnow(),
-    )
-    defender_report = models.SpyReport(
-        city_id=defender_city.id,
-        attacker_city_id=None if reported_as_unknown else attacker_city.id,
-        defender_city_id=defender_city.id,
-        success=success,
-        reported_as_unknown=reported_as_unknown,
-        content=defender_content,
-        created_at=datetime.utcnow(),
+        attacker_city_id=attacker_city.id,
+        defender_city_id=defender_city.id
     )
     db.add(attacker_report)
+
+    defender_report = models.Report(
+        city_id=defender_city.id,
+        world_id=movement.world_id,
+        report_type="spy",
+        content=defender_content,
+        attacker_city_id=attacker_city.id,
+        defender_city_id=defender_city.id
+    )
     db.add(defender_report)
-    db.commit()
-    db.refresh(attacker_report)
-    db.refresh(defender_report)
-    if success:
-        from .achievement import update_achievement_progress
 
-        update_achievement_progress(
-            db,
-            attacker_city.owner_id,
-            "spy_success",
-            increment=1,
-        )
-
-    if attacker_city.owner:
-        notification_service.create_notification(
-            db,
-            attacker_city.owner,
-            title="Nuevo informe de espionaje",
-            body=(
-                f"Tu misión de espionaje sobre {defender_city.name} ha generado un informe."
-            ),
-            notification_type="report_ready",
-            allow_email=False,
-        )
-    if defender_city.owner:
-        notification_service.create_notification(
-            db,
-            defender_city.owner,
-            title="Has sido espiado",
-            body=(
-                f"Un informe de espionaje sobre {defender_city.name} está disponible."
-            ),
-            notification_type="report_ready",
-            allow_email=False,
-        )
-    return attacker_report, defender_report
+    return attacker_report, defender_report, surviving_spies

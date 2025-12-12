@@ -15,3 +15,13 @@ class BuildingRead(BuildingBase):
 
     class Config:
         orm_mode = True
+
+
+class BuildingAvailability(BaseModel):
+    name: str
+    level: int
+    cost: dict
+    requirements_met: bool
+    requirements: dict
+    build_time: int
+

@@ -4,6 +4,14 @@ from typing import Optional
 from pydantic import BaseModel
 
 
+class WorldWinner(BaseModel):
+    id: int
+    username: str
+
+    class Config:
+        orm_mode = True
+
+
 class WorldBase(BaseModel):
     name: str
     speed_modifier: float = 1.0
@@ -20,6 +28,10 @@ class WorldCreate(WorldBase):
 class WorldRead(WorldBase):
     id: int
     created_at: datetime
+    ended_at: Optional[datetime] = None
+    winner_id: Optional[int] = None
+    winner_alliance_id: Optional[int] = None
+    winner: Optional[WorldWinner] = None
 
     class Config:
         orm_mode = True
@@ -34,3 +46,7 @@ class PlayerWorldRead(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class WorldSelect(BaseModel):
+    world_id: int

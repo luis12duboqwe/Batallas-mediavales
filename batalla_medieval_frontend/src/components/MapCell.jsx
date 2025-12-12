@@ -7,10 +7,18 @@ const relationColors = {
   neutral: 'shadow-[0_0_10px_1px_rgba(120,113,108,0.35)]',
 };
 
+const tileStyles = {
+  water: 'from-blue-900/80 via-blue-800/80 to-blue-900/80',
+  mountain: 'from-gray-800/80 via-gray-700/80 to-gray-800/80',
+  forest: 'from-green-900/80 via-green-800/80 to-green-900/80',
+  grass: 'from-emerald-900/70 via-emerald-800/80 to-emerald-900/80',
+};
+
 const MapCell = memo(
-  ({ x, y, city, size, selected, onClick }) => {
+  ({ x, y, city, tileType, size, selected, onClick }) => {
     const relation = city?.relation || 'neutral';
     const glow = relationColors[relation] || relationColors.neutral;
+    const bgGradient = tileStyles[tileType] || tileStyles.grass;
 
     return (
       <div
@@ -34,7 +42,7 @@ const MapCell = memo(
         }}
       >
         <div
-          className={`w-full h-full rounded-lg border border-amber-900/70 bg-gradient-to-br from-emerald-900/70 via-emerald-800/80 to-emerald-900/80 relative overflow-hidden group-hover:border-amber-200/70 group-hover:shadow-[0_0_0_2px_rgba(251,191,36,0.35)] ${glow}`}
+          className={`w-full h-full rounded-lg border border-amber-900/70 bg-gradient-to-br ${bgGradient} relative overflow-hidden group-hover:border-amber-200/70 group-hover:shadow-[0_0_0_2px_rgba(251,191,36,0.35)] ${glow}`}
         >
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.05),transparent_60%)]" />
           <div className="absolute top-1 left-1 text-[10px] font-semibold text-amber-100/70 drop-shadow">

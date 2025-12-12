@@ -1,0 +1,43 @@
+{
+  "nav": {
+    "city": "Ciudad",
+    "buildings": "Edificios",
+    "troops": "Tropas",
+    "movements": "Movimientos",
+    "map": "Mapa",
+    "reports": "Reportes",
+    "quests": "Misiones",
+    "ranking": "Ranking",
+    "alliance": "Alianza",
+    "shop": "Tienda",
+    "wiki": "Ayuda",
+    "messages": "Mensajes",
+    "simulator": "Simulador",
+    "market": "Mercado",
+    "academy": "Academia",
+    "admin": "Admin",
+    "profile": "Perfil",
+    "logout": "Cerrar Sesión"
+  },
+  "common": {
+    "loading": "Cargando...",
+    "error": "Error",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "confirm": "Confirmar"
+  },
+  "dashboard": {
+    "welcome": "Bienvenido, {{name}}",
+    "resources": "Recursos",
+    "production": "Producción por hora"
+  },
+  "basic_infantry": "Lancero Común",
+  "heavy_infantry": "Soldado de Acero",
+  "archer": "Arquero Real",
+  "fast_cavalry": "Jinete Explorador",
+  "heavy_cavalry": "Caballero Imperial",
+  "spy": "Infiltrador",
+  "ram": "Quebramuros",
+  "catapult": "Tormenta de Piedra",
+  "noble": "Noble"
+}

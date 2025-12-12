@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from app import models
 from app.services import building
@@ -9,11 +9,11 @@ def test_building_upgrade_and_completion(db_session, city):
     db_session.commit()
 
     result = building.queue_upgrade(db_session, city, "town_hall")
-    assert isinstance(result, models.Building)
+    assert isinstance(result, models.BuildingQueue)
     queue = db_session.query(models.BuildingQueue).first()
     assert queue.target_level == 1
 
-    queue.finish_time = datetime.utcnow() - timedelta(seconds=1)
+    queue.finish_time = datetime.now(timezone.utc) - timedelta(seconds=1)
     db_session.commit()
     finished = building.process_building_queues(db_session)
     assert finished[0]["target_level"] == 1

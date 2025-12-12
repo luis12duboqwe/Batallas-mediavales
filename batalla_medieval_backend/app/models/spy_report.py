@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.orm import relationship
 
 from ..database import Base
+from ..utils import get_utc_now
 
 
 class SpyReport(Base):
@@ -16,7 +17,7 @@ class SpyReport(Base):
     success = Column(Boolean, default=False)
     reported_as_unknown = Column(Boolean, default=False)
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
     city = relationship("City", foreign_keys=[city_id])
     attacker_city = relationship("City", foreign_keys=[attacker_city_id])
