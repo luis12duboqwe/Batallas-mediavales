@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import io from 'socket.io-client';
-import useAuthStore from '../store/authStore';
+import { useUserStore } from '../store/userStore';
 
 const SocketContext = createContext();
 
@@ -8,7 +8,8 @@ export const useSocket = () => useContext(SocketContext);
 
 export const SocketProvider = ({ children }) => {
     const [socket, setSocket] = useState(null);
-    const { user, token } = useAuthStore();
+    const user = useUserStore((state) => state.user);
+    const token = useUserStore((state) => state.token);
 
     useEffect(() => {
         if (user && token) {
@@ -39,12 +40,14 @@ export const SocketProvider = ({ children }) => {
             setSocket(newSocket);
 
             return () => newSocket.close();
-        } else {
-            if (socket) {
-                socket.close();
-                setSocket(null);
-            }
         }
+
+        setSocket((currentSocket) => {
+            currentSocket?.close();
+            return null;
+        });
+
+        return undefined;
     }, [user, token]);
 
     return (

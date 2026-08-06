@@ -7,7 +7,6 @@ export const useUserStore = create((set, get) => ({
   cities: [],
   loading: false,
   error: null,
-  isAuthenticated: () => !!get().token,
   async login(credentials) {
     set({ loading: true, error: null });
     try {
