@@ -3,7 +3,7 @@
 | Campo | Valor |
 |---|---|
 | Estado | Activo |
-| Versión | 1.0 |
+| Versión | 2.0 |
 | Fecha de auditoría | 2026-08-06 |
 | Repositorio | `luis12duboqwe/Batallas-mediavales` |
 | Rama auditada | `main` |
@@ -14,7 +14,9 @@
 
 Este documento convierte el prototipo actual en un proyecto ejecutable por etapas. Es la fuente de verdad para decidir qué se construye, en qué orden, qué se pospone y qué evidencia se exige antes de considerar terminada una tarea o una versión.
 
-El objetivo no es conservar todas las funciones existentes a cualquier costo. El objetivo es entregar primero un ciclo jugable estable, seguro y comprobable; después se reincorporarán las funciones secundarias que superen sus controles de calidad.
+El objetivo no es conservar todas las funciones existentes a cualquier costo. El objetivo final es entregar **Batallas Medievales v1.0 como juego completo, público, operable y mantenible**. La alpha y la beta son hitos intermedios para validar el producto; no representan el cierre del proyecto.
+
+En este plan, “100 % terminado” significa cumplir todo el alcance aprobado para v1.0 y su puerta G10 con evidencia real. No significa que un juego vivo nunca pueda recibir nuevos mundos, balance, contenido o expansiones después del lanzamiento.
 
 ## 2. Dictamen de la auditoría inicial
 
@@ -67,7 +69,11 @@ Batallas Medievales será un juego persistente de estrategia para navegador dond
 9. Recibir informes, recuperarse y planificar el siguiente movimiento.
 10. Progresar en clasificación y alianza durante la vida del mundo.
 
-## 4. Alcance de la primera versión jugable
+### Resultado final esperado
+
+La versión v1.0 debe poder ser utilizada por jugadores reales sin intervención técnica cotidiana: registro, progreso, economía, combate, interacción social, contenido, administración, soporte, seguridad, recuperación ante fallos y despliegue deben funcionar de extremo a extremo. Toda función visible debe estar terminada; una función incompleta debe completarse o retirarse antes del lanzamiento.
+
+## 4. Alcance de la primera versión jugable — hito intermedio
 
 ### Incluido en el MVP
 
@@ -85,24 +91,52 @@ Batallas Medievales será un juego persistente de estrategia para navegador dond
 - Tutorial corto que complete el primer ciclo de progreso.
 - Despliegue de beta cerrada con copias de seguridad y monitoreo.
 
-### Fuera del MVP
+### Pospuesto hasta después del MVP
 
 El código existente puede conservarse, pero estas funciones permanecerán desactivadas hasta que el núcleo sea estable:
 
 - Héroes, inventario y aventuras.
-- Logros, tienda, temas y cosméticos.
-- Temporadas, eventos avanzados y reinicios automáticos.
+- Medallas de honor, tienda, temas y cosméticos.
+- Temporadas, eventos avanzados y ciclo automatizado de mundos.
 - Wiki editable, foro avanzado y API pública.
 - Premium, monetización y pagos.
 - Generación dinámica de iconos.
 - Expansión de idiomas más allá del español necesario para la beta.
 - Animaciones, música y efectos que afecten rendimiento o accesibilidad.
 
+Estas funciones están fuera del corte MVP, pero no se consideran automáticamente fuera de v1.0. Las fases G6–G10 determinan cuáles forman parte obligatoria del juego completo y cuáles se retiran de forma explícita.
+
+### Alcance obligatorio del juego completo v1.0
+
+- Todo el MVP estabilizado y validado con jugadores reales.
+- Economía canónica de madera, piedra, hierro y oro, con producción, almacenamiento, costes, comercio y mantenimiento de tropas consistentes.
+- Ciudades y campamentos, con expansión mediante los puntos generados por iglesia y catedral.
+- Catálogo completo y balanceado de edificios, investigaciones y unidades.
+- Combate instantáneo por rondas, sin terreno ni obstáculos, con resultados reproducibles desde una semilla auditable.
+- Espionaje completo con probabilidad y suerte controladas por el servidor.
+- Comercio disponible desde el inicio bajo límites antiabuso.
+- Bárbaros, oasis, héroe, inventario y aventuras como paquetes completos, balanceados e integrados; no se publicarán versiones parciales.
+- Alianzas, diplomacia, chat, mensajería, foro de alianza, informes, notificaciones y clasificaciones.
+- Tutorial como único sistema de misiones obligatorias y medallas de honor sin bonos de recursos o combate.
+- Ciclo de vida de mundos, eventos administrables y temporadas únicamente cuando no destruyan el progreso sin una regla anunciada.
+- Administración, moderación, soporte, auditoría y controles antiabuso.
+- Interfaz final adaptable, accesible y consistente, con arte, animación y sonido dentro del presupuesto de rendimiento.
+- Español completo; inglés completo si permanece seleccionable en producción.
+- Producción con monitoreo, alertas, copias de seguridad, restauración, seguridad, privacidad, términos y canal de soporte.
+
+### Fuera de v1.0 salvo decisión posterior del propietario
+
+- Conquista de ciudades de otros jugadores.
+- Venta de ventajas directas de combate, producción, velocidad o capacidad.
+- Aplicaciones móviles nativas; v1.0 será web adaptable e instalable cuando la plataforma lo permita.
+- API pública para terceros.
+- Niveles sin límite como requisito de contenido: la arquitectura aceptará crecimiento por fórmula, pero v1.0 tendrá un rango balanceado y probado.
+
 ## 5. Decisiones canónicas del juego
 
 | ID | Decisión |
 |---|---|
-| PD-001 | El MVP mantiene los tres recursos ya dominantes en el código: madera, barro e hierro. Agregar piedra u oro exige una decisión de producto y migración independiente. |
+| PD-001 | El MVP puede estabilizar temporalmente los tres recursos actuales, pero v1.0 usa cuatro recursos canónicos: madera, piedra, hierro y oro. La sustitución de barro y la incorporación de oro se ejecutan mediante migración versionada después de G5. |
 | PD-002 | El servidor calcula y valida recursos, costos, tiempo, combate, botín y recompensas. El frontend nunca es autoridad. |
 | PD-003 | Toda entidad y consulta jugable se filtra por `world_id`. Las acciones entre mundos son inválidas. |
 | PD-004 | Se permite atacar y saquear a otro jugador cuando no existe protección aplicable. |
@@ -112,6 +146,13 @@ El código existente puede conservarse, pero estas funciones permanecerán desac
 | PD-008 | La beta no vende ventajas de combate, producción, velocidad ni capacidad. |
 | PD-009 | Cada mundo tiene reglas y balance versionados; un cambio no altera silenciosamente mundos ya iniciados. |
 | PD-010 | Una operación económica o militar debe ser atómica, idempotente cuando corresponda y resistente a solicitudes simultáneas. |
+| PD-011 | El combate se resuelve de forma instantánea por rondas en el servidor; no usa terreno ni obstáculos tácticos. |
+| PD-012 | El espionaje puede revelar información completa según la relación entre espías y una suerte limitada, auditable y calculada en servidor. |
+| PD-013 | Las unidades tienen mantenimiento; no puede entrenarse o conservarse un ejército ignorando la capacidad económica definida para el mundo. |
+| PD-014 | El comercio está disponible desde el inicio y sus límites, transporte y protección antiabuso son reglas versionadas del mundo. |
+| PD-015 | Las misiones obligatorias pertenecen únicamente al tutorial. Las medallas de honor reconocen logros, pero no entregan bonos económicos o militares. |
+| PD-016 | La expansión territorial usa ciudades y campamentos; iglesia y catedral generan los puntos requeridos para la expansión según el balance del mundo. |
+| PD-017 | “Juego completo” significa una v1.0 que aprueba G10. Las ampliaciones posteriores se gestionan como operación viva y no impiden declarar terminado el alcance v1.0. |
 
 ## 6. Arquitectura objetivo
 
@@ -236,7 +277,7 @@ Objetivo: convertir el núcleo correcto en un juego entendible y sostenible.
 - Definir edificios, unidades, requisitos, tiempos, mantenimiento y capacidad.
 - Balancear progreso inicial, protección, botín y recuperación tras derrota.
 - Mejorar tutorial, ayudas contextuales e informes.
-- Incorporar misiones y logros solamente cuando usen eventos de dominio confiables.
+- Cerrar el tutorial como único sistema de misiones e incorporar medallas de honor sin ventajas cuando usen eventos de dominio confiables.
 - Probar accesibilidad, móvil, latencia lenta y traducciones visibles.
 
 **G4 — Candidato a beta**
@@ -265,18 +306,108 @@ Objetivo: publicar de forma controlada y recuperable.
 - Existe rollback probado para aplicación y base de datos.
 - El propietario del producto aprueba explícitamente la apertura de la beta.
 
-### Fase 6 — Expansión posterior al MVP
+### Fase 6 — Mecánicas completas de v1.0
 
-Reactivar por paquetes independientes, cada uno con sus propias pruebas y balance:
+Objetivo: convertir el núcleo probado en el conjunto final de reglas del juego, sin mantener dos economías o fórmulas incompatibles.
 
-1. Héroes, objetos y aventuras.
-2. Logros, misiones ampliadas y temporadas.
-3. Tienda de cosméticos y temas.
-4. Eventos mundiales y bárbaros avanzados.
-5. Foro, wiki y API pública.
-6. Idiomas adicionales, sonido y pulido visual.
+- Migrar la economía a madera, piedra, hierro y oro, con compatibilidad de datos y rollback ensayado.
+- Completar edificios, investigaciones, unidades, requisitos, costes, mantenimiento y capacidades.
+- Implementar ciudades, campamentos y expansión mediante iglesia y catedral.
+- Cerrar combate instantáneo por rondas, moral, suerte limitada, bajas, botín y recuperación.
+- Completar espionaje, refuerzos, transporte, comercio desde el inicio y protección de novatos.
+- Terminar bárbaros y oasis con comportamiento, recompensas y dificultad versionados.
+- Completar como paquete indivisible héroe, objetos y aventuras, incluyendo balance, persistencia, API, UI y pruebas E2E.
+- Eliminar código, rutas, pantallas y datos de prototipo que contradigan las reglas finales.
 
-## 8. Backlog inicial priorizado
+**G6 — Reglas finales cerradas**
+
+- El catálogo y todas las fórmulas provienen de una única versión de balance.
+- Una migración de staging conserva cuentas y progreso al adoptar los cuatro recursos.
+- Todos los movimientos, combates, expansiones y gastos tienen pruebas negativas, concurrentes y E2E.
+- No existe una pantalla visible que use una regla provisional o un servicio alternativo.
+- El propietario aprueba el documento de diseño y el catálogo de contenido de v1.0.
+
+### Fase 7 — Mundo, contenido y comunidad completos
+
+Objetivo: cerrar todos los sistemas que dan vida y continuidad a un mundo multijugador.
+
+- Completar alianzas, rangos, permisos, invitaciones, diplomacia y foro de alianza.
+- Completar chat, mensajería, notificaciones, informes y controles de privacidad/bloqueo.
+- Completar ranking por mundo y medallas de honor sin recompensas de recursos o combate.
+- Limitar las misiones al tutorial y retirar recompensas repetibles incompatibles con PD-015.
+- Definir eventos administrables, temporadas y ciclo de apertura/cierre de mundos sin cambios silenciosos.
+- Completar panel administrativo, moderación, sanciones, soporte, auditoría y herramientas anti-cheat.
+- Publicar ayuda y wiki de solo lectura alineadas con las reglas versionadas; la edición pública y la API de terceros quedan fuera de v1.0.
+
+**G7 — Mundo completo**
+
+- Un mundo puede abrirse, operar, moderarse, respaldarse y cerrarse siguiendo un runbook probado.
+- Los sistemas sociales superan pruebas de permisos, privacidad, abuso e aislamiento por mundo.
+- Todo contenido visible tiene dueño, estado, pruebas, texto final y comportamiento documentado.
+- No hay recompensas explotables, funciones huérfanas ni enlaces hacia rutas incompletas.
+
+### Fase 8 — Experiencia final, arte y accesibilidad
+
+Objetivo: transformar la aplicación funcional en un juego coherente, entendible y agradable en escritorio y móvil.
+
+- Crear y aplicar un sistema visual medieval consistente para navegación, mapa, ciudad, unidades, edificios e informes.
+- Sustituir recursos visuales provisionales por arte con licencia y trazabilidad válidas.
+- Completar diseño adaptable, navegación táctil, teclado, contraste, foco, textos y lectores de pantalla en flujos críticos.
+- Incorporar sonido, música y animaciones con controles independientes, reducción de movimiento y carga diferida.
+- Completar estados vacíos, carga, error, reconexión, sesión expirada, mantenimiento y pérdida de red.
+- Completar español; completar inglés o retirar el selector antes del lanzamiento.
+- Optimizar tamaño de descarga, memoria, renderizado del mapa y rendimiento en equipos de gama media/baja.
+
+**G8 — Candidato de lanzamiento**
+
+- Las pruebas visuales y E2E cubren las resoluciones y navegadores soportados.
+- No quedan textos, iconos, sonidos, pantallas o rutas provisionales visibles.
+- Se cumplen presupuestos medidos de accesibilidad y rendimiento.
+- Jugadores que no conocen el proyecto pueden completar tutorial, progreso, comercio y combate sin ayuda del desarrollador.
+
+### Fase 9 — Producción, legal y sostenibilidad
+
+Objetivo: asegurar que v1.0 pueda publicarse y mantenerse de forma responsable.
+
+- Ejecutar auditoría de seguridad, abuso, privacidad, dependencias y configuración de producción.
+- Finalizar términos de uso, privacidad, cookies, edades aplicables, eliminación/exportación de cuenta y retención de datos.
+- Completar soporte, estado del servicio, respuesta a incidentes y procedimiento de apelación de sanciones.
+- Probar carga, larga duración, escalado, despliegue sin pérdida, rollback, backup y restauración.
+- Decidir el modelo de sostenibilidad: sin pagos o tienda exclusivamente cosmética/conveniencia sin ventaja; un pago real exige integración, conciliación, reembolso y pruebas propias.
+- Preparar analítica respetuosa de privacidad para errores, embudo inicial, retención y balance.
+
+**G9 — Aprobación para lanzamiento público**
+
+- Cero vulnerabilidades críticas o altas y cero defectos P0/P1 abiertos.
+- Restauración, rollback y respuesta a incidentes tienen simulacros recientes.
+- Todos los requisitos legales y de soporte aplicables están publicados.
+- La capacidad medida soporta el cupo de lanzamiento con margen acordado.
+- Si hay pagos, una compra, fallo, reintento, devolución y conciliación pasan de extremo a extremo; si no, todos los endpoints y botones de pago permanecen desactivados.
+
+### Fase 10 — Lanzamiento controlado y cierre de v1.0
+
+Objetivo: demostrar en condiciones reales que el producto completo funciona y cerrar formalmente el proyecto v1.0.
+
+- Ejecutar lanzamiento gradual con límites de jugadores y ampliación basada en métricas.
+- Observar economía, balance, errores, abuso, rendimiento y soporte durante un periodo mínimo acordado.
+- Corregir todos los P0/P1 y decidir explícitamente cada P2 antes de declarar la versión final.
+- Congelar catálogo, reglas, migraciones, arte, documentación y runbooks de v1.0.
+- Etiquetar la versión, publicar notas, registrar evidencias y aprobar el acta de cierre.
+
+**G10 — Batallas Medievales v1.0 terminado al 100 %**
+
+- G0–G9 permanecen aprobados y su evidencia sigue vigente.
+- El 100 % del alcance obligatorio de v1.0 está terminado o existe una decisión aprobada que lo retire del alcance antes del lanzamiento.
+- Cero funciones visibles incompletas, P0/P1 abiertos, migraciones pendientes o controles obligatorios omitidos.
+- Los objetivos de producción se cumplen durante el periodo de observación acordado.
+- Código, infraestructura, datos, contenido, seguridad, soporte y documentación pueden mantenerse sin depender de conocimiento no escrito.
+- El propietario del producto firma el cierre de v1.0 contra el commit y la versión desplegada exactos.
+
+### Fase 11 — Operación viva posterior a v1.0
+
+Esta fase comienza después del cierre y no se usa para ocultar trabajo incompleto de v1.0. Incluye nuevos mundos, balance, temporadas, eventos, contenido, cosméticos, idiomas y expansiones aprobadas. Cada cambio mantiene las mismas reglas de issue, PR, pruebas, migración y observabilidad.
+
+## 8. Backlog maestro priorizado
 
 | ID | Prioridad | Tamaño | Trabajo | Criterio de aceptación principal |
 |---|---:|---:|---|---|
@@ -310,8 +441,36 @@ Reactivar por paquetes independientes, cada uno con sus propias pruebas y balanc
 | BM-0051 | P1 | L | Backup y restauración | Una restauración ensayada recupera cuentas y progreso dentro del RPO |
 | BM-0052 | P1 | L | Pruebas de carga y larga duración | Se documentan capacidad, límites y ausencia de duplicación |
 | BM-0053 | P1 | M | Seguridad previa a beta | Cero hallazgos críticos/altos abiertos y dependencias revisadas |
+| BM-0060 | P1 | XL | Migrar a cuatro recursos | Madera, piedra, hierro y oro funcionan con migración, rollback, pruebas y una única fuente de balance |
+| BM-0061 | P1 | XL | Ciudades, campamentos y expansión | Iglesia/catedral generan puntos y la expansión completa pasa E2E sin permitir conquista PvP |
+| BM-0062 | P1 | XL | Catálogo final de edificios e investigación | Requisitos, efectos, tiempos y niveles aprobados coinciden en servidor, UI y ayuda |
+| BM-0063 | P1 | XL | Catálogo final de unidades y mantenimiento | Entrenamiento, población, mantenimiento, velocidad, carga y defensa quedan balanceados y probados |
+| BM-0064 | P1 | XL | Combate final por rondas | PvE/PvP, moral, suerte, bajas, botín y retorno son reproducibles y resistentes a reintentos |
+| BM-0065 | P1 | L | Espionaje completo | Éxito, detección y datos revelados respetan suerte limitada, permisos y aislamiento |
+| BM-0066 | P1 | L | Comercio desde el inicio | Mercado y transporte aplican límites, autorización, atomicidad y protección antiabuso |
+| BM-0067 | P2 | XL | Bárbaros y oasis finales | Generación, dificultad, IA, recompensas y regeneración están versionadas y balanceadas |
+| BM-0068 | P2 | XL | Paquete héroe, objetos y aventuras | El paquete completo pasa balance, permisos, datos, API, UI y E2E sin rutas parciales |
+| BM-0070 | P1 | XL | Comunidad y diplomacia completas | Alianzas, rangos, diplomacia, chat, mensajes y foro pasan permisos, privacidad y moderación |
+| BM-0071 | P2 | L | Ranking y medallas de honor | Cálculo, desempate y privacidad son correctos; las medallas no entregan ventajas |
+| BM-0072 | P1 | XL | Ciclo de vida de mundos | Crear, abrir, pausar, cerrar y archivar un mundo conserva datos y sigue reglas anunciadas |
+| BM-0073 | P1 | XL | Administración, soporte y moderación | Acciones sensibles requieren permisos, motivo, auditoría y procedimiento de reversión |
+| BM-0074 | P1 | L | Anti-cheat y protección contra abuso | Detección, rate limit y sanciones reducen abuso sin decisiones automáticas irreversibles |
+| BM-0075 | P2 | L | Tutorial y ayuda final | El tutorial es el único sistema obligatorio de misiones y la ayuda coincide con el balance vigente |
+| BM-0080 | P1 | XL | Sistema visual y arte final | No quedan recursos provisionales y cada activo tiene licencia y uso documentados |
+| BM-0081 | P1 | XL | Adaptabilidad y accesibilidad | Flujos críticos funcionan en móvil, escritorio, teclado y tecnologías de asistencia |
+| BM-0082 | P2 | L | Sonido, música y animaciones | Controles, reducción de movimiento, carga diferida y presupuesto de rendimiento pasan QA |
+| BM-0083 | P2 | L | Localización final | Español está completo; inglés está completo o se retira de producción sin rutas rotas |
+| BM-0084 | P1 | L | Resiliencia de interfaz | Carga, vacío, error, reconexión, mantenimiento y expiración de sesión tienen UX probada |
+| BM-0085 | P1 | L | Rendimiento cliente | Descarga, memoria, mapa e interacción cumplen presupuestos medidos en dispositivos objetivo |
+| BM-0090 | P1 | L | Privacidad, términos y cuentas | Consentimiento, exportación, eliminación y retención funcionan y están documentados |
+| BM-0091 | P2 | XL | Sostenibilidad y pagos opcionales | Se aprueba juego sin pagos o se completa compra, fallo, reembolso y conciliación sin pay-to-win |
+| BM-0092 | P1 | XL | Plataforma final de producción | Despliegue, TLS, correo, escalado, observabilidad, alertas y estado del servicio están operativos |
+| BM-0093 | P1 | L | Recuperación de desastres | Backup, restauración, rollback y pérdida de una dependencia pasan simulacros |
+| BM-0100 | P1 | L | Lanzamiento gradual | Cupos y ampliaciones se gobiernan por errores, capacidad, abuso y soporte observados |
+| BM-0101 | P1 | XL | Cierre de defectos de lanzamiento | No quedan P0/P1 y cada P2 tiene resolución o aceptación explícita documentada |
+| BM-0102 | P1 | M | Certificación y cierre v1.0 | Matriz de alcance, gates, commit, despliegue, notas y acta de cierre quedan vinculados |
 
-P0 bloquea cualquier otro trabajo. P1 bloquea la beta. P2 puede diferirse si no rompe el recorrido principal.
+P0 bloquea cualquier otro trabajo. P1 bloquea la siguiente puerta y siempre bloquea G10. Un P2 solo puede diferirse del lanzamiento mediante decisión explícita del propietario, con impacto y seguimiento documentados; no se oculta como “mejora futura”.
 
 ## 9. Estrategia de pruebas
 
@@ -324,8 +483,11 @@ P0 bloquea cualquier otro trabajo. P1 bloquea la beta. P2 puede diferirse si no 
 | Frontend | Stores, componentes críticos y manejo de errores | Cada PR |
 | E2E | Registro, ciudad, edificio, tropa, ataque, retorno e informe | Cada PR y staging |
 | Concurrencia | Doble gasto, mercado, colas, botín e idempotencia | Antes de G3 |
-| Carga | API, mapa, ranking, WebSocket y procesamiento de colas | Antes de G5 |
-| Seguridad | Dependencias, secretos, auth, autorización, abuso y rate limit | Continuo y antes de G5 |
+| Balance | Progresión, costes, mantenimiento, recuperación y simulaciones de economía/combate | Antes de G4, G6 y cada versión de reglas |
+| Visual/accesibilidad | Resoluciones, navegadores, teclado, contraste, movimiento y tecnologías de asistencia | Continuo desde G4 y obligatorio para G8 |
+| Carga | API, mapa, ranking, WebSocket y procesamiento de colas | Antes de G5, G9 y cada ampliación de cupo |
+| Seguridad | Dependencias, secretos, auth, autorización, abuso y rate limit | Continuo y antes de G5, G9 y G10 |
+| Pagos | Compra, idempotencia, fallo, reintento, reembolso y conciliación | Solo si se habilitan pagos, antes de G9 |
 | Restauración | Backup, migración, rollback y recuperación | Antes de cada versión pública |
 
 Objetivos iniciales:
@@ -334,6 +496,7 @@ Objetivos iniciales:
 - Al menos 80 % de cobertura en servicios del núcleo; la cobertura nunca sustituye los escenarios.
 - Cero pruebas inestables aceptadas en `main`.
 - Cero errores ignorados para obtener un CI verde.
+- 100 % de funciones visibles vinculadas a pruebas, evidencia manual repetible o ambas según el riesgo.
 
 ## 10. Integración y despliegue continuos
 
@@ -360,6 +523,8 @@ Se ejecuta en `pull_request` y en cada push a `main`:
 
 ## 11. Definición de terminado
 
+### Para una tarea
+
 Una tarea no está terminada solo porque el código existe. Debe cumplir todo lo aplicable:
 
 - Requisito y criterios de aceptación claros.
@@ -374,7 +539,19 @@ Una tarea no está terminada solo porque el código existe. Debe cumplir todo lo
 - Evidencia reproducible incluida en el PR.
 - Sin defectos P0/P1 conocidos introducidos o aplazados silenciosamente.
 
-## 12. Objetivos operativos de la beta
+### Para Batallas Medievales v1.0
+
+El proyecto solo se declara terminado cuando:
+
+- La matriz de alcance asigna a cada sistema obligatorio un estado `TERMINADO`, nunca `CASI`, `PARCIAL` o `POR VALIDAR`.
+- G0–G10 tienen fecha, commit, responsable, pruebas y evidencia enlazada.
+- Todas las pantallas y rutas publicadas corresponden a servicios terminados; el código descartado se elimina o queda fuera del artefacto desplegado.
+- Una instalación limpia, una actualización desde la versión anterior, un rollback y una restauración se han ensayado.
+- La versión desplegada coincide exactamente con la etiqueta y commit certificados.
+- Documentación de jugador, operación, soporte, seguridad y desarrollo refleja el comportamiento real.
+- El acta de cierre v1.0 está aprobada por el propietario del producto.
+
+## 12. Objetivos operativos
 
 Estos valores deben revisarse con resultados de carga reales:
 
@@ -385,6 +562,15 @@ Estos valores deben revisarse con resultados de carga reales:
 - RTO: máximo 4 horas durante beta cerrada.
 - Cero duplicaciones conocidas de recursos, tropas, recompensas o movimientos.
 - Cero acceso comprobado a datos o acciones de otro mundo sin autorización.
+
+Para G9/G10 se endurecen como mínimo a:
+
+- Disponibilidad mensual objetivo: 99.9 %.
+- Latencia p95 de API jugable: menor de 250 ms bajo la carga objetivo.
+- Error 5xx: menor de 0.2 % de solicitudes.
+- RPO: máximo 1 hora; RTO: máximo 2 horas.
+- Cero vulnerabilidades críticas/altas, pérdida silenciosa de progreso, doble gasto o ruptura de aislamiento.
+- Presupuestos de cliente, concurrencia y cupo documentados a partir de mediciones, no estimaciones.
 
 ## 13. Riesgos principales
 
@@ -398,16 +584,20 @@ Estos valores deben revisarse con resultados de carga reales:
 | Autenticación WebSocket suplantable | Alta | Alto | JWT en handshake y sala derivada del usuario verificado |
 | Balance contradictorio | Alta | Alto | Catálogo versionado como fuente única |
 | CI que no representa producción | Alta | Alto | PostgreSQL real, imágenes y E2E en validación |
-| Alcance excesivo | Alta | Alto | MVP estricto, gates y aprobación para cambiar alcance |
+| Confundir beta con juego terminado | Alta | Alto | G5 es intermedio; solo G10 autoriza declarar v1.0 terminada |
+| “100 %” sin alcance verificable | Alta | Alto | Matriz v1.0, criterios binarios y retiro explícito de cualquier función descartada |
+| Alcance excesivo | Alta | Alto | MVP estricto, paquetes verticales, gates y aprobación para cambiar v1.0 |
 | Arte y sonido antes de estabilidad | Media | Medio | Presupuesto de rendimiento y activación posterior a G4 |
 
 ## 14. Gobierno del plan
 
 - Cada issue y PR debe citar un ID `BM-####` o crear uno nuevo en este documento.
-- Cambiar una regla `PD-###`, el alcance del MVP o una puerta de salida requiere aprobación explícita del propietario del producto.
+- Cambiar una regla `PD-###`, el alcance del MVP/v1.0 o una puerta de salida requiere aprobación explícita del propietario del producto.
 - Los PR deben ser pequeños, permanecer en borrador mientras falte evidencia y no mezclar correcciones sin relación.
 - No se fusiona con CI rojo, pruebas omitidas sin justificación o una migración irreversible no ensayada.
 - Al cerrar un hito se actualizan: estado del backlog, evidencia, riesgos, métricas y siguiente prioridad.
+- Desde G5 se mantiene una matriz de alcance v1.0 con sistema, responsable, estado, pruebas, defectos y evidencia; “existe código” no cuenta como avance terminado.
+- Solo puede existir una fase activa de construcción. Investigación o diseño futuro puede adelantarse, pero no desplaza P0/P1 de la puerta vigente.
 
 ## 15. Próximos diez trabajos, en orden
 
