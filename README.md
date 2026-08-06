@@ -2,11 +2,11 @@
 
 Juego de estrategia medieval multijugador para navegador, inspirado en los juegos de construcción de ciudades, gestión de recursos, alianzas y guerra persistente.
 
-> **Estado actual: prototipo en estabilización.** El repositorio contiene una cantidad amplia de sistemas, pero la rama `main` todavía no representa una versión ejecutable ni apta para producción. La prioridad vigente es recuperar una base verificable antes de añadir funciones.
+> **Estado actual: prototipo en estabilización.** El objetivo aprobado es llevarlo hasta **Batallas Medievales v1.0 completo**, no detenerse en una beta. La rama `main` todavía no representa una versión ejecutable ni apta para producción; la prioridad vigente es recuperar una base verificable antes de añadir funciones.
 
 ## Fuente de verdad
 
-El documento rector del proyecto es el [Plan Maestro de Desarrollo](docs/PLAN_MAESTRO_DESARROLLO.md). Define el alcance del MVP, prioridades, fases, criterios de aceptación, riesgos y la definición de terminado.
+El documento rector del proyecto es el [Plan Maestro de Desarrollo](docs/PLAN_MAESTRO_DESARROLLO.md). Define el MVP intermedio, el alcance completo de v1.0, prioridades, fases G0–G10, criterios de aceptación, riesgos y la definición verificable de terminado.
 
 En caso de conflicto, se aplica este orden:
 
@@ -48,4 +48,4 @@ docs/                       Planificación y decisiones del proyecto
 4. Abrir un PR en borrador con evidencia reproducible.
 5. Fusionar únicamente cuando todos los controles obligatorios estén en verde.
 
-No debe anunciarse una versión jugable hasta cumplir el hito **G5 — Beta cerrada publicable** definido en el plan maestro.
+G5 autoriza únicamente una **beta cerrada**. El juego solo puede anunciarse como terminado al aprobar **G10 — Batallas Medievales v1.0 terminado al 100 %** contra un commit y despliegue exactos.

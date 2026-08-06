@@ -14,8 +14,15 @@ class Alliance(Base):
     name = Column(String, nullable=False)
     description = Column(Text, default="")
     diplomacy = Column(String, default="neutral")
-    leader_id = Column(Integer, ForeignKey("users.id"))
-    world_id = Column(Integer, ForeignKey("worlds.id"), nullable=False)
+    leader_id = Column(
+        Integer,
+        ForeignKey("users.id", name="fk_alliances_leader_id_users", use_alter=True),
+    )
+    world_id = Column(
+        Integer,
+        ForeignKey("worlds.id", name="fk_alliances_world_id_worlds", use_alter=True),
+        nullable=False,
+    )
     created_at = Column(DateTime, default=get_utc_now)
 
     __table_args__ = (UniqueConstraint("name", "world_id", name="uq_alliance_name_world"),)
