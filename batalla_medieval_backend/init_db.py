@@ -1,8 +1,16 @@
-from app.database import Base, engine
-from app.main import app
-from app.models.movement import Movement
+"""Compatibility entry point for initializing or upgrading the database."""
 
-print("Creating tables...")
-print("Movement columns:", Movement.__table__.columns.keys())
-Base.metadata.create_all(bind=engine)
-print("Tables created.")
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
+
+
+def main() -> None:
+    config = Config(str(Path(__file__).with_name("alembic.ini")))
+    command.upgrade(config, "head")
+    print("Database is at the latest migration revision.")
+
+
+if __name__ == "__main__":
+    main()
