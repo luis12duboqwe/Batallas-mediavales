@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 import socketio
 
+from .config import get_settings
 from .database import SessionLocal
 from .middleware.language import LanguageMiddleware
 from .scheduler import start_scheduler, shutdown_scheduler
@@ -38,6 +39,7 @@ from .routers import (
 )
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 app = FastAPI(title="Batalla Medieval Backend")
 
@@ -63,7 +65,7 @@ async def shutdown_event():
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
