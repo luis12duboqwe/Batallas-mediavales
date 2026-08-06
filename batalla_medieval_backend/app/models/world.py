@@ -19,8 +19,20 @@ class World(Base):
     created_at = Column(DateTime, default=get_utc_now)
     is_active = Column(Boolean, default=True)
     ended_at = Column(DateTime, nullable=True)
-    winner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    winner_alliance_id = Column(Integer, ForeignKey("alliances.id"), nullable=True)
+    winner_id = Column(
+        Integer,
+        ForeignKey("users.id", name="fk_worlds_winner_id_users", use_alter=True),
+        nullable=True,
+    )
+    winner_alliance_id = Column(
+        Integer,
+        ForeignKey(
+            "alliances.id",
+            name="fk_worlds_winner_alliance_id_alliances",
+            use_alter=True,
+        ),
+        nullable=True,
+    )
 
     cities = relationship("City", back_populates="world", cascade="all, delete-orphan")
     users = relationship("User", back_populates="world", foreign_keys="User.world_id")
