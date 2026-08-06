@@ -1,4 +1,35 @@
+# Dependencies and virtual environments
 node_modules/
+.venv/
+venv/
+
+# Frontend build and test output
 dist/
+coverage/
+
+# Local environment files
 .env
+.env.*
+!.env.example
+
+# Python caches and test output
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Local data and runtime output
+*.db
+*.sqlite
+*.sqlite3
+*.log
+nohup.out
+
+# Operating-system metadata
 .DS_Store
