@@ -36,8 +36,10 @@ services:
     image: ${BACKEND_IMAGE:-batalla-medieval-backend:local}
     restart: unless-stopped
     environment:
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: ${DB_URL:?Set DB_URL in .env}
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
