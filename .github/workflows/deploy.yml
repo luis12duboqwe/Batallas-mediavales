@@ -1,10 +1,6 @@
-name: CI/CD
+name: Deployment
 
 on:
-  push:
-    branches:
-      - main
-      - staging
   workflow_dispatch:
     inputs:
       environment:
@@ -24,53 +20,16 @@ env:
   DOCKER_BUILDKIT: 1
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
     environment:
       name: ${{ env.DEPLOY_ENV }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install backend dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r batalla_medieval_backend/requirements.txt flake8 pytest
-
-      - name: Lint backend
-        run: flake8 batalla_medieval_backend/app
-
-      - name: Test backend
-        run: pytest batalla_medieval_backend
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: batalla_medieval_frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        working-directory: batalla_medieval_frontend
-        run: npm install
-
-      - name: Lint frontend
-        working-directory: batalla_medieval_frontend
-        run: npm run lint
-
-      - name: Build frontend
-        working-directory: batalla_medieval_frontend
-        env:
-          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || '/api' }}
-        run: npm run build
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to registry
         uses: docker/login-action@v3
