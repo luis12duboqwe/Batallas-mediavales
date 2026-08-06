@@ -1,14 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import asyncio
 import logging
 import socketio
 
 from .database import Base, engine, SessionLocal
 from .middleware.language import LanguageMiddleware
 from .scheduler import start_scheduler, shutdown_scheduler
-from app.services import hero_service, socket_manager
-from app.routers import (
+from .services import hero as hero_service
+from .services import socket_manager
+from .routers import (
     alliance,
     auth,
     building,
@@ -42,6 +42,12 @@ logger = logging.getLogger(__name__)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Batalla Medieval Backend")
+
+
+@app.get("/health", tags=["Health"])
+def health_check():
+    """Return a dependency-free liveness response for probes and CI."""
+    return {"status": "ok"}
 
 @app.on_event("startup")
 async def startup_event():
@@ -96,5 +102,8 @@ app.include_router(public_api.router, prefix="/public-api", tags=["Public API"])
 app.include_router(queue.router, prefix="/queue", tags=["Queue"])
 app.include_router(world.router)
 
-# Mount Socket.IO
-app = socketio.ASGIApp(socket_manager.sio, app)
+# Keep the FastAPI application available as ``app`` for HTTP probes, tests and
+# dependency overrides. Production can opt into Socket.IO with
+# ``uvicorn app.main:socket_app`` until the authenticated real-time transport
+# is completed in BM-0012.
+socket_app = socketio.ASGIApp(socket_manager.sio, app)
