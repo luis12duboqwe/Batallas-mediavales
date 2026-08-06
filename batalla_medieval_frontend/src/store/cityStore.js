@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { api } from '../api/axiosClient';
-import { calculateProduction } from '../utils/gameMath';
 import soundManager from '../services/sound';
 
 export const useCityStore = create((set, get) => ({
