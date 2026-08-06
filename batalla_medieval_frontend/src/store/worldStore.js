@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import worldApi from '../api/worldApi';
 
-export const useWorldStore = create((set, get) => ({
+export const useWorldStore = create((set) => ({
   worlds: [],
   currentWorldId: null,
   loading: false,
