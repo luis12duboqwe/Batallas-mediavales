@@ -20,6 +20,7 @@ class Settings(BaseSettings):
         env_file=".env",
         case_sensitive=False,
         extra="ignore",
+        enable_decoding=False,
     )
 
     app_name: str = "Batalla Medieval"
