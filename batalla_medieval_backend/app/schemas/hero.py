@@ -1,10 +1,15 @@
-from pydantic import BaseModel
 from typing import Optional
+
+from pydantic import BaseModel, ConfigDict
+
 
 class HeroBase(BaseModel):
     pass
 
+
 class HeroRead(HeroBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     city_id: Optional[int]
@@ -19,8 +24,6 @@ class HeroRead(HeroBase):
     production_points: int
     available_points: int
 
-    class Config:
-        orm_mode = True
 
 class HeroDistributePoints(BaseModel):
     attack: int = 0
