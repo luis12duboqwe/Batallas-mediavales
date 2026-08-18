@@ -1,31 +1,7 @@
-from typing import Dict
-
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import production
-
-RESEARCH_COSTS: Dict[str, Dict[str, float]] = {
-    "heavy_infantry": {"wood": 500, "clay": 400, "iron": 300},
-    "archer": {"wood": 600, "clay": 300, "iron": 300},
-    "fast_cavalry": {"wood": 1000, "clay": 800, "iron": 600},
-    "heavy_cavalry": {"wood": 2000, "clay": 1500, "iron": 1500},
-    "spy": {"wood": 200, "clay": 200, "iron": 200},
-    "ram": {"wood": 1500, "clay": 1000, "iron": 1000},
-    "catapult": {"wood": 2000, "clay": 1500, "iron": 1500},
-    "noble": {"wood": 10000, "clay": 10000, "iron": 10000},
-}
-
-RESEARCH_PREREQUISITES: Dict[str, Dict[str, int]] = {
-    "heavy_infantry": {"barracks": 3},
-    "archer": {"barracks": 5},
-    "fast_cavalry": {"stable": 3},
-    "heavy_cavalry": {"stable": 10},
-    "spy": {"stable": 1},
-    "ram": {"barracks": 10},
-    "catapult": {"barracks": 15},
-    "noble": {"town_hall": 20},
-}
+from . import production, unit_catalog
 
 
 def get_researched_techs(db: Session, city_id: int):
@@ -33,21 +9,38 @@ def get_researched_techs(db: Session, city_id: int):
 
 
 def is_researched(db: Session, city_id: int, tech_name: str) -> bool:
-    if tech_name == "basic_infantry":
-        return True
-    return (
-        db.query(models.Research)
-        .filter(
-            models.Research.city_id == city_id,
-            models.Research.tech_name == tech_name,
-        )
-        .first()
-        is not None
+    return unit_catalog.is_researched(db, city_id, tech_name)
+
+
+def _sync_city_researched_units(db: Session, city: models.City) -> None:
+    """Keep the legacy City JSON mirror aligned without deleting old progress."""
+
+    researched = ["basic_infantry"]
+    researched.extend(
+        unit
+        for unit in list(city.researched_units or [])
+        if unit != "basic_infantry"
     )
+    researched.extend(
+        row.tech_name
+        for row in (
+            db.query(models.Research)
+            .filter(models.Research.city_id == city.id)
+            .order_by(models.Research.id.asc())
+            .all()
+        )
+        if row.tech_name != "basic_infantry"
+    )
+    city.researched_units = list(dict.fromkeys(researched))
+    db.add(city)
 
 
-def research_tech(db: Session, city: models.City, tech_name: str):
-    """Research a technology while holding the city's economic row lock."""
+def research_tech(db: Session, city: models.City, tech_name: str) -> models.Research:
+    """Research a unit using the same server catalog exposed to the client."""
+
+    definition = unit_catalog.get_unit(tech_name)
+    if not definition["researchable"]:
+        raise ValueError("Technology is already available by default")
 
     city, production_gains = production.lock_and_recalculate_resources(db, city)
     db.expire(city, ["buildings"])
@@ -56,20 +49,17 @@ def research_tech(db: Session, city: models.City, tech_name: str):
         db.rollback()
         raise ValueError("Technology already researched")
 
-    cost = RESEARCH_COSTS.get(tech_name)
-    if not cost:
+    missing = unit_catalog.first_missing_requirement(
+        city, definition["research_requirements"]
+    )
+    if missing:
+        req_name, req_level = missing
         db.rollback()
-        raise ValueError("Invalid technology")
+        raise ValueError(
+            f"Prerequisite not met: {req_name} level {req_level} required"
+        )
 
-    prereqs = RESEARCH_PREREQUISITES.get(tech_name, {})
-    existing_buildings = {b.name: b.level for b in city.buildings}
-    for req_name, req_level in prereqs.items():
-        if existing_buildings.get(req_name, 0) < req_level:
-            db.rollback()
-            raise ValueError(
-                f"Prerequisite not met: {req_name} level {req_level} required"
-            )
-
+    cost = definition["research_cost"]
     if not production.check_cost(city, cost):
         db.rollback()
         raise ValueError("Insufficient resources")
@@ -78,6 +68,8 @@ def research_tech(db: Session, city: models.City, tech_name: str):
 
     research = models.Research(city_id=city.id, tech_name=tech_name, level=1)
     db.add(research)
+    db.flush()
+    _sync_city_researched_units(db, city)
     db.commit()
     db.refresh(research)
     production.record_resource_gains(db, city, production_gains)

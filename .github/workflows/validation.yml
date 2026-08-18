@@ -94,6 +94,7 @@ jobs:
           tests/test_economic_concurrency.py
           tests/test_world_onboarding_concurrency.py
           tests/test_building_completion_concurrency.py
+          tests/test_unit_concurrency.py
 
   frontend:
     name: Frontend

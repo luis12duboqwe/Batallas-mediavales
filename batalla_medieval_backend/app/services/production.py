@@ -44,7 +44,7 @@ def get_storage_limit(city: models.City) -> float:
 def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
     """Return resource rates expressed strictly in units per hour."""
 
-    modifiers = event_service.get_active_modifiers(db)
+    modifiers = event_service.get_active_modifiers(db, world_id=city.world_id)
     rate_multiplier = modifiers.get("production_speed", 1.0)
     world_modifier = city.world.resource_modifier if city.world else 1.0
 

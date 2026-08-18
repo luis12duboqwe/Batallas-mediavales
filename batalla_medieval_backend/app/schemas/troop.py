@@ -1,3 +1,5 @@
+from typing import Dict
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -19,3 +21,17 @@ class TroopRead(TroopBase):
 class ResearchRequest(BaseModel):
     city_id: int
     unit_type: str
+
+
+class UnitAvailability(BaseModel):
+    unit_type: str
+    training_cost: Dict[str, float]
+    training_time_seconds: int
+    training_requirements: Dict[str, int]
+    research_cost: Dict[str, float]
+    research_requirements: Dict[str, int]
+    researched: bool
+    training_requirements_met: bool
+    research_requirements_met: bool
+    can_train: bool
+    can_research: bool

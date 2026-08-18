@@ -22,6 +22,7 @@ MVP_HTTP_CONTRACT = {
     ("GET", "/building/available"),
     ("POST", "/building/upgrade"),
     ("DELETE", "/building/queue/{queue_id}"),
+    ("GET", "/troop/available"),
     ("POST", "/troop/train"),
     ("POST", "/troop/research"),
     ("DELETE", "/troop/queue/{queue_id}"),
