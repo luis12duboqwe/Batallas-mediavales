@@ -17,7 +17,7 @@ class SocketAuthenticationError(ValueError):
 
 
 def authenticate_socket_token(token: Optional[str]) -> int:
-    """Return the authenticated user's id from a valid access token."""
+    """Return a user's id only for a current, verified access token."""
     if not token:
         raise SocketAuthenticationError("missing token")
 
@@ -27,6 +27,8 @@ def authenticate_socket_token(token: Optional[str]) -> int:
         raise SocketAuthenticationError("invalid token") from exc
 
     username = payload.get("sub")
+    if payload.get("type") != "access":
+        raise SocketAuthenticationError("invalid token purpose")
     if not isinstance(username, str) or not username:
         raise SocketAuthenticationError("token subject missing")
 
@@ -35,6 +37,10 @@ def authenticate_socket_token(token: Optional[str]) -> int:
         user = db.query(models.User).filter(models.User.username == username).first()
         if user is None:
             raise SocketAuthenticationError("user not found")
+        if payload.get("ver") != user.auth_version:
+            raise SocketAuthenticationError("stale token")
+        if not user.is_verified:
+            raise SocketAuthenticationError("email not verified")
         if user.is_frozen:
             raise SocketAuthenticationError("account frozen")
         return user.id
