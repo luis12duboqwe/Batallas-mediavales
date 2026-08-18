@@ -17,6 +17,17 @@ down_revision: Union[str, Sequence[str], None] = "0004"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+RESEARCHABLE_UNITS = {
+    "heavy_infantry",
+    "archer",
+    "fast_cavalry",
+    "heavy_cavalry",
+    "spy",
+    "ram",
+    "catapult",
+    "noble",
+}
+
 
 def _assert_no_duplicates(connection, table: str, columns: tuple[str, ...], label: str) -> None:
     group_by = ", ".join(columns)
@@ -39,8 +50,8 @@ def _assert_no_duplicates(connection, table: str, columns: tuple[str, ...], labe
         )
 
 
-def _backfill_researched_units(connection) -> None:
-    """Align the legacy cities.researched_units JSON mirror with Research rows."""
+def _backfill_research_state(connection) -> None:
+    """Promote legacy JSON progress into Research rows, then sync the mirror."""
 
     city_table = sa.table(
         "cities",
@@ -51,7 +62,36 @@ def _backfill_researched_units(connection) -> None:
         "research",
         sa.column("city_id", sa.Integer()),
         sa.column("tech_name", sa.String()),
+        sa.column("level", sa.Integer()),
     )
+
+    existing_pairs = {
+        (int(row.city_id), str(row.tech_name))
+        for row in connection.execute(
+            sa.select(research_table.c.city_id, research_table.c.tech_name)
+        )
+    }
+
+    city_rows = list(
+        connection.execute(
+            sa.select(city_table.c.id, city_table.c.researched_units)
+        ).mappings()
+    )
+    for row in city_rows:
+        city_id = int(row["id"])
+        for unit in list(row["researched_units"] or []):
+            unit_name = str(unit)
+            pair = (city_id, unit_name)
+            if unit_name not in RESEARCHABLE_UNITS or pair in existing_pairs:
+                continue
+            connection.execute(
+                research_table.insert().values(
+                    city_id=city_id,
+                    tech_name=unit_name,
+                    level=1,
+                )
+            )
+            existing_pairs.add(pair)
 
     researched_by_city: dict[int, list[str]] = defaultdict(list)
     for row in connection.execute(
@@ -61,9 +101,7 @@ def _backfill_researched_units(connection) -> None:
         if row.tech_name != "basic_infantry":
             researched_by_city[int(row.city_id)].append(str(row.tech_name))
 
-    for row in connection.execute(
-        sa.select(city_table.c.id, city_table.c.researched_units)
-    ).mappings():
+    for row in city_rows:
         current = list(row["researched_units"] or [])
         merged = ["basic_infantry"]
         merged.extend(unit for unit in current if unit != "basic_infantry")
@@ -95,6 +133,7 @@ def upgrade() -> None:
         "troop_queue",
         sa.Column("paid_cost", sa.JSON(), nullable=True),
     )
+    _backfill_research_state(connection)
     op.create_index(
         "ux_research_city_tech",
         "research",
@@ -107,7 +146,6 @@ def upgrade() -> None:
         ["city_id", "unit_type"],
         unique=True,
     )
-    _backfill_researched_units(connection)
 
 
 def downgrade() -> None:
