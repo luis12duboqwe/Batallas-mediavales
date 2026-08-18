@@ -88,8 +88,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r batalla_medieval_backend/requirements.txt
 
-      - name: Run economic concurrency tests
-        run: pytest -q tests/test_economic_concurrency.py
+      - name: Run concurrency tests
+        run: >-
+          pytest -q
+          tests/test_economic_concurrency.py
+          tests/test_world_onboarding_concurrency.py
 
   frontend:
     name: Frontend
