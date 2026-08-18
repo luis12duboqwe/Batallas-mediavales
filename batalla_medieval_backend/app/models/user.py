@@ -29,16 +29,16 @@ class User(Base):
     last_action_at: Mapped[Optional[datetime]]
     rename_tokens: Mapped[int] = mapped_column(default=0)
     tutorial_step: Mapped[int] = mapped_column(default=0)
-    
+
     is_verified: Mapped[bool] = mapped_column(default=False)
     verification_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     premium_theme_unlocked: Mapped[bool] = mapped_column(default=False)
     world_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("worlds.id", name="fk_users_world_id_worlds", use_alter=True)
     )
 
-    # Rankings
     attacker_points: Mapped[int] = mapped_column(default=0)
     defender_points: Mapped[int] = mapped_column(default=0)
 
