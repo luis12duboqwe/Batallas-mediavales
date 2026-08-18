@@ -6,7 +6,6 @@ import socketio
 from .config import get_settings
 from .database import SessionLocal
 from .middleware.language import LanguageMiddleware
-from .scheduler import start_scheduler, shutdown_scheduler
 from .services import hero as hero_service
 from .services import socket_manager
 from .routers import (
@@ -52,17 +51,17 @@ def health_check():
 
 @app.on_event("startup")
 async def startup_event():
-    start_scheduler()
+    """Perform API-only startup work.
+
+    Periodic game processing intentionally runs in ``app.worker`` so scaling or
+    restarting the HTTP service cannot create duplicate schedulers.
+    """
+
     db = SessionLocal()
     try:
         hero_service.seed_items(db)
     finally:
         db.close()
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    shutdown_scheduler()
 
 
 app.add_middleware(
