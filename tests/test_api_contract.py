@@ -67,18 +67,50 @@ MVP_HTTP_CONTRACT = {
     ("PATCH", "/anticheat/resolve/{flag_id}"),
 }
 
+_HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
+
 
 def _http_pairs():
-    """Inspect the public routing protocol instead of FastAPI private classes.
-
-    FastAPI/Starlette may wrap included router entries in different concrete
-    classes across releases. HTTP routes consistently expose a non-empty
-    ``methods`` collection and a ``path``; relying on that public shape keeps
-    this contract test useful across framework upgrades.
-    """
+    """Read the public OpenAPI contract instead of framework route classes."""
 
     pairs = []
-    for route in app.routes:
+    for path, operations in app.openapi().get("paths", {}).items():
+        for operation in operations:
+            if operation.lower() in _HTTP_METHODS and operation.lower() not in {"head", "options"}:
+                pairs.append((operation.upper(), path))
+    return pairs
+
+
+def _walk_routes(routes, seen=None):
+    """Recursively traverse Starlette/FastAPI route containers.
+
+    Newer FastAPI releases may group included routers under nested route
+    containers. This traversal intentionally relies only on common public-ish
+    attributes (``routes``/``router.routes``) and protects against cycles.
+    """
+
+    if seen is None:
+        seen = set()
+    for route in routes:
+        identity = id(route)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        yield route
+
+        nested = getattr(route, "routes", None)
+        if nested:
+            yield from _walk_routes(nested, seen)
+
+        router = getattr(route, "router", None)
+        router_routes = getattr(router, "routes", None)
+        if router_routes:
+            yield from _walk_routes(router_routes, seen)
+
+
+def _raw_http_pairs():
+    pairs = []
+    for route in _walk_routes(app.routes):
         methods = getattr(route, "methods", None)
         path = getattr(route, "path", None)
         if not methods or not path:
@@ -96,7 +128,7 @@ def test_mvp_http_contract_is_registered():
 
 
 def test_routes_do_not_have_duplicate_method_path_pairs():
-    counts = Counter(_http_pairs())
+    counts = Counter(_raw_http_pairs())
     duplicates = sorted(pair for pair, count in counts.items() if count > 1)
     assert duplicates == [], f"Ambiguous duplicate API routes: {duplicates}"
 
@@ -108,12 +140,9 @@ def test_queue_router_is_not_double_prefixed():
 
 
 def test_global_chat_websocket_is_registered():
-    # WebSocket routes do not expose an HTTP methods collection. Path presence
-    # is sufficient here because the contract reserves this exact path for the
-    # global chat WebSocket and no HTTP route may duplicate it.
     websocket_paths = {
         getattr(route, "path", None)
-        for route in app.routes
+        for route in _walk_routes(app.routes)
         if getattr(route, "methods", None) is None
     }
     assert "/chat/{channel}" in websocket_paths
