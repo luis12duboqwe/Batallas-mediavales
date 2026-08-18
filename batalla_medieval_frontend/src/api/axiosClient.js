@@ -178,6 +178,8 @@ export const api = {
   adminDeleteCity: (cityId) => axiosClient.delete(`/admin/city/${cityId}`),
 
   // Troops
+  getAvailableUnits: (cityId, worldId) =>
+    axiosClient.get('/troop/available', { params: { city_id: cityId, world_id: worldId } }),
   researchUnit: (cityId, worldId, unitType) => axiosClient.post('/troop/research', { city_id: cityId, unit_type: unitType }, { params: { world_id: worldId } }),
 
   // Hero
