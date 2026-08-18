@@ -2,7 +2,8 @@ import json
 from typing import List, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseSettings, Field, root_validator, validator
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 PROTECTED_ENVIRONMENTS = {"staging", "production"}
@@ -15,6 +16,12 @@ KNOWN_WEAK_SECRETS = {
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
     app_name: str = "Batalla Medieval"
     app_env: Literal["development", "test", "staging", "production"] = "development"
     secret_key: str = "development-only-secret-key-do-not-use"
@@ -31,9 +38,20 @@ class Settings(BaseSettings):
     from_email: str = ""
     frontend_url: str = "http://localhost:5173"
 
-    @validator("cors_origins")
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, raw_value):
+        if isinstance(raw_value, str):
+            stripped = raw_value.strip()
+            if stripped.startswith("["):
+                return json.loads(stripped)
+            return [value.strip() for value in stripped.split(",") if value.strip()]
+        return raw_value
+
+    @field_validator("cors_origins")
+    @classmethod
     def validate_cors_origins(cls, origins: List[str]) -> List[str]:
-        normalized = []
+        normalized: list[str] = []
         for origin in origins:
             value = origin.strip().rstrip("/")
             if not value:
@@ -52,56 +70,39 @@ class Settings(BaseSettings):
             raise ValueError("At least one CORS origin is required")
         return normalized
 
-    @root_validator
-    def reject_insecure_protected_environment(cls, values):
-        app_env = values.get("app_env")
-        if app_env not in PROTECTED_ENVIRONMENTS:
-            return values
+    @model_validator(mode="after")
+    def reject_insecure_protected_environment(self):
+        if self.app_env not in PROTECTED_ENVIRONMENTS:
+            return self
 
-        secret_key = values.get("secret_key", "")
-        if len(secret_key) < 32 or secret_key in KNOWN_WEAK_SECRETS:
+        if len(self.secret_key) < 32 or self.secret_key in KNOWN_WEAK_SECRETS:
             raise ValueError(
-                f"{app_env} requires a unique SECRET_KEY with at least 32 characters"
+                f"{self.app_env} requires a unique SECRET_KEY with at least 32 characters"
             )
 
-        database_url = values.get("database_url", "")
-        if database_url.startswith("sqlite"):
-            raise ValueError(f"{app_env} requires PostgreSQL; SQLite is not allowed")
+        if self.database_url.startswith("sqlite"):
+            raise ValueError(
+                f"{self.app_env} requires PostgreSQL; SQLite is not allowed"
+            )
 
-        cors_origins = values.get("cors_origins", [])
-        if "*" in cors_origins or any(
-            not origin.startswith("https://") for origin in cors_origins
+        if "*" in self.cors_origins or any(
+            not origin.startswith("https://") for origin in self.cors_origins
         ):
             raise ValueError(
-                f"{app_env} requires explicit HTTPS CORS_ORIGINS and forbids '*'"
+                f"{self.app_env} requires explicit HTTPS CORS_ORIGINS and forbids '*'"
             )
 
-        frontend_url = str(values.get("frontend_url") or "").rstrip("/")
+        frontend_url = self.frontend_url.rstrip("/")
         if not frontend_url.startswith("https://"):
-            raise ValueError(f"{app_env} requires an HTTPS FRONTEND_URL")
-        values["frontend_url"] = frontend_url
+            raise ValueError(f"{self.app_env} requires an HTTPS FRONTEND_URL")
+        self.frontend_url = frontend_url
 
-        smtp_host = str(values.get("smtp_host") or "").strip()
-        from_email = str(values.get("from_email") or "").strip()
-        if not smtp_host or "@" not in from_email:
+        if not self.smtp_host.strip() or "@" not in self.from_email.strip():
             raise ValueError(
-                f"{app_env} requires SMTP_HOST and a valid FROM_EMAIL for account verification"
+                f"{self.app_env} requires SMTP_HOST and a valid FROM_EMAIL for account verification"
             )
 
-        return values
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-
-        @classmethod
-        def parse_env_var(cls, field_name: str, raw_value: str):
-            if field_name == "cors_origins":
-                stripped = raw_value.strip()
-                if stripped.startswith("["):
-                    return json.loads(stripped)
-                return [value.strip() for value in stripped.split(",") if value.strip()]
-            return cls.json_loads(raw_value)
+        return self
 
 
 def get_settings() -> Settings:
