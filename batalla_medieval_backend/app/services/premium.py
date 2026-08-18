@@ -21,6 +21,29 @@ PREMIUM_MESSAGE_LIMIT = 200
 
 
 def get_or_create_status(db: Session, user: models.User) -> models.PremiumStatus:
+    """Return the unique premium row, serializing first-time creation per user."""
+
+    status = (
+        db.query(models.PremiumStatus)
+        .filter(models.PremiumStatus.user_id == user.id)
+        .first()
+    )
+    if status:
+        return status
+
+    # Lock the parent row before the second lookup/insert. PremiumStatus.user_id
+    # is unique, so two concurrent first-time requests must not both attempt the
+    # insert and race on the uniqueness constraint.
+    locked_user = (
+        db.query(models.User)
+        .filter(models.User.id == user.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if locked_user is None:
+        db.rollback()
+        raise ValueError("User not found")
+
     status = (
         db.query(models.PremiumStatus)
         .filter(models.PremiumStatus.user_id == user.id)
@@ -31,6 +54,25 @@ def get_or_create_status(db: Session, user: models.User) -> models.PremiumStatus
         db.add(status)
         db.commit()
         db.refresh(status)
+    else:
+        # Release the parent-row lock acquired only for creation coordination.
+        db.commit()
+        db.refresh(status)
+    return status
+
+
+def _lock_status(db: Session, user_id: int) -> models.PremiumStatus:
+    """Reload the premium balance under a PostgreSQL row lock."""
+
+    status = (
+        db.query(models.PremiumStatus)
+        .filter(models.PremiumStatus.user_id == user_id)
+        .with_for_update()
+        .populate_existing()
+        .one_or_none()
+    )
+    if status is None:
+        raise ValueError("Premium status not found")
     return status
 
 
@@ -38,15 +80,21 @@ def buy_feature(db: Session, user: models.User, feature: str) -> models.PremiumS
     if feature not in FEATURE_COSTS:
         raise ValueError("Unknown premium feature")
 
-    status = get_or_create_status(db, user)
+    get_or_create_status(db, user)
+    status = _lock_status(db, user.id)
     if getattr(status, feature, False):
+        db.rollback()
         raise ValueError("Feature already purchased")
 
     cost = FEATURE_COSTS[feature]
     if status.rubies_balance < cost:
+        db.rollback()
         raise ValueError("Not enough rubies")
 
     status.rubies_balance -= cost
+    if status.rubies_balance < 0:
+        db.rollback()
+        raise ValueError("Ruby balance cannot become negative")
     setattr(status, feature, True)
     db.commit()
     db.refresh(status)
@@ -56,7 +104,8 @@ def buy_feature(db: Session, user: models.User, feature: str) -> models.PremiumS
 def grant_rubies(db: Session, user: models.User, amount: int) -> models.PremiumStatus:
     if amount <= 0:
         raise ValueError("Amount must be positive")
-    status = get_or_create_status(db, user)
+    get_or_create_status(db, user)
+    status = _lock_status(db, user.id)
     status.rubies_balance += amount
     db.commit()
     db.refresh(status)
@@ -127,7 +176,10 @@ def use_premium_action(
         queue_entry = (
             db.query(models.BuildingQueue)
             .join(models.City, models.BuildingQueue.city_id == models.City.id)
-            .filter(models.BuildingQueue.id == queue_id, models.City.owner_id == user.id)
+            .filter(
+                models.BuildingQueue.id == queue_id,
+                models.City.owner_id == user.id,
+            )
             .first()
         )
         if not queue_entry:

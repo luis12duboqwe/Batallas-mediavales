@@ -48,22 +48,19 @@ def get_building_costs() -> Dict[str, Dict[str, float]]:
 
 def get_available_buildings(db: Session, city: models.City) -> List[dict]:
     """Return list of all buildings with their status for the city."""
-    
+
     existing_map = {b.name: b for b in city.buildings}
     result = []
-    
+
     all_buildings = BUILDING_COSTS.keys()
-    
+
     for name in all_buildings:
         building = existing_map.get(name)
         current_level = building.level if building else 0
-        
-        # Calculate cost for next level
-        # We simulate a building object for the cost calculator
+
         temp_building = models.Building(name=name, level=current_level + 1)
         cost = calculate_upgrade_cost(temp_building)
-        
-        # Check prerequisites
+
         prereqs = BUILDING_PREREQUISITES.get(name, {})
         requirements_met = True
         for req_name, req_level in prereqs.items():
@@ -71,25 +68,30 @@ def get_available_buildings(db: Session, city: models.City) -> List[dict]:
             if not existing_req or existing_req.level < req_level:
                 requirements_met = False
                 break
-        
+
         build_time = BASE_BUILD_TIME_SECONDS * (current_level + 1)
-        
+
         result.append({
             "name": name,
             "level": current_level,
             "cost": cost,
             "requirements_met": requirements_met,
             "requirements": prereqs,
-            "build_time": build_time
+            "build_time": build_time,
         })
-        
+
     return result
 
 
 def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.BuildingQueue:
-    """Queue an upgrade for a building, enforcing premium limits and costs."""
+    """Queue an upgrade atomically against the city's current resource row."""
 
+    # Premium status may need to be created before the economic transaction.
     status = premium_service.get_or_create_status(db, city.owner)
+
+    city, production_gains = production.lock_and_recalculate_resources(db, city)
+    db.expire(city, ["buildings"])
+
     existing_queue = (
         db.query(models.BuildingQueue)
         .filter(models.BuildingQueue.city_id == city.id)
@@ -97,34 +99,50 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
     )
     allowed_slots = premium_service.get_build_queue_limit(status)
     if existing_queue >= allowed_slots:
+        db.rollback()
         raise ValueError("No building queue slots available")
 
-    # Check prerequisites
+    already_queued = (
+        db.query(models.BuildingQueue)
+        .filter(
+            models.BuildingQueue.city_id == city.id,
+            models.BuildingQueue.building_type == building_name,
+        )
+        .first()
+    )
+    if already_queued:
+        db.rollback()
+        raise ValueError("Building upgrade already queued")
+
     prereqs = BUILDING_PREREQUISITES.get(building_name, {})
     if prereqs:
         existing_buildings = {b.name: b.level for b in city.buildings}
         for req_name, req_level in prereqs.items():
             if existing_buildings.get(req_name, 0) < req_level:
-                raise ValueError(f"Prerequisite not met: {req_name} level {req_level} required")
+                db.rollback()
+                raise ValueError(
+                    f"Prerequisite not met: {req_name} level {req_level} required"
+                )
 
     building = (
         db.query(models.Building)
         .options(selectinload(models.Building.city))
-        .filter(models.Building.city_id == city.id, models.Building.name == building_name)
+        .filter(
+            models.Building.city_id == city.id,
+            models.Building.name == building_name,
+        )
         .first()
     )
     if not building:
         building = models.Building(city_id=city.id, name=building_name, level=0)
         db.add(building)
-        db.commit()
-        db.refresh(building)
+        db.flush()
 
     cost = calculate_upgrade_cost(building)
-    production.recalculate_resources(db, city)
-    
     if not production.check_cost(city, cost):
+        db.rollback()
         raise ValueError("Insufficient resources")
-        
+
     production.pay_cost(city, cost)
 
     target_level = building.level + 1
@@ -140,6 +158,8 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
     db.add(queue_entry)
     db.commit()
     db.refresh(queue_entry)
+
+    production.record_resource_gains(db, city, production_gains)
     ranking.recalculate_player_and_alliance_scores(db, city.owner_id, city.world_id)
     logger.info(
         "building_upgrade_queued",
@@ -156,7 +176,9 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
 def calculate_upgrade_cost(building: models.Building) -> Dict[str, float]:
     """Calculate resource costs for the next upgrade level."""
 
-    base = get_building_costs().get(building.name, {"wood": 100, "clay": 100, "iron": 100})
+    base = get_building_costs().get(
+        building.name, {"wood": 100, "clay": 100, "iron": 100}
+    )
     multiplier = 1.2 ** max(building.level - 1, 0)
     return {resource: value * multiplier for resource, value in base.items()}
 
@@ -173,7 +195,12 @@ def process_building_queues(db: Session) -> List[dict]:
     )
     finished_info: List[dict] = []
     for queue_entry in finished_queues:
-        city = queue_entry.city or db.query(models.City).filter(models.City.id == queue_entry.city_id).first()
+        city = (
+            queue_entry.city
+            or db.query(models.City)
+            .filter(models.City.id == queue_entry.city_id)
+            .first()
+        )
         building = (
             db.query(models.Building)
             .filter(
@@ -191,18 +218,14 @@ def process_building_queues(db: Session) -> List[dict]:
             db.add(building)
             db.flush()
         building.level = max(building.level, queue_entry.target_level)
-        
-        # Check for World Wonder Win Condition
+
         if building.name == "world_wonder" and building.level >= 100:
             world = db.query(models.World).filter(models.World.id == city.world_id).first()
             if world and world.is_active:
                 world.is_active = False
                 world.ended_at = utc_now()
                 world.winner_id = city.owner_id
-                # If user is in an alliance, set winner_alliance_id
-                # Assuming city.owner.alliance_id exists or similar
-                # For now, just winner_id
-                
+
                 notification_service.create_notification(
                     db,
                     city.owner,
@@ -223,7 +246,10 @@ def process_building_queues(db: Session) -> List[dict]:
                 db,
                 city.owner,
                 "building_finished",
-                {"building_type": queue_entry.building_type, "level": building.level},
+                {
+                    "building_type": queue_entry.building_type,
+                    "level": building.level,
+                },
             )
             from .achievement import update_achievement_progress
 
@@ -238,37 +264,48 @@ def process_building_queues(db: Session) -> List[dict]:
         db.commit()
         logger.info(
             "building_queues_completed",
-            extra={"count": len(finished_queues), "cities": [item["city_id"] for item in finished_info]},
+            extra={
+                "count": len(finished_queues),
+                "cities": [item["city_id"] for item in finished_info],
+            },
         )
     return finished_info
 
 
 def cancel_building_queue(db: Session, queue_id: int, user_id: int) -> bool:
-    """Cancel a building queue and refund a percentage of resources."""
+    """Cancel a queue and refund it while holding the city resource lock."""
+
     queue_entry = (
         db.query(models.BuildingQueue)
         .join(models.City)
-        .filter(models.BuildingQueue.id == queue_id, models.City.owner_id == user_id)
+        .filter(
+            models.BuildingQueue.id == queue_id,
+            models.City.owner_id == user_id,
+        )
+        .with_for_update()
         .first()
     )
     if not queue_entry:
         return False
 
-    city = queue_entry.city
-    
-    # Calculate refund (e.g., 80% of cost)
-    # Re-calculate cost for the target level
-    dummy_building = models.Building(name=queue_entry.building_type, level=queue_entry.target_level - 1)
+    city, production_gains = production.lock_and_recalculate_resources(
+        db, queue_entry.city_id
+    )
+
+    dummy_building = models.Building(
+        name=queue_entry.building_type,
+        level=queue_entry.target_level - 1,
+    )
     cost = calculate_upgrade_cost(dummy_building)
-    
+
     refund_factor = 0.8
     refund = {r: int(amount * refund_factor) for r, amount in cost.items()}
-    
-    production.recalculate_resources(db, city)
+
     for resource, amount in refund.items():
         current_val = getattr(city, resource)
         setattr(city, resource, current_val + amount)
-        
+
     db.delete(queue_entry)
     db.commit()
+    production.record_resource_gains(db, city, production_gains)
     return True
