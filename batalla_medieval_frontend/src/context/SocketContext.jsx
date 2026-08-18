@@ -8,25 +8,20 @@ export const useSocket = () => useContext(SocketContext);
 
 export const SocketProvider = ({ children }) => {
     const [socket, setSocket] = useState(null);
-    const user = useUserStore((state) => state.user);
     const token = useUserStore((state) => state.token);
 
     useEffect(() => {
-        if (user && token) {
+        if (token) {
             const newSocket = io('/', {
                 path: '/socket.io',
                 transports: ['websocket'],
                 auth: {
-                    token: token
+                    token,
                 },
-                query: {
-                    user_id: user.id
-                }
             });
 
             newSocket.on('connect', () => {
                 console.log('Socket connected');
-                newSocket.emit('join', { user_id: user.id });
             });
 
             newSocket.on('disconnect', () => {
@@ -48,7 +43,7 @@ export const SocketProvider = ({ children }) => {
         });
 
         return undefined;
-    }, [user, token]);
+    }, [token]);
 
     return (
         <SocketContext.Provider value={socket}>
