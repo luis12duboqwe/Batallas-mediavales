@@ -41,6 +41,24 @@ def test_socket_token_rejects_stale_session(user, db_session):
         socket_manager.authenticate_socket_token(token)
 
 
+def test_socket_token_rejects_unverified_user(user, db_session):
+    token = access_token_for(user)
+    user.is_verified = False
+    db_session.commit()
+
+    with pytest.raises(socket_manager.SocketAuthenticationError):
+        socket_manager.authenticate_socket_token(token)
+
+
+def test_socket_token_rejects_frozen_user(user, db_session):
+    token = access_token_for(user)
+    user.is_frozen = True
+    db_session.commit()
+
+    with pytest.raises(socket_manager.SocketAuthenticationError):
+        socket_manager.authenticate_socket_token(token)
+
+
 def test_socket_token_cannot_select_another_user(user, db_session):
     second_user = type(user)(
         username="attacker-target",
