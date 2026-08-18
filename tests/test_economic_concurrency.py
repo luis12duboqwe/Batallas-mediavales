@@ -102,3 +102,30 @@ def test_two_premium_purchases_cannot_spend_same_rubies(db_session, user):
     assert unlocked == 1
     assert final_status.rubies_balance == 50
     assert final_status.rubies_balance >= 0
+
+
+def test_first_premium_status_creation_is_serialized(db_session, user):
+    """Two first-time requests must create one row and preserve both grants."""
+
+    user_id = user.id
+    grants = iter([10, 20])
+    grant_lock = threading.Lock()
+
+    def grant_once(session):
+        with grant_lock:
+            amount = next(grants)
+        loaded_user = session.query(models.User).filter(models.User.id == user_id).one()
+        premium_service.grant_rubies(session, loaded_user, amount)
+
+    results = _run_concurrently(grant_once)
+
+    db_session.expire_all()
+    rows = (
+        db_session.query(models.PremiumStatus)
+        .filter(models.PremiumStatus.user_id == user_id)
+        .all()
+    )
+
+    assert results == ["ok", "ok"] or results == ["ok", "ok"]
+    assert len(rows) == 1
+    assert rows[0].rubies_balance == 30
