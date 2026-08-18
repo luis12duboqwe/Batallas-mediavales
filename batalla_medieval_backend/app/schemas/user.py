@@ -1,9 +1,33 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, validator
 
 from .world import WorldRead
+
+
+MIN_PASSWORD_LENGTH = 10
+MAX_PASSWORD_LENGTH = 128
+COMMON_PASSWORDS = {
+    "1234567890",
+    "password123",
+    "qwerty12345",
+    "letmein123",
+}
+
+
+def _validate_password(value: str) -> str:
+    if len(value) < MIN_PASSWORD_LENGTH:
+        raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
+    if len(value) > MAX_PASSWORD_LENGTH:
+        raise ValueError(f"Password must be at most {MAX_PASSWORD_LENGTH} characters")
+    if not any(character.isalpha() for character in value):
+        raise ValueError("Password must contain at least one letter")
+    if not any(character.isdigit() for character in value):
+        raise ValueError("Password must contain at least one number")
+    if value.lower() in COMMON_PASSWORDS:
+        raise ValueError("Password is too common")
+    return value
 
 
 class UserBase(BaseModel):
@@ -16,12 +40,16 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
+    _password_policy = validator("password", allow_reuse=True)(_validate_password)
+
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     password: Optional[str] = None
     email_notifications: Optional[bool] = None
     language: Optional[str] = None
+
+    _password_policy = validator("password", allow_reuse=True)(_validate_password)
 
 
 class UserRead(UserBase):
@@ -56,6 +84,8 @@ class PasswordResetRequest(BaseModel):
 class PasswordResetConfirm(BaseModel):
     token: str
     new_password: str
+
+    _password_policy = validator("new_password", allow_reuse=True)(_validate_password)
 
 
 class Token(BaseModel):
