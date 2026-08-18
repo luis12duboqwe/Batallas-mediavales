@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..utils import utc_now
-from . import event as event_service
+from . import economy, event as event_service
 
 PRODUCTION_RATES = {
     "wood": 15.0,
@@ -15,8 +15,11 @@ PRODUCTION_RATES = {
 RESOURCE_FIELDS = frozenset(PRODUCTION_RATES)
 
 LOYALTY_RECOVERY_PER_HOUR = 2.0
-BASE_STORAGE = 5000.0
-STORAGE_PER_LEVEL = 2000.0
+
+# Compatibility aliases for callers that imported the old production constants.
+# The authoritative values live in ``economy``.
+BASE_STORAGE = economy.STORAGE_BASE_CAPACITY
+STORAGE_PER_WAREHOUSE_LEVEL = economy.STORAGE_PER_WAREHOUSE_LEVEL
 
 
 def _ensure_timezone(dt):
@@ -24,17 +27,23 @@ def _ensure_timezone(dt):
 
 
 def get_storage_limit(city: models.City) -> float:
-    """Capacidad de almacén derivada del nivel de ayuntamiento."""
+    """Return server-authoritative storage capacity for the city.
 
-    level = 1
+    A city always has the base capacity. Each completed ``warehouse`` level
+    increases the capacity; unrelated buildings such as the town hall do not.
+    """
+
+    warehouse_level = 0
     for building in city.buildings or []:
-        if building.name == "town_hall":
-            level = max(building.level, level)
+        if building.name == "warehouse":
+            warehouse_level = max(int(building.level), 0)
             break
-    return BASE_STORAGE + STORAGE_PER_LEVEL * max(level - 1, 0)
+    return economy.get_storage_capacity(warehouse_level)
 
 
 def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
+    """Return resource rates expressed strictly in units per hour."""
+
     modifiers = event_service.get_active_modifiers(db)
     rate_multiplier = modifiers.get("production_speed", 1.0)
     world_modifier = city.world.resource_modifier if city.world else 1.0
@@ -84,7 +93,7 @@ def recalculate_resources(
     *,
     commit: bool = True,
 ) -> models.City | tuple[models.City, Dict[str, float]]:
-    """Accrue passive resources.
+    """Accrue passive resources from an hourly rate.
 
     ``commit=False`` is used inside larger economic transactions so callers can
     keep a PostgreSQL row lock until validation, payment and the domain record
@@ -93,8 +102,8 @@ def recalculate_resources(
 
     now = utc_now()
     last_prod = _ensure_timezone(city.last_production or now)
-    elapsed_minutes = max((now - last_prod).total_seconds() / 60, 0)
-    if elapsed_minutes == 0:
+    elapsed_hours = max((now - last_prod).total_seconds() / 3600.0, 0.0)
+    if elapsed_hours == 0:
         gains = {resource: 0.0 for resource in PRODUCTION_RATES}
         return (city, gains) if return_gains else city
 
@@ -103,15 +112,26 @@ def recalculate_resources(
 
     gains: Dict[str, float] = {}
     for resource, rate in production_rates.items():
-        produced = rate * elapsed_minutes
-        current_value = getattr(city, resource)
-        new_value = min(current_value + produced, storage_limit)
-        actual_gain = max(new_value - current_value, 0)
+        produced = rate * elapsed_hours
+        current_value = float(getattr(city, resource))
+
+        # Reaching storage stops future accumulation. If legacy/admin data is
+        # already above the current cap, recalculation must not delete it.
+        if current_value >= storage_limit:
+            new_value = current_value
+            actual_gain = 0.0
+        else:
+            new_value = min(current_value + produced, storage_limit)
+            actual_gain = max(new_value - current_value, 0.0)
+
         gains[resource] = actual_gain
         setattr(city, resource, new_value)
 
-    loyalty_gain = LOYALTY_RECOVERY_PER_HOUR * (elapsed_minutes / 60)
+    loyalty_gain = LOYALTY_RECOVERY_PER_HOUR * elapsed_hours
     city.loyalty = min(100.0, city.loyalty + loyalty_gain)
+
+    # Always consume elapsed time, including while storage is full. Otherwise a
+    # player could spend after being capped and receive an artificial backlog.
     city.last_production = now
 
     db.add(city)
