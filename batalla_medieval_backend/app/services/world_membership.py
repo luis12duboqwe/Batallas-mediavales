@@ -14,6 +14,10 @@ class WorldNotAvailableError(ValueError):
     """Raised when a requested world does not exist or cannot be joined."""
 
 
+class SpawnUnavailableError(RuntimeError):
+    """Raised when an active world cannot allocate a valid player tile."""
+
+
 class StartingCityConsistencyError(RuntimeError):
     """Raised when persisted membership data points at an invalid city."""
 
@@ -77,12 +81,12 @@ def _create_starting_city(
     world: models.World,
 ) -> models.City:
     if world.map_size <= 0:
-        raise WorldNotAvailableError("World map is not configured for player spawns")
+        raise SpawnUnavailableError("World map is not configured for player spawns")
 
     try:
         x, y = world_gen.find_spawn_location(db, world.id, world.map_size)
     except ValueError as exc:
-        raise WorldNotAvailableError("World has no available starting location") from exc
+        raise SpawnUnavailableError("World has no available starting location") from exc
 
     city = models.City(
         name=f"Capital de {user.username}",
