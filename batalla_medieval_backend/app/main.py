@@ -49,6 +49,7 @@ def health_check():
     """Return a dependency-free liveness response for probes and CI."""
     return {"status": "ok"}
 
+
 @app.on_event("startup")
 async def startup_event():
     start_scheduler()
@@ -58,11 +59,12 @@ async def startup_event():
     finally:
         db.close()
 
+
 @app.on_event("shutdown")
 async def shutdown_event():
     shutdown_scheduler()
 
-# CORS
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -71,10 +73,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# language middleware
 app.add_middleware(LanguageMiddleware)
 
-# register routers
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(city.router, prefix="/city", tags=["City"])
 app.include_router(building.router, prefix="/building", tags=["Building"])
@@ -102,8 +102,6 @@ app.include_router(public_api.router, prefix="/public-api", tags=["Public API"])
 app.include_router(queue.router, prefix="/queue", tags=["Queue"])
 app.include_router(world.router)
 
-# Keep the FastAPI application available as ``app`` for HTTP probes, tests and
-# dependency overrides. Production can opt into Socket.IO with
-# ``uvicorn app.main:socket_app`` until the authenticated real-time transport
-# is completed in BM-0012.
+# Socket.IO is mounted around the HTTP application. The real-time transport
+# authenticates every connection from its JWT before assigning a personal room.
 socket_app = socketio.ASGIApp(socket_manager.sio, app)
