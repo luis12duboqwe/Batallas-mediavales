@@ -1,9 +1,11 @@
+import logging
 import smtplib
 from email.mime.text import MIMEText
 
 from ..config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 def _smtp_details_provided() -> bool:
@@ -11,9 +13,10 @@ def _smtp_details_provided() -> bool:
 
 
 def send_email(to_email: str, subject: str, body: str) -> bool:
-    """Send an email using basic SMTP settings.
+    """Send an account email through the configured SMTP server.
 
-    Returns True if the email was queued successfully, False otherwise.
+    The caller decides whether delivery failure is fatal for the current
+    environment. This function never logs message bodies or credentials.
     """
 
     if not _smtp_details_provided():
@@ -25,12 +28,13 @@ def send_email(to_email: str, subject: str, body: str) -> bool:
     message["To"] = to_email
 
     try:
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
-            if settings.smtp_username and settings.smtp_password:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
+            if settings.smtp_use_starttls:
                 server.starttls()
+            if settings.smtp_username and settings.smtp_password:
                 server.login(settings.smtp_username, settings.smtp_password)
             server.sendmail(settings.from_email, [to_email], message.as_string())
         return True
     except Exception:
-        # We intentionally swallow errors to avoid breaking gameplay flows if email fails.
+        logger.exception("SMTP delivery failed for account email")
         return False
