@@ -13,9 +13,14 @@ def is_researched(db: Session, city_id: int, tech_name: str) -> bool:
 
 
 def _sync_city_researched_units(db: Session, city: models.City) -> None:
-    """Keep the legacy City JSON mirror aligned with canonical Research rows."""
+    """Keep the legacy City JSON mirror aligned without deleting old progress."""
 
     researched = ["basic_infantry"]
+    researched.extend(
+        unit
+        for unit in list(city.researched_units or [])
+        if unit != "basic_infantry"
+    )
     researched.extend(
         row.tech_name
         for row in (
