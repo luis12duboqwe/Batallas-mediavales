@@ -21,6 +21,29 @@ PREMIUM_MESSAGE_LIMIT = 200
 
 
 def get_or_create_status(db: Session, user: models.User) -> models.PremiumStatus:
+    """Return the unique premium row, serializing first-time creation per user."""
+
+    status = (
+        db.query(models.PremiumStatus)
+        .filter(models.PremiumStatus.user_id == user.id)
+        .first()
+    )
+    if status:
+        return status
+
+    # Lock the parent row before the second lookup/insert. PremiumStatus.user_id
+    # is unique, so two concurrent first-time requests must not both attempt the
+    # insert and race on the uniqueness constraint.
+    locked_user = (
+        db.query(models.User)
+        .filter(models.User.id == user.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if locked_user is None:
+        db.rollback()
+        raise ValueError("User not found")
+
     status = (
         db.query(models.PremiumStatus)
         .filter(models.PremiumStatus.user_id == user.id)
@@ -29,6 +52,10 @@ def get_or_create_status(db: Session, user: models.User) -> models.PremiumStatus
     if not status:
         status = models.PremiumStatus(user_id=user.id)
         db.add(status)
+        db.commit()
+        db.refresh(status)
+    else:
+        # Release the parent-row lock acquired only for creation coordination.
         db.commit()
         db.refresh(status)
     return status
