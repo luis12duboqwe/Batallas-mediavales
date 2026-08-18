@@ -75,9 +75,8 @@ def get_building_cost(building_type: str, level: int) -> Dict[str, float]:
 
 
 def get_troop_cost(troop_type: str, amount: int = 1) -> Dict[str, float]:
-    """
-    Calculate the total cost for training a number of troops (including population).
-    """
+    """Calculate the total cost for training a number of troops."""
+
     if amount < 1:
         raise ValueError("Amount of troops must be >= 1")
 
@@ -89,11 +88,8 @@ def get_troop_cost(troop_type: str, amount: int = 1) -> Dict[str, float]:
 
 
 def get_training_time(troop_type: str, building_level: int) -> float:
-    """
-    Calculate training time in seconds for a troop type at a given training building level.
+    """Calculate training time in seconds at a given building level."""
 
-    Formula: time = base_time * (1.18 ** (building_level - 1))
-    """
     if building_level < 1:
         raise ValueError("Building level must be >= 1")
 
@@ -108,21 +104,24 @@ def get_training_time(troop_type: str, building_level: int) -> float:
 # Storage and population helpers
 # ------------------------------
 
+# Storage uses the same internal building key as the live game service:
+# ``warehouse``. A city has base capacity even before constructing one.
 STORAGE_BASE_CAPACITY = 5000.0
-STORAGE_GROWTH = 1.32
+STORAGE_PER_WAREHOUSE_LEVEL = 2000.0
 POPULATION_BASE = 50.0
 POPULATION_GROWTH = 1.22
 
 
-def get_storage_capacity(gran_deposito_level: int) -> float:
-    """Return total resource capacity based on Gran Depósito level."""
-    if gran_deposito_level < 1:
-        return 0.0
-    return STORAGE_BASE_CAPACITY * (STORAGE_GROWTH ** (gran_deposito_level - 1))
+def get_storage_capacity(warehouse_level: int) -> float:
+    """Return total resource capacity for a completed warehouse level."""
+
+    level = max(int(warehouse_level), 0)
+    return STORAGE_BASE_CAPACITY + STORAGE_PER_WAREHOUSE_LEVEL * level
 
 
 def enforce_storage_limits(resources: Mapping[str, float], storage_level: int) -> Dict[str, float]:
-    """Clamp resource dictionary to the storage capacity of the given Gran Depósito level."""
+    """Clamp resource dictionary to the canonical warehouse capacity."""
+
     capacity = get_storage_capacity(storage_level)
     return {
         resource: min(amount, capacity)
@@ -151,6 +150,8 @@ __all__ = [
     "BASE_BUILDING_COSTS",
     "BASE_TROOP_COSTS",
     "BASE_TRAINING_TIMES",
+    "STORAGE_BASE_CAPACITY",
+    "STORAGE_PER_WAREHOUSE_LEVEL",
     "calculate_population_used",
     "enforce_storage_limits",
     "get_building_cost",
