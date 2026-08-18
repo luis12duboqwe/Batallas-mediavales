@@ -1,4 +1,4 @@
-"""add one-time password reset token
+"""add one-time password reset token and session version
 
 Revision ID: 0002
 Revises: 0001
@@ -22,7 +22,12 @@ def upgrade() -> None:
         "users",
         sa.Column("password_reset_token", sa.String(), nullable=True),
     )
+    op.add_column(
+        "users",
+        sa.Column("auth_version", sa.Integer(), nullable=False, server_default="0"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_column("users", "auth_version")
     op.drop_column("users", "password_reset_token")
