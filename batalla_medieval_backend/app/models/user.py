@@ -33,6 +33,7 @@ class User(Base):
     is_verified: Mapped[bool] = mapped_column(default=False)
     verification_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    auth_version: Mapped[int] = mapped_column(default=0)
 
     premium_theme_unlocked: Mapped[bool] = mapped_column(default=False)
     world_id: Mapped[Optional[int]] = mapped_column(
