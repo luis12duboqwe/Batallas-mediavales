@@ -1,37 +1,85 @@
-import socketio
 import logging
+from typing import Optional
+
+import socketio
+from jose import JWTError, jwt
+
+from .. import models
+from ..config import get_settings
+from ..database import SessionLocal
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
-# Create the Socket.IO server
-sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
+
+class SocketAuthenticationError(ValueError):
+    """Raised when a Socket.IO client cannot be mapped to an authenticated user."""
+
+
+def authenticate_socket_token(token: Optional[str]) -> int:
+    """Return the authenticated user's id from a valid access token."""
+    if not token:
+        raise SocketAuthenticationError("missing token")
+
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+    except JWTError as exc:
+        raise SocketAuthenticationError("invalid token") from exc
+
+    username = payload.get("sub")
+    if not isinstance(username, str) or not username:
+        raise SocketAuthenticationError("token subject missing")
+
+    db = SessionLocal()
+    try:
+        user = db.query(models.User).filter(models.User.username == username).first()
+        if user is None:
+            raise SocketAuthenticationError("user not found")
+        if user.is_frozen:
+            raise SocketAuthenticationError("account frozen")
+        return user.id
+    finally:
+        db.close()
+
+
+sio = socketio.AsyncServer(
+    async_mode="asgi",
+    cors_allowed_origins=settings.cors_origins,
+)
+
 
 @sio.event
-async def connect(sid, environ):
-    logger.info(f"Socket connected: {sid}")
+async def connect(sid, environ, auth):
+    token = auth.get("token") if isinstance(auth, dict) else None
+
+    try:
+        user_id = authenticate_socket_token(token)
+    except SocketAuthenticationError as exc:
+        logger.warning("Rejected Socket.IO connection %s: %s", sid, exc)
+        raise socketio.exceptions.ConnectionRefusedError("authentication failed") from exc
+
+    room = f"user_{user_id}"
+    await sio.save_session(sid, {"user_id": user_id})
+    await sio.enter_room(sid, room)
+    await sio.emit("joined", {"room": room}, to=sid)
+    logger.info("Socket connected: sid=%s user_id=%s room=%s", sid, user_id, room)
+    return True
+
 
 @sio.event
 async def disconnect(sid):
-    logger.info(f"Socket disconnected: {sid}")
+    logger.info("Socket disconnected: %s", sid)
 
-@sio.on("join")
-async def on_join(sid, data):
-    """User joins their personal room."""
-    user_id = data.get("user_id")
-    if user_id:
-        room = f"user_{user_id}"
-        logger.info(f"User {user_id} joining room {room}")
-        sio.enter_room(sid, room)
-        await sio.emit("joined", {"room": room}, room=sid)
 
 async def notify_user(user_id: int, event: str, data: dict):
-    """Send a notification to a specific user."""
+    """Send a notification to a specific authenticated user room."""
     room = f"user_{user_id}"
     try:
         await sio.emit(event, data, room=room)
-    except Exception as e:
-        logger.error(f"Error sending notification to {room}: {e}")
+    except Exception:
+        logger.exception("Error sending notification to %s", room)
+
 
 async def broadcast(event: str, data: dict):
-    """Broadcast to all users."""
+    """Broadcast to all connected users."""
     await sio.emit(event, data)
