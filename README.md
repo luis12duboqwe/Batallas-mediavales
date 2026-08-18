@@ -40,6 +40,39 @@ docs/                       Planificación y decisiones del proyecto
 .github/                    Instrucciones de agentes y automatización
 ```
 
+## Arranque reproducible
+
+La vía preferida es Docker Compose. Una vez creado `.env` a partir de `.env.example` con credenciales válidas:
+
+```bash
+docker compose up --build
+```
+
+El orden de arranque es parte del contrato operativo:
+
+1. PostgreSQL queda saludable.
+2. `migrate` ejecuta `alembic upgrade head`.
+3. `seed` ejecuta `python -m app.seed` y crea solo los datos canónicos que falten.
+4. `backend` sirve HTTP + Socket.IO.
+5. `worker` procesa los trabajos periódicos fuera del proceso web.
+6. Nginx publica frontend, API y WebSocket.
+
+Para trabajar manualmente con el backend desde `batalla_medieval_backend/` se respeta el mismo orden:
+
+```bash
+alembic -c alembic.ini upgrade head
+python -m app.seed
+uvicorn app.main:socket_app --host 0.0.0.0 --port 8000
+```
+
+El worker se inicia en un proceso separado:
+
+```bash
+python -m app.worker
+```
+
+El seed es idempotente: volver a ejecutarlo no repone recursos, edificios ni tropas de aldeas bárbaras que ya tengan progreso.
+
 ## Flujo de trabajo
 
 1. Seleccionar una tarea del backlog del plan maestro.

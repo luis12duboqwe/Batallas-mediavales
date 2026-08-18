@@ -1,0 +1,122 @@
+import pytest
+
+from app import models
+from app.seed import (
+    BARBARIAN_BUILDINGS,
+    BARBARIAN_TROOPS,
+    CANONICAL_BARBARIANS,
+    DEFAULT_WORLD_NAME,
+    seed_game,
+)
+
+
+def test_canonical_seed_is_idempotent(db_session):
+    first = seed_game(db_session)
+    second = seed_game(db_session)
+
+    worlds = (
+        db_session.query(models.World)
+        .filter(models.World.name == DEFAULT_WORLD_NAME)
+        .all()
+    )
+    assert len(worlds) == 1
+    world = worlds[0]
+
+    barbarians = (
+        db_session.query(models.City)
+        .filter(
+            models.City.world_id == world.id,
+            models.City.owner_id.is_(None),
+        )
+        .all()
+    )
+
+    assert first.world_created is True
+    assert first.barbarians_created == len(CANONICAL_BARBARIANS)
+    assert second.world_created is False
+    assert second.barbarians_created == 0
+    assert len(barbarians) == len(CANONICAL_BARBARIANS)
+
+    expected_buildings = {name: level for name, level in BARBARIAN_BUILDINGS}
+    expected_troops = {unit: quantity for unit, quantity in BARBARIAN_TROOPS}
+
+    for city in barbarians:
+        assert {building.name: building.level for building in city.buildings} == expected_buildings
+        assert {troop.unit_type: troop.quantity for troop in city.troops} == expected_troops
+
+
+def test_seed_does_not_reset_existing_barbarian_progress(db_session):
+    result = seed_game(db_session)
+    x, y = CANONICAL_BARBARIANS[0]
+    city = (
+        db_session.query(models.City)
+        .filter(
+            models.City.world_id == result.world_id,
+            models.City.x == x,
+            models.City.y == y,
+        )
+        .one()
+    )
+
+    basic_infantry = next(
+        troop for troop in city.troops if troop.unit_type == "basic_infantry"
+    )
+    town_hall = next(
+        building for building in city.buildings if building.name == "town_hall"
+    )
+
+    city.wood = 123.0
+    basic_infantry.quantity = 3
+    town_hall.level = 2
+    db_session.commit()
+
+    second = seed_game(db_session)
+    assert second.barbarians_created == 0
+
+    db_session.expire_all()
+    city = (
+        db_session.query(models.City)
+        .filter(
+            models.City.world_id == result.world_id,
+            models.City.x == x,
+            models.City.y == y,
+        )
+        .one()
+    )
+    basic_infantry = next(
+        troop for troop in city.troops if troop.unit_type == "basic_infantry"
+    )
+    town_hall = next(
+        building for building in city.buildings if building.name == "town_hall"
+    )
+
+    assert city.wood == 123.0
+    assert basic_infantry.quantity == 3
+    assert town_hall.level == 2
+
+
+def test_seed_refuses_to_overwrite_player_city(db_session, user):
+    world = models.World(
+        name=DEFAULT_WORLD_NAME,
+        speed_modifier=1.0,
+        resource_modifier=1.0,
+        map_size=100,
+        is_active=True,
+    )
+    db_session.add(world)
+    db_session.flush()
+
+    x, y = CANONICAL_BARBARIANS[0]
+    db_session.add(
+        models.City(
+            name="Player Capital",
+            owner_id=user.id,
+            world_id=world.id,
+            x=x,
+            y=y,
+        )
+    )
+    db_session.commit()
+
+    with pytest.raises(RuntimeError, match="occupied by a player city"):
+        seed_game(db_session)
