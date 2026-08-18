@@ -3,6 +3,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 
 from app import models
+from app.routers.auth import get_password_hash
 from app.services import emailer
 
 
@@ -93,3 +94,38 @@ def test_registration_rejects_weak_password(client: httpx.Client):
         },
     )
     assert response.status_code == 422
+
+
+def test_frozen_user_cannot_login_or_reuse_existing_http_session(client, db_session):
+    user = models.User(
+        username="frozen-player",
+        email="frozen@example.com",
+        hashed_password=get_password_hash(PASSWORD),
+        is_verified=True,
+        is_frozen=False,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    login = client.post(
+        "/auth/token",
+        data={"username": user.username, "password": PASSWORD},
+    )
+    assert login.status_code == 200
+    token = login.json()["access_token"]
+
+    user.is_frozen = True
+    user.freeze_reason = "security review"
+    db_session.commit()
+
+    protected = client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert protected.status_code == 403
+
+    second_login = client.post(
+        "/auth/token",
+        data={"username": user.username, "password": PASSWORD},
+    )
+    assert second_login.status_code == 403
