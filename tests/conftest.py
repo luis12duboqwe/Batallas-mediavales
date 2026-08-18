@@ -56,6 +56,7 @@ def user(db_session):
         email="tester@example.com",
         hashed_password="placeholder",
         protection_ends_at=datetime.now(timezone.utc) + timedelta(hours=48),
+        is_verified=True,
     )
     db_session.add(user)
     db_session.commit()
