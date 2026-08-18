@@ -101,8 +101,38 @@ def get_tile_type(x: int, y: int) -> str:
     return "grass"
 
 
+def _coordinate_is_free(db: Session, world_id: int, x: int, y: int) -> bool:
+    city_exists = (
+        db.query(models.City.id)
+        .filter(
+            models.City.world_id == world_id,
+            models.City.x == x,
+            models.City.y == y,
+        )
+        .first()
+        is not None
+    )
+    if city_exists:
+        return False
+
+    oasis_exists = (
+        db.query(models.Oasis.id)
+        .filter(
+            models.Oasis.world_id == world_id,
+            models.Oasis.x == x,
+            models.Oasis.y == y,
+        )
+        .first()
+        is not None
+    )
+    return not oasis_exists
+
+
 def find_spawn_location(db: Session, world_id: int, map_size: int) -> tuple[int, int]:
-    """Find a valid spawn location for a new city."""
+    """Find a valid, unoccupied spawn location for a new city."""
+
+    if map_size <= 0:
+        raise ValueError("World map size must be positive")
 
     rng = random.SystemRandom()
 
@@ -111,32 +141,22 @@ def find_spawn_location(db: Session, world_id: int, map_size: int) -> tuple[int,
         x = rng.randrange(map_size)
         y = rng.randrange(map_size)
 
-        if not db.query(models.City).filter(
-            models.City.world_id == world_id,
-            models.City.x == x,
-            models.City.y == y,
-        ).first():
-            if get_tile_type(x, y) != "water":
-                return x, y
+        if _coordinate_is_free(db, world_id, x, y) and get_tile_type(x, y) != "water":
+            return x, y
 
     # Fall back to a deterministic expanding search around the map center.
     center_x, center_y = map_size // 2, map_size // 2
-    for radius in range(1, map_size):
+    for radius in range(0, map_size):
         for offset_x in range(-radius, radius + 1):
             for offset_y in range(-radius, radius + 1):
-                if abs(offset_x) != radius and abs(offset_y) != radius:
+                if radius and abs(offset_x) != radius and abs(offset_y) != radius:
                     continue
 
                 x, y = center_x + offset_x, center_y + offset_y
                 if not (0 <= x < map_size and 0 <= y < map_size):
                     continue
 
-                occupied = db.query(models.City).filter(
-                    models.City.world_id == world_id,
-                    models.City.x == x,
-                    models.City.y == y,
-                ).first()
-                if not occupied and get_tile_type(x, y) != "water":
+                if _coordinate_is_free(db, world_id, x, y) and get_tile_type(x, y) != "water":
                     return x, y
 
     raise ValueError("No valid spawn location found")

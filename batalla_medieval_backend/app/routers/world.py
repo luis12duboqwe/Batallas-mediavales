@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
-from ..services import world_gen
+from ..services import world_gen, world_membership
 
 router = APIRouter(prefix="/worlds", tags=["worlds"])
 
@@ -37,35 +37,30 @@ def create_world(
     return world
 
 
+def _join_or_select_world(
+    db: Session,
+    current_user: models.User,
+    world_id: int,
+) -> models.PlayerWorld:
+    try:
+        return world_membership.join_world(db, current_user, world_id)
+    except world_membership.WorldNotAvailableError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except world_membership.SpawnUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except world_membership.StartingCityConsistencyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/{world_id}/join", response_model=schemas.PlayerWorldRead)
 def join_world(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    world = db.query(models.World).filter(models.World.id == world_id, models.World.is_active.is_(True)).first()
-    if not world:
-        raise HTTPException(status_code=404, detail="World not found")
+    """Join a world and guarantee an idempotent starting city."""
 
-    membership = (
-        db.query(models.PlayerWorld)
-        .filter(models.PlayerWorld.world_id == world_id, models.PlayerWorld.user_id == current_user.id)
-        .first()
-    )
-    if membership:
-        current_user.world_id = world_id
-        db.add(current_user)
-        db.commit()
-        db.refresh(current_user)
-        return membership
-
-    membership = models.PlayerWorld(user_id=current_user.id, world_id=world_id)
-    db.add(membership)
-    current_user.world_id = world_id
-    db.add(current_user)
-    db.commit()
-    db.refresh(membership)
-    return membership
+    return _join_or_select_world(db, current_user, world_id)
 
 
 @router.get("/active", response_model=dict)
@@ -82,27 +77,9 @@ def set_active_world(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    world = (
-        db.query(models.World)
-        .filter(models.World.id == payload.world_id, models.World.is_active.is_(True))
-        .first()
-    )
-    if not world:
-        raise HTTPException(status_code=404, detail="World not found or inactive")
+    """Select a world; first selection performs the same safe onboarding."""
 
-    membership = (
-        db.query(models.PlayerWorld)
-        .filter(models.PlayerWorld.user_id == current_user.id, models.PlayerWorld.world_id == payload.world_id)
-        .first()
-    )
-    if not membership:
-        membership = models.PlayerWorld(user_id=current_user.id, world_id=payload.world_id)
-        db.add(membership)
-    current_user.world_id = payload.world_id
-    db.add(current_user)
-    db.commit()
-    db.refresh(membership)
-    return membership
+    return _join_or_select_world(db, current_user, payload.world_id)
 
 
 @router.get("/{world_id}/tiles", response_model=list[schemas.MapTile])
@@ -118,11 +95,11 @@ def get_map_tiles(
     # Validate range to prevent fetching too many tiles
     if (max_x - min_x) * (max_y - min_y) > 2500:
         raise HTTPException(status_code=400, detail="Area too large")
-        
+
     tiles = []
     for x in range(min_x, max_x + 1):
         for y in range(min_y, max_y + 1):
             tile_type = world_gen.get_tile_type(x, y)
             tiles.append(schemas.MapTile(x=x, y=y, type=tile_type))
-            
+
     return tiles
