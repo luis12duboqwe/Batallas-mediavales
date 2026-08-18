@@ -1,11 +1,14 @@
 from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
+from ..schemas import diplomacy as diplomacy_schema
 from ..services import alliance as alliance_service
+from ..services import diplomacy as diplomacy_service
 
 router = APIRouter(tags=["alliance"])
 
@@ -15,7 +18,11 @@ def get_my_alliance(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    membership = db.query(models.AllianceMember).filter(models.AllianceMember.user_id == current_user.id).first()
+    membership = (
+        db.query(models.AllianceMember)
+        .filter(models.AllianceMember.user_id == current_user.id)
+        .first()
+    )
     if not membership:
         return None
     return membership.alliance
@@ -67,7 +74,10 @@ def list_my_invitations(
 
 
 @router.post("/leave", status_code=status.HTTP_204_NO_CONTENT)
-def leave_alliance(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def leave_alliance(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
     alliance_service.leave_alliance(db, current_user)
 
 
@@ -138,67 +148,6 @@ def list_chat_messages(
     return alliance_service.list_chat_messages(db, alliance_id, current_user)
 
 
-@router.post("/{alliance_id}/diplomacy", response_model=schemas.DiplomacyRead)
-def propose_diplomacy(
-    alliance_id: int,
-    payload: schemas.DiplomacyCreate,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
-):
-    """Propose a diplomatic relation (War, NAP, Alliance)."""
-    # Verify user is leader/general of alliance_id
-    membership = alliance_service.require_membership(db, alliance_id, current_user.id)
-    if membership.rank < schemas.RANK_GENERAL:
-        raise HTTPException(status_code=403, detail="Insufficient rank")
-        
-    # Check if target alliance exists
-    target = alliance_service.get_alliance_or_404(db, payload.alliance_target_id)
-    if target.world_id != membership.alliance.world_id:
-        raise HTTPException(status_code=400, detail="Target alliance in different world")
-        
-    # Create or update diplomacy
-    # Logic:
-    # If War -> Immediate
-    # If NAP/Ally -> Pending until accepted? Or immediate for now?
-    # Let's implement immediate for War, pending for others.
-    
-    # For simplicity in this iteration, we just create the record.
-    # In a real game, we'd need a "request" system for NAP/Ally.
-    # Here we assume "War" is unilateral, others might need acceptance.
-    
-    # Check existing
-    existing = db.query(models.Diplomacy).filter(
-        ((models.Diplomacy.alliance_a_id == alliance_id) & (models.Diplomacy.alliance_b_id == target.id)) |
-        ((models.Diplomacy.alliance_a_id == target.id) & (models.Diplomacy.alliance_b_id == alliance_id))
-    ).first()
-    
-    if existing:
-        existing.status = payload.status
-        db.commit()
-        db.refresh(existing)
-        return existing
-        
-    diplomacy = models.Diplomacy(
-        alliance_a_id=alliance_id,
-        alliance_b_id=target.id,
-        status=payload.status
-    )
-    db.add(diplomacy)
-    db.commit()
-    db.refresh(diplomacy)
-    return diplomacy
-
-@router.get("/{alliance_id}/diplomacy", response_model=list[schemas.DiplomacyRead])
-def list_diplomacy(
-    alliance_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
-):
-    alliance_service.require_membership(db, alliance_id, current_user.id)
-    return db.query(models.Diplomacy).filter(
-        (models.Diplomacy.alliance_a_id == alliance_id) | (models.Diplomacy.alliance_b_id == alliance_id)
-    ).all()
-
 @router.post("/{alliance_id}/mass-message")
 def send_mass_message(
     alliance_id: int,
@@ -206,10 +155,14 @@ def send_mass_message(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    return alliance_service.send_mass_message(db, alliance_id, current_user, payload.subject, payload.content)
+    return alliance_service.send_mass_message(
+        db,
+        alliance_id,
+        current_user,
+        payload.subject,
+        payload.content,
+    )
 
-from ..services import diplomacy as diplomacy_service
-from ..schemas import diplomacy as diplomacy_schema
 
 @router.get("/{alliance_id}/diplomacy", response_model=list[diplomacy_schema.DiplomacyRead])
 def get_diplomacy(
@@ -217,11 +170,9 @@ def get_diplomacy(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    # Check if user is member of alliance? Or is it public?
-    # Usually diplomacy is public or at least visible to members.
-    # Let's allow members for now.
     alliance_service.require_membership(db, alliance_id, current_user.id)
     return diplomacy_service.get_relations(db, alliance_id)
+
 
 @router.post("/{alliance_id}/diplomacy", response_model=diplomacy_schema.DiplomacyRead)
 def request_diplomacy(
@@ -232,11 +183,23 @@ def request_diplomacy(
 ):
     membership = alliance_service.require_membership(db, alliance_id, current_user.id)
     if membership.rank < alliance_service.RANK_GENERAL:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient rank")
-        
-    return diplomacy_service.request_relation(db, alliance_id, payload.alliance_target_id, payload.status)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient rank",
+        )
 
-@router.post("/{alliance_id}/diplomacy/{diplomacy_id}/accept", response_model=diplomacy_schema.DiplomacyRead)
+    return diplomacy_service.request_relation(
+        db,
+        alliance_id,
+        payload.alliance_target_id,
+        payload.status,
+    )
+
+
+@router.post(
+    "/{alliance_id}/diplomacy/{diplomacy_id}/accept",
+    response_model=diplomacy_schema.DiplomacyRead,
+)
 def accept_diplomacy(
     alliance_id: int,
     diplomacy_id: int,
@@ -245,9 +208,13 @@ def accept_diplomacy(
 ):
     membership = alliance_service.require_membership(db, alliance_id, current_user.id)
     if membership.rank < alliance_service.RANK_GENERAL:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient rank")
-        
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient rank",
+        )
+
     return diplomacy_service.accept_relation(db, alliance_id, diplomacy_id)
+
 
 @router.delete("/{alliance_id}/diplomacy/{diplomacy_id}")
 def cancel_diplomacy(
@@ -258,6 +225,9 @@ def cancel_diplomacy(
 ):
     membership = alliance_service.require_membership(db, alliance_id, current_user.id)
     if membership.rank < alliance_service.RANK_GENERAL:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient rank")
-        
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient rank",
+        )
+
     return diplomacy_service.cancel_relation(db, alliance_id, diplomacy_id)
