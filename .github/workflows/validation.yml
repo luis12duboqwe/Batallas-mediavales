@@ -36,12 +36,14 @@ jobs:
       - name: Compile backend
         run: python -m compileall -q batalla_medieval_backend/app tests
 
-      - name: Validate database migrations
+      - name: Validate migrations and canonical seed
         env:
           DATABASE_URL: sqlite:////tmp/batalla-medieval-migrations.db
           PYTHONPATH: batalla_medieval_backend
         run: |
           alembic -c batalla_medieval_backend/alembic.ini upgrade head
+          python -m app.seed
+          python -m app.seed
           alembic -c batalla_medieval_backend/alembic.ini downgrade base
 
       - name: Run backend tests
