@@ -6,7 +6,7 @@ const ResetPassword = () => {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
   const navigate = useNavigate();
-  
+
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -19,7 +19,7 @@ const ResetPassword = () => {
       setError('Las contraseñas no coinciden');
       return;
     }
-    
+
     setLoading(true);
     setMessage('');
     setError('');
@@ -62,6 +62,8 @@ const ResetPassword = () => {
                 name="password"
                 type="password"
                 required
+                minLength={10}
+                maxLength={128}
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-700 placeholder-gray-500 text-gray-100 bg-gray-900 rounded-t-md focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 focus:z-10 sm:text-sm"
                 placeholder="Nueva contraseña"
                 value={password}
@@ -75,6 +77,8 @@ const ResetPassword = () => {
                 name="confirm-password"
                 type="password"
                 required
+                minLength={10}
+                maxLength={128}
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-700 placeholder-gray-500 text-gray-100 bg-gray-900 rounded-b-md focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 focus:z-10 sm:text-sm"
                 placeholder="Confirmar contraseña"
                 value={confirmPassword}
@@ -82,6 +86,9 @@ const ResetPassword = () => {
               />
             </div>
           </div>
+          <p className="text-xs text-gray-500">
+            Usa al menos 10 caracteres e incluye una letra y un número.
+          </p>
 
           {message && <div className="text-green-400 text-sm text-center">{message}</div>}
           {error && <div className="text-red-400 text-sm text-center">{error}</div>}

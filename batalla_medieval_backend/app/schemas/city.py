@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from .building import BuildingRead
 from .troop import TroopRead
@@ -21,6 +21,8 @@ class CityCreate(CityBase):
 
 
 class CityRead(CityBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     wood: float
     clay: float
@@ -29,16 +31,15 @@ class CityRead(CityBase):
     population_max: int
     last_production: datetime
     is_protected: bool = False
-    researched_units: List[str] = []
-    buildings: List[BuildingRead] = []
-    troops: List[TroopRead] = []
-    oases: List[OasisRead] = []
-
-    class Config:
-        orm_mode = True
+    researched_units: List[str] = Field(default_factory=list)
+    buildings: List[BuildingRead] = Field(default_factory=list)
+    troops: List[TroopRead] = Field(default_factory=list)
+    oases: List[OasisRead] = Field(default_factory=list)
 
 
 class CityResourceStatus(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     city_id: int
     wood: float
     clay: float
@@ -48,9 +49,6 @@ class CityResourceStatus(BaseModel):
     production_per_hour: dict
     last_production: datetime
     is_protected: bool = False
-    building_queue: list[BuildingQueueRead] = []
-    troop_queue: list[TroopQueueRead] = []
-    oases: List[OasisRead] = []
-
-    class Config:
-        orm_mode = True
+    building_queue: list[BuildingQueueRead] = Field(default_factory=list)
+    troop_queue: list[TroopQueueRead] = Field(default_factory=list)
+    oases: List[OasisRead] = Field(default_factory=list)

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class EventModifiers(BaseModel):
@@ -29,11 +29,9 @@ class EventCreate(BaseModel):
 
 
 class EventRead(EventBase):
-    id: int
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
-    class Config:
-        orm_mode = True
-        allow_population_by_field_name = True
+    id: int
 
 
 class ActiveEventResponse(BaseModel):

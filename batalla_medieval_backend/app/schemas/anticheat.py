@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class AntiCheatFlagBase(BaseModel):
@@ -15,11 +15,10 @@ class AntiCheatFlagBase(BaseModel):
 
 
 class AntiCheatFlagRead(AntiCheatFlagBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     timestamp: datetime
-
-    class Config:
-        orm_mode = True
 
 
 class AntiCheatResolveRequest(BaseModel):

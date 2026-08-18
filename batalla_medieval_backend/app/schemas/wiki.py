@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 WIKI_CATEGORIES = (
     "buildings",
@@ -35,9 +35,8 @@ class WikiArticleUpdate(BaseModel):
 
 
 class WikiArticleRead(WikiArticleBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        orm_mode = True

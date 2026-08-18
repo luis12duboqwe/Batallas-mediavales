@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class LogBase(BaseModel):
@@ -17,7 +17,6 @@ class LogCreate(BaseModel):
 
 
 class LogRead(LogBase):
-    id: int
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        orm_mode = True
+    id: int

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Dict, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ThemeBase(BaseModel):
@@ -27,10 +27,9 @@ class ThemeUpdate(BaseModel):
 
 
 class ThemeRead(ThemeBase):
-    id: int
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        orm_mode = True
+    id: int
 
 
 class ThemeOwnershipCreate(BaseModel):
@@ -40,14 +39,13 @@ class ThemeOwnershipCreate(BaseModel):
 
 
 class ThemeOwnershipRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     theme_id: int
     source: str
     created_at: datetime
-
-    class Config:
-        orm_mode = True
 
 
 class ThemeApplied(ThemeRead):

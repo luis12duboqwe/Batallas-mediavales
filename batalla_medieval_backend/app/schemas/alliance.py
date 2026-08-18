@@ -1,10 +1,7 @@
 from datetime import datetime
-from typing import List, Optional
-
-from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 RANK_MEMBER = 1
@@ -28,23 +25,21 @@ class AllianceUpdate(BaseModel):
 
 
 class AllianceRead(AllianceBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     diplomacy: str
     leader_id: Optional[int]
     created_at: datetime
 
-    class Config:
-        orm_mode = True
-
 
 class AllianceMemberRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     alliance_id: int
     user_id: int
     rank: int
-
-    class Config:
-        orm_mode = True
 
 
 class AllianceMemberPublic(BaseModel):
@@ -58,6 +53,8 @@ class AllianceInvitationCreate(BaseModel):
 
 
 class AllianceInvitationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     alliance_id: int
     invited_user_id: int
@@ -66,15 +63,14 @@ class AllianceInvitationRead(BaseModel):
     created_at: datetime
     responded_at: Optional[datetime]
 
-    class Config:
-        orm_mode = True
-
 
 class AllianceChatMessageCreate(BaseModel):
     message: str
 
 
 class AllianceChatMessageRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     alliance_id: int
     user_id: int
@@ -82,12 +78,6 @@ class AllianceChatMessageRead(BaseModel):
     message: str
     created_at: datetime
 
-    class Config:
-        orm_mode = True
-
-class AllianceMassMessage(BaseModel):
-    subject: str
-    content: str
 
 class AllianceMassMessage(BaseModel):
     subject: str

@@ -1,8 +1,7 @@
 from collections import Counter
 
-from fastapi.routing import APIRoute, APIWebSocketRoute
-
 from app.main import app
+from app.routers.auth import create_access_token
 
 
 MVP_HTTP_CONTRACT = {
@@ -58,7 +57,6 @@ MVP_HTTP_CONTRACT = {
     ("POST", "/tutorial/advance"),
     ("GET", "/queue/status"),
     ("GET", "/protection/status"),
-    # The MVP requires an authenticated administration/moderation surface.
     ("PATCH", "/admin/city/{city_id}/resources"),
     ("PATCH", "/admin/city/{city_id}/building/{building_type}"),
     ("PATCH", "/admin/city/{city_id}/troops"),
@@ -70,15 +68,52 @@ MVP_HTTP_CONTRACT = {
     ("PATCH", "/anticheat/resolve/{flag_id}"),
 }
 
+_HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
+
 
 def _http_pairs():
+    """Read the public OpenAPI contract instead of framework route classes."""
+
     pairs = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
+    for path, operations in app.openapi().get("paths", {}).items():
+        for operation in operations:
+            if operation.lower() in _HTTP_METHODS and operation.lower() not in {"head", "options"}:
+                pairs.append((operation.upper(), path))
+    return pairs
+
+
+def _walk_routes(routes, seen=None):
+    """Recursively traverse route containers for duplicate HTTP detection."""
+
+    if seen is None:
+        seen = set()
+    for route in routes:
+        identity = id(route)
+        if identity in seen:
             continue
-        for method in route.methods or set():
+        seen.add(identity)
+        yield route
+
+        nested = getattr(route, "routes", None)
+        if nested:
+            yield from _walk_routes(nested, seen)
+
+        router = getattr(route, "router", None)
+        router_routes = getattr(router, "routes", None)
+        if router_routes:
+            yield from _walk_routes(router_routes, seen)
+
+
+def _raw_http_pairs():
+    pairs = []
+    for route in _walk_routes(app.routes):
+        methods = getattr(route, "methods", None)
+        path = getattr(route, "path", None)
+        if not methods or not path:
+            continue
+        for method in methods:
             if method not in {"HEAD", "OPTIONS"}:
-                pairs.append((method, route.path))
+                pairs.append((method, path))
     return pairs
 
 
@@ -89,7 +124,7 @@ def test_mvp_http_contract_is_registered():
 
 
 def test_routes_do_not_have_duplicate_method_path_pairs():
-    counts = Counter(_http_pairs())
+    counts = Counter(_raw_http_pairs())
     duplicates = sorted(pair for pair, count in counts.items() if count > 1)
     assert duplicates == [], f"Ambiguous duplicate API routes: {duplicates}"
 
@@ -100,8 +135,15 @@ def test_queue_router_is_not_double_prefixed():
     assert all(not path.startswith("/queue/queue/") for _, path in registered)
 
 
-def test_global_chat_websocket_is_registered():
-    websocket_paths = {
-        route.path for route in app.routes if isinstance(route, APIWebSocketRoute)
-    }
-    assert "/chat/{channel}" in websocket_paths
+def test_global_chat_websocket_is_registered(client, user):
+    """Prove the real authenticated websocket handshake, not route internals."""
+
+    token = create_access_token(
+        {
+            "sub": user.username,
+            "type": "access",
+            "ver": user.auth_version,
+        }
+    )
+    with client.websocket_connect(f"/chat/global?token={token}"):
+        pass

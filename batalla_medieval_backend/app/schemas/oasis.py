@@ -1,5 +1,7 @@
-from pydantic import BaseModel
-from typing import Optional, Dict
+from typing import Dict, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
 
 class OasisBase(BaseModel):
     x: int
@@ -7,11 +9,11 @@ class OasisBase(BaseModel):
     resource_type: str
     bonus_percent: int
 
+
 class OasisRead(OasisBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     world_id: int
     owner_city_id: Optional[int] = None
-    troops: Dict[str, int] = {}
-
-    class Config:
-        orm_mode = True
+    troops: Dict[str, int] = Field(default_factory=dict)

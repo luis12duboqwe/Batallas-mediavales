@@ -1,12 +1,11 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 
 const Register = () => {
   const [form, setForm] = useState({ username: '', email: '', password: '' });
   const [success, setSuccess] = useState(false);
   const { register, error, loading } = useUserStore();
-  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -71,8 +70,13 @@ const Register = () => {
               className="input w-full"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
+              minLength={10}
+              maxLength={128}
               required
             />
+            <p className="mt-1 text-xs text-gray-500">
+              Mínimo 10 caracteres, incluyendo al menos una letra y un número.
+            </p>
           </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button type="submit" className="btn-primary w-full" disabled={loading}>

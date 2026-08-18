@@ -1,9 +1,11 @@
 from typing import Any, Dict, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class QuestBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     quest_id: str
     title: str
     description: str
@@ -11,13 +13,10 @@ class QuestBase(BaseModel):
     reward: Dict[str, Any]
     is_tutorial: bool = False
 
-    class Config:
-        orm_mode = True
-
 
 class QuestRead(QuestBase):
     status: str
-    progress_data: Dict[str, Any] = {}
+    progress_data: Dict[str, Any] = Field(default_factory=dict)
 
 
 class QuestListResponse(BaseModel):

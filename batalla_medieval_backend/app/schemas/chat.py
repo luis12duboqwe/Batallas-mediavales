@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ChatMessageBase(BaseModel):
@@ -16,6 +16,8 @@ class ChatMessageCreate(ChatMessageBase):
 
 
 class ChatMessageRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     world_id: Optional[int]
@@ -24,6 +26,3 @@ class ChatMessageRead(BaseModel):
     receiver_id: Optional[int]
     content: str
     timestamp: datetime
-
-    class Config:
-        orm_mode = True

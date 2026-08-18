@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class BuildingBase(BaseModel):
@@ -10,11 +10,10 @@ class BuildingCreate(BuildingBase):
 
 
 class BuildingRead(BuildingBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     level: int
-
-    class Config:
-        orm_mode = True
 
 
 class BuildingAvailability(BaseModel):
@@ -24,4 +23,3 @@ class BuildingAvailability(BaseModel):
     requirements_met: bool
     requirements: dict
     build_time: int
-

@@ -1,7 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class PlayerRanking(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     user_id: int
     username: str
     points: int
@@ -9,15 +11,11 @@ class PlayerRanking(BaseModel):
     defender_points: int = 0
     world_id: int
 
-    class Config:
-        orm_mode = True
-
 
 class AllianceRanking(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     alliance_id: int
     name: str
     points: int
     world_id: int
-
-    class Config:
-        orm_mode = True

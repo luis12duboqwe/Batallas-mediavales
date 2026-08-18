@@ -1,4 +1,5 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
 
 class ItemTemplateBase(BaseModel):
     name: str
@@ -8,18 +9,21 @@ class ItemTemplateBase(BaseModel):
     bonus_type: str
     bonus_value: float
 
+
 class ItemTemplateRead(ItemTemplateBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
-    class Config:
-        orm_mode = True
+
 
 class HeroItemBase(BaseModel):
     hero_id: int
     template_id: int
 
+
 class HeroItemRead(HeroItemBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     is_equipped: bool
     template: ItemTemplateRead
-    class Config:
-        orm_mode = True

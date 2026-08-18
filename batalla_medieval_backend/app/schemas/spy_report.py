@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SpyReportBase(BaseModel):
@@ -17,8 +17,7 @@ class SpyReportCreate(SpyReportBase):
 
 
 class SpyReportRead(SpyReportBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
-
-    class Config:
-        orm_mode = True

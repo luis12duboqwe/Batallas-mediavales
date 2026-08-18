@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel
+
+from pydantic import BaseModel, ConfigDict
+
 from .user import UserPublic
 
 
@@ -15,12 +17,11 @@ class MessageCreate(MessageBase):
 
 
 class MessageRead(MessageBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     sender_id: int
     read: bool
     timestamp: datetime
     sender: Optional[UserPublic]
     receiver: Optional[UserPublic]
-
-    class Config:
-        orm_mode = True

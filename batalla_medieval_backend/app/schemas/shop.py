@@ -1,10 +1,12 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ShopItemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     description: str
@@ -13,20 +15,15 @@ class ShopItemRead(BaseModel):
     rarity: str
     preview_url: Optional[str] = None
 
-    class Config:
-        orm_mode = True
-
 
 class UserItemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     item: ShopItemRead
     acquired_at: datetime
-
-    class Config:
-        orm_mode = True
 
 
 class PurchaseResponse(BaseModel):
     item: ShopItemRead
     acquired_at: datetime
     remaining_rubies: int
-
