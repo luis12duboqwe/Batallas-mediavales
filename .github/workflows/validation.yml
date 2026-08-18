@@ -117,6 +117,38 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Audit Python dependencies
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r batalla_medieval_backend/requirements.txt --progress-spinner=off
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: batalla_medieval_frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: batalla_medieval_frontend
+        run: npm ci
+
+      - name: Audit frontend dependencies
+        working-directory: batalla_medieval_frontend
+        run: npm audit --audit-level=high
+
   images:
     name: Container images
     runs-on: ubuntu-latest
@@ -124,6 +156,7 @@ jobs:
       - backend
       - postgres-concurrency
       - frontend
+      - dependency-audit
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
