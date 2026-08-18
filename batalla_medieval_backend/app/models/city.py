@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, JSON
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, JSON
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 
 from ..database import Base
@@ -8,6 +8,9 @@ from ..utils import get_utc_now
 
 class City(Base):
     __tablename__ = "cities"
+    __table_args__ = (
+        Index("ux_cities_world_xy", "world_id", "x", "y", unique=True),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -50,4 +53,3 @@ class City(Base):
     market_offers = relationship("MarketOffer", back_populates="city", cascade="all, delete-orphan")
     oases = relationship("Oasis", back_populates="owner_city")
     research = relationship("Research", back_populates="city", cascade="all, delete-orphan")
-    market_offers = relationship("MarketOffer", back_populates="city", cascade="all, delete-orphan")
