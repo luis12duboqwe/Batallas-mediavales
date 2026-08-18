@@ -35,5 +35,6 @@ class TroopQueue(Base):
     troop_type = Column(String, nullable=False)
     amount = Column(Integer, nullable=False)
     finish_time = Column(DateTime, nullable=False)
+    paid_cost = Column(JSON, nullable=True)
 
     city = relationship("City", back_populates="troop_queue")
