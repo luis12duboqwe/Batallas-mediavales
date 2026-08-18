@@ -2,8 +2,8 @@
 
 from typing import Callable, Optional
 
+import jwt
 from fastapi import Request
-from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..config import get_settings
@@ -31,7 +31,7 @@ class LanguageMiddleware(BaseHTTPMiddleware):
         return preferred if preferred in available_languages() else None
 
     def _get_language_from_user(self, request: Request) -> Optional[str]:
-        """Return a user's preferred language when a valid token is provided."""
+        """Return a verified user's preference for a current access token."""
 
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.lower().startswith("bearer "):
@@ -44,16 +44,22 @@ class LanguageMiddleware(BaseHTTPMiddleware):
                 algorithms=[self.settings.algorithm],
                 options={"verify_exp": True},
             )
-        except JWTError:
+        except jwt.exceptions.InvalidTokenError:
             return None
 
         username = payload.get("sub")
-        if not username:
+        if payload.get("type") != "access" or not username:
             return None
 
         with SessionLocal() as db:
             user = db.query(User).filter(User.username == username).first()
-            if user and user.language in available_languages():
+            if (
+                user
+                and payload.get("ver") == user.auth_version
+                and user.is_verified
+                and not user.is_frozen
+                and user.language in available_languages()
+            ):
                 return user.language
         return None
 
