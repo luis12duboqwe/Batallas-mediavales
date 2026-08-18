@@ -1,8 +1,8 @@
 import logging
 from typing import Optional
 
+import jwt
 import socketio
-from jose import JWTError, jwt
 
 from .. import models
 from ..config import get_settings
@@ -23,7 +23,7 @@ def authenticate_socket_token(token: Optional[str]) -> int:
 
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-    except JWTError as exc:
+    except jwt.exceptions.InvalidTokenError as exc:
         raise SocketAuthenticationError("invalid token") from exc
 
     username = payload.get("sub")
