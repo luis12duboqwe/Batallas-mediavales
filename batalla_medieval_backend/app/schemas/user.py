@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
 from .world import WorldRead
 
@@ -40,7 +40,10 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
-    _password_policy = validator("password", allow_reuse=True)(_validate_password)
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        return _validate_password(value)
 
 
 class UserUpdate(BaseModel):
@@ -49,10 +52,15 @@ class UserUpdate(BaseModel):
     email_notifications: Optional[bool] = None
     language: Optional[str] = None
 
-    _password_policy = validator("password", allow_reuse=True)(_validate_password)
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_password(value) if value is not None else value
 
 
 class UserRead(UserBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
     last_active_at: datetime
@@ -65,16 +73,12 @@ class UserRead(UserBase):
     premium_theme_unlocked: bool = False
     world_id: Optional[int] = None
 
-    class Config:
-        orm_mode = True
-
 
 class UserPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
-
-    class Config:
-        orm_mode = True
 
 
 class PasswordResetRequest(BaseModel):
@@ -85,7 +89,10 @@ class PasswordResetConfirm(BaseModel):
     token: str
     new_password: str
 
-    _password_policy = validator("new_password", allow_reuse=True)(_validate_password)
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        return _validate_password(value)
 
 
 class Token(BaseModel):
