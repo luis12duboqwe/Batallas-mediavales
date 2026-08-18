@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class AdminBotLogBase(BaseModel):
@@ -12,10 +12,9 @@ class AdminBotLogBase(BaseModel):
 
 
 class AdminBotLogRead(AdminBotLogBase):
-    id: int
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        orm_mode = True
+    id: int
 
 
 class AdminBotRunResponse(BaseModel):
