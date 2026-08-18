@@ -9,7 +9,9 @@ from .middleware.language import LanguageMiddleware
 from .services import hero as hero_service
 from .services import socket_manager
 from .routers import (
+    admin,
     alliance,
+    anticheat,
     auth,
     building,
     chat,
@@ -98,8 +100,15 @@ app.include_router(season.router, prefix="/season", tags=["Season"])
 app.include_router(quest.router, prefix="/quest", tags=["Quest"])
 app.include_router(wiki.router, prefix="/wiki", tags=["Wiki"])
 app.include_router(public_api.router, prefix="/public-api", tags=["Public API"])
-app.include_router(queue.router, prefix="/queue", tags=["Queue"])
+# ``queue.router`` already owns the /queue prefix. Adding it again produces
+# /queue/queue/* and breaks the frontend contract.
+app.include_router(queue.router)
 app.include_router(world.router)
+
+# G1 administration/moderation surface. Both routers own their prefixes and
+# enforce administrator authorization internally.
+app.include_router(admin.router)
+app.include_router(anticheat.router)
 
 # Socket.IO is mounted around the HTTP application. The real-time transport
 # authenticates every connection from its JWT before assigning a personal room.
