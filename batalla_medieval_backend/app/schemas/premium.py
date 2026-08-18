@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PremiumPurchase(BaseModel):
@@ -17,10 +17,9 @@ class MapBookmarkBase(BaseModel):
 
 
 class MapBookmarkRead(MapBookmarkBase):
-    id: int
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        orm_mode = True
+    id: int
 
 
 class PremiumUseAction(BaseModel):
@@ -32,6 +31,8 @@ class PremiumUseAction(BaseModel):
 
 
 class PremiumStatusRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     rubies_balance: int
     second_build_queue: bool
     second_troop_queue: bool
@@ -44,7 +45,4 @@ class PremiumStatusRead(BaseModel):
     map_bookmarks: bool
     selected_theme: str | None
     selected_banner: str | None
-    bookmarks: list[MapBookmarkRead] = []
-
-    class Config:
-        orm_mode = True
+    bookmarks: list[MapBookmarkRead] = Field(default_factory=list)
