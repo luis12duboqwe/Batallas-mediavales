@@ -1,9 +1,9 @@
 from datetime import timedelta
 from typing import Optional
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -36,11 +36,7 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    """Create a signed JWT.
-
-    ``type`` defaults to ``access`` for compatibility with callers, but every
-    authentication boundary validates the token purpose before trusting it.
-    """
+    """Create a signed JWT with an explicit purpose."""
 
     to_encode = data.copy()
     to_encode.setdefault("type", "access")
@@ -54,7 +50,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 def decode_typed_token(token: str, expected_type: str) -> dict:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-    except JWTError as exc:
+    except jwt.exceptions.InvalidTokenError as exc:
         raise ValueError("Invalid or expired token") from exc
 
     if payload.get("type") != expected_type or not payload.get("sub"):
