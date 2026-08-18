@@ -5,6 +5,7 @@ Revises: 0004
 Create Date: 2026-08-18
 """
 
+from collections import defaultdict
 from typing import Sequence, Union
 
 from alembic import op
@@ -35,6 +36,43 @@ def _assert_no_duplicates(connection, table: str, columns: tuple[str, ...], labe
         raise RuntimeError(
             f"Cannot enforce {label} uniqueness: duplicate {details} "
             f"count={duplicate['duplicate_count']}"
+        )
+
+
+def _backfill_researched_units(connection) -> None:
+    """Align the legacy cities.researched_units JSON mirror with Research rows."""
+
+    city_table = sa.table(
+        "cities",
+        sa.column("id", sa.Integer()),
+        sa.column("researched_units", sa.JSON()),
+    )
+    research_table = sa.table(
+        "research",
+        sa.column("city_id", sa.Integer()),
+        sa.column("tech_name", sa.String()),
+    )
+
+    researched_by_city: dict[int, list[str]] = defaultdict(list)
+    for row in connection.execute(
+        sa.select(research_table.c.city_id, research_table.c.tech_name)
+        .order_by(research_table.c.city_id, research_table.c.tech_name)
+    ):
+        if row.tech_name != "basic_infantry":
+            researched_by_city[int(row.city_id)].append(str(row.tech_name))
+
+    for row in connection.execute(
+        sa.select(city_table.c.id, city_table.c.researched_units)
+    ).mappings():
+        current = list(row["researched_units"] or [])
+        merged = ["basic_infantry"]
+        merged.extend(unit for unit in current if unit != "basic_infantry")
+        merged.extend(researched_by_city.get(int(row["id"]), []))
+        merged = list(dict.fromkeys(merged))
+        connection.execute(
+            city_table.update()
+            .where(city_table.c.id == row["id"])
+            .values(researched_units=merged)
         )
 
 
@@ -69,6 +107,7 @@ def upgrade() -> None:
         ["city_id", "unit_type"],
         unique=True,
     )
+    _backfill_researched_units(connection)
 
 
 def downgrade() -> None:
