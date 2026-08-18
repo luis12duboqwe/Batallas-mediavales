@@ -1,6 +1,7 @@
 """Building endpoints for handling upgrades."""
 
 from typing import List
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, selectinload
 
@@ -8,7 +9,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
 from ..routers.responses import error_response
-from ..services import building, production, queue as queue_service
+from ..services import building
 
 router = APIRouter(tags=["buildings"])
 
@@ -20,7 +21,8 @@ def get_available_buildings(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """Get all available buildings and their status for a city."""
+    """Get server-authoritative building quotes for an owned city."""
+
     city = (
         db.query(models.City)
         .options(selectinload(models.City.buildings))
@@ -33,7 +35,7 @@ def get_available_buildings(
     )
     if not city:
         raise error_response(404, "city_not_found", "City not found", {"city_id": city_id})
-        
+
     return building.get_available_buildings(db, city)
 
 
@@ -58,13 +60,11 @@ def upgrade_building(
     )
     if not city:
         raise error_response(404, "city_not_found", "City not found", {"city_id": payload.city_id})
-    queue_service.process_all_queues(db)
-    production.recalculate_resources(db, city)
+
     try:
-        building_queue = building.queue_upgrade(db, city, payload.building_type)
+        return building.queue_upgrade(db, city, payload.building_type)
     except ValueError as exc:
         raise error_response(400, "upgrade_failed", str(exc)) from exc
-    return building_queue
 
 
 @router.delete("/queue/{queue_id}", status_code=204)
@@ -73,8 +73,12 @@ def cancel_queue(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """Cancel a building upgrade queue."""
-    success = building.cancel_building_queue(db, queue_id, current_user.id)
+    """Cancel a not-yet-completed building queue."""
+
+    try:
+        success = building.cancel_building_queue(db, queue_id, current_user.id)
+    except ValueError as exc:
+        raise error_response(409, "queue_not_cancellable", str(exc)) from exc
     if not success:
         raise error_response(404, "queue_not_found", "Queue entry not found or not owned by user")
     return None
