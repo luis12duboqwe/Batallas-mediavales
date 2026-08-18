@@ -1,12 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import logging
 import socketio
 
 from .config import get_settings
-from .database import SessionLocal
 from .middleware.language import LanguageMiddleware
-from .services import hero as hero_service
 from .services import socket_manager
 from .routers import (
     admin,
@@ -39,7 +36,6 @@ from .routers import (
     tutorial,
 )
 
-logger = logging.getLogger(__name__)
 settings = get_settings()
 
 app = FastAPI(title="Batalla Medieval Backend")
@@ -49,21 +45,6 @@ app = FastAPI(title="Batalla Medieval Backend")
 def health_check():
     """Return a dependency-free liveness response for probes and CI."""
     return {"status": "ok"}
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Perform API-only startup work.
-
-    Periodic game processing intentionally runs in ``app.worker`` so scaling or
-    restarting the HTTP service cannot create duplicate schedulers.
-    """
-
-    db = SessionLocal()
-    try:
-        hero_service.seed_items(db)
-    finally:
-        db.close()
 
 
 app.add_middleware(
