@@ -1,15 +1,14 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class WorldWinner(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
-
-    class Config:
-        orm_mode = True
 
 
 class WorldBase(BaseModel):
@@ -26,6 +25,8 @@ class WorldCreate(WorldBase):
 
 
 class WorldRead(WorldBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
     ended_at: Optional[datetime] = None
@@ -33,19 +34,15 @@ class WorldRead(WorldBase):
     winner_alliance_id: Optional[int] = None
     winner: Optional[WorldWinner] = None
 
-    class Config:
-        orm_mode = True
-
 
 class PlayerWorldRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     world_id: int
     starting_city_id: Optional[int] = None
     joined_at: datetime
-
-    class Config:
-        orm_mode = True
 
 
 class WorldSelect(BaseModel):
