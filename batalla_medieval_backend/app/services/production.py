@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..utils import utc_now
-from . import event as event_service
+from . import economy, event as event_service
 
 PRODUCTION_RATES = {
     "wood": 15.0,
@@ -15,8 +15,11 @@ PRODUCTION_RATES = {
 RESOURCE_FIELDS = frozenset(PRODUCTION_RATES)
 
 LOYALTY_RECOVERY_PER_HOUR = 2.0
-BASE_STORAGE = 5000.0
-STORAGE_PER_WAREHOUSE_LEVEL = 2000.0
+
+# Compatibility aliases for callers that imported the old production constants.
+# The authoritative values live in ``economy``.
+BASE_STORAGE = economy.STORAGE_BASE_CAPACITY
+STORAGE_PER_WAREHOUSE_LEVEL = economy.STORAGE_PER_WAREHOUSE_LEVEL
 
 
 def _ensure_timezone(dt):
@@ -35,7 +38,7 @@ def get_storage_limit(city: models.City) -> float:
         if building.name == "warehouse":
             warehouse_level = max(int(building.level), 0)
             break
-    return BASE_STORAGE + STORAGE_PER_WAREHOUSE_LEVEL * warehouse_level
+    return economy.get_storage_capacity(warehouse_level)
 
 
 def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
