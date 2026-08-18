@@ -14,9 +14,9 @@ axiosClient.interceptors.request.use((config) => {
 });
 
 const PRODUCTION_PER_HOUR = {
-  wood: 15 * 60,
-  clay: 12 * 60,
-  iron: 10 * 60,
+  wood: 15,
+  clay: 12,
+  iron: 10,
 };
 
 const EMPTY_OVERVIEW = {
@@ -111,6 +111,7 @@ export const api = {
         cities,
         city: activeCity,
         resources: statusData ? statusData : buildResourceSnapshot(activeCity),
+        storage_limit: statusData?.storage_limit ?? 5000,
         buildings: availableBuildings.length > 0 ? availableBuildings : (activeCity?.buildings ?? []),
         production: statusData?.production_per_hour ?? { ...PRODUCTION_PER_HOUR },
         queues: {
@@ -159,11 +160,11 @@ export const api = {
   joinWorld: (worldId) => axiosClient.post(`/worlds/${worldId}/join`),
   getCityStatus: ({ cityId, worldId }) =>
     axiosClient.get(`/city/${cityId}/status`, { params: { world_id: worldId } }),
-  
+
   // Map
   getMapTiles: (worldId, x, y, radius = 10) => axiosClient.get('/map/tiles', { params: { world_id: worldId, x, y, radius } }),
   getOasis: (oasisId) => axiosClient.get(`/map/oasis/${oasisId}`),
-  
+
   // Themes
   getThemes: () => axiosClient.get('/theme/'),
 
