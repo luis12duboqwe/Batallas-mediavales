@@ -15,6 +15,10 @@ def _freeze_time(monkeypatch):
     monkeypatch.setattr(troops, "utc_now", lambda: FIXED_NOW)
 
 
+def _aware(value):
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
 def _auth_headers(user: models.User) -> dict[str, str]:
     token = create_access_token(
         {
@@ -89,7 +93,7 @@ def test_available_catalog_matches_research_and_training_payment(
         for resource, amount in heavy["training_cost"].items()
     }
     assert queue.paid_cost == pytest.approx(expected_paid)
-    assert (queue.finish_time - FIXED_NOW).total_seconds() == pytest.approx(
+    assert (_aware(queue.finish_time) - FIXED_NOW).total_seconds() == pytest.approx(
         heavy["training_time_seconds"] * 2
     )
     for resource, amount in expected_paid.items():
