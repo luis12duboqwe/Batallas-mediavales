@@ -1,0 +1,40 @@
+# npm audit report
+
+brace-expansion  <=1.1.17
+Severity: high
+brace-expansion: Zero-step sequence causes process hang and memory exhaustion - https://github.com/advisories/GHSA-f886-m6hf-6m8v
+brace-expansion: DoS via exponential-time expansion of consecutive non-expanding {} groups - https://github.com/advisories/GHSA-3jxr-9vmj-r5cp
+brace-expansion: DoS via unbounded expansion length causing an out-of-memory process crash - https://github.com/advisories/GHSA-mh99-v99m-4gvg
+brace-expansion: DoS via unbounded intermediate arrays, bypassing the CVE-2026-14257 mitigation - https://github.com/advisories/GHSA-rgw5-rvv9-x895
+fix available via `npm audit fix`
+node_modules/brace-expansion
+
+picomatch  <=2.3.1
+Severity: high
+Picomatch: Method Injection in POSIX Character Classes causes incorrect Glob Matching - https://github.com/advisories/GHSA-3v7f-55p6-f55p
+Picomatch has a ReDoS vulnerability via extglob quantifiers - https://github.com/advisories/GHSA-c2c7-rcm5-vvqj
+fix available via `npm audit fix`
+node_modules/picomatch
+
+socket.io-parser  4.0.0 - 4.2.6
+Severity: high
+socket.io allows an unbounded number of binary attachments - https://github.com/advisories/GHSA-677m-j7p3-52f9
+Socket.IO: Zero-attachment Memory Exhaustion - https://github.com/advisories/GHSA-2m8v-j782-fhvr
+fix available via `npm audit fix`
+node_modules/socket.io-parser
+
+ws  8.0.0 - 8.20.1
+Severity: high
+ws: Uninitialized memory disclosure - https://github.com/advisories/GHSA-58qx-3vcg-4xpx
+ws: Memory exhaustion DoS from tiny fragments and data chunks - https://github.com/advisories/GHSA-96hv-2xvq-fx4p
+fix available via `npm audit fix`
+node_modules/ws
+  engine.io-client  0.7.0 || 0.7.8 - 0.7.9 || 6.0.0 - 6.6.4
+  Depends on vulnerable versions of ws
+  node_modules/engine.io-client
+
+5 vulnerabilities (1 moderate, 4 high)
+
+To address all issues, run:
+  npm audit fix
+audit_exit_code=1
