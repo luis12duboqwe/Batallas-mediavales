@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
+    smtp_use_starttls: bool = True
     from_email: str = ""
     frontend_url: str = "http://localhost:5173"
 
@@ -74,6 +75,19 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"{app_env} requires explicit HTTPS CORS_ORIGINS and forbids '*'"
             )
+
+        frontend_url = str(values.get("frontend_url") or "").rstrip("/")
+        if not frontend_url.startswith("https://"):
+            raise ValueError(f"{app_env} requires an HTTPS FRONTEND_URL")
+        values["frontend_url"] = frontend_url
+
+        smtp_host = str(values.get("smtp_host") or "").strip()
+        from_email = str(values.get("from_email") or "").strip()
+        if not smtp_host or "@" not in from_email:
+            raise ValueError(
+                f"{app_env} requires SMTP_HOST and a valid FROM_EMAIL for account verification"
+            )
+
         return values
 
     class Config:
