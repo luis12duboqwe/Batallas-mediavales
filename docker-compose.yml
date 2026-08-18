@@ -62,6 +62,29 @@ services:
     networks:
       - web
 
+  worker:
+    build:
+      context: ./batalla_medieval_backend
+    image: ${BACKEND_IMAGE:-batalla-medieval-backend:local}
+    command: python -m app.worker
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DB_URL:?Set DB_URL in .env}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      FROM_EMAIL: ${FROM_EMAIL:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - web
+
   frontend:
     build:
       context: ./batalla_medieval_frontend
