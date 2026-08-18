@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class TroopBase(BaseModel):
@@ -10,11 +10,10 @@ class TroopCreate(TroopBase):
 
 
 class TroopRead(TroopBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     quantity: int
-
-    class Config:
-        orm_mode = True
 
 
 class ResearchRequest(BaseModel):
