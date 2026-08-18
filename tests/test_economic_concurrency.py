@@ -126,6 +126,6 @@ def test_first_premium_status_creation_is_serialized(db_session, user):
         .all()
     )
 
-    assert results == ["ok", "ok"] or results == ["ok", "ok"]
+    assert results.count("ok") == 2
     assert len(rows) == 1
     assert rows[0].rubies_balance == 30
