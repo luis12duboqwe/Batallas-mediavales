@@ -1,5 +1,7 @@
 from typing import Dict
+
 from sqlalchemy.orm import Session
+
 from .. import models
 from . import production
 
@@ -25,36 +27,58 @@ RESEARCH_PREREQUISITES: Dict[str, Dict[str, int]] = {
     "noble": {"town_hall": 20},
 }
 
+
 def get_researched_techs(db: Session, city_id: int):
     return db.query(models.Research).filter(models.Research.city_id == city_id).all()
+
 
 def is_researched(db: Session, city_id: int, tech_name: str) -> bool:
     if tech_name == "basic_infantry":
         return True
-    return db.query(models.Research).filter(models.Research.city_id == city_id, models.Research.tech_name == tech_name).first() is not None
+    return (
+        db.query(models.Research)
+        .filter(
+            models.Research.city_id == city_id,
+            models.Research.tech_name == tech_name,
+        )
+        .first()
+        is not None
+    )
+
 
 def research_tech(db: Session, city: models.City, tech_name: str):
+    """Research a technology while holding the city's economic row lock."""
+
+    city, production_gains = production.lock_and_recalculate_resources(db, city)
+    db.expire(city, ["buildings"])
+
     if is_researched(db, city.id, tech_name):
+        db.rollback()
         raise ValueError("Technology already researched")
 
     cost = RESEARCH_COSTS.get(tech_name)
     if not cost:
+        db.rollback()
         raise ValueError("Invalid technology")
 
-    # Check prerequisites
     prereqs = RESEARCH_PREREQUISITES.get(tech_name, {})
     existing_buildings = {b.name: b.level for b in city.buildings}
     for req_name, req_level in prereqs.items():
         if existing_buildings.get(req_name, 0) < req_level:
-            raise ValueError(f"Prerequisite not met: {req_name} level {req_level} required")
+            db.rollback()
+            raise ValueError(
+                f"Prerequisite not met: {req_name} level {req_level} required"
+            )
 
-    production.recalculate_resources(db, city)
     if not production.check_cost(city, cost):
+        db.rollback()
         raise ValueError("Insufficient resources")
 
     production.pay_cost(city, cost)
-    
+
     research = models.Research(city_id=city.id, tech_name=tech_name, level=1)
     db.add(research)
     db.commit()
+    db.refresh(research)
+    production.record_resource_gains(db, city, production_gains)
     return research
