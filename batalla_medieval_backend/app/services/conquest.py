@@ -32,13 +32,18 @@ def _calculate_strength(troops_sent: Dict[str, int]) -> int:
 
 
 def resolve_conquest(
-    db: Session, attacker_city: models.City, target_city: models.City, troops_sent: Dict[str, int]
+    db: Session,
+    attacker_city: models.City,
+    target_city: models.City,
+    troops_sent: Dict[str, int],
 ) -> Tuple[bool, bool]:
     production.recalculate_resources(db, attacker_city)
     production.recalculate_resources(db, target_city)
     _validate_troops_available(attacker_city, troops_sent)
 
-    defender_troops = {troop.unit_type: troop.quantity for troop in target_city.troops}
+    defender_troops = {
+        troop.unit_type: troop.quantity for troop in target_city.troops
+    }
 
     battle_result = combat.simulate_round(troops_sent, defender_troops)
     attacker_losses = battle_result["attacker_losses"]
@@ -51,10 +56,12 @@ def resolve_conquest(
     db.add(target_city)
 
     attacker_remaining = {
-        unit: max(0, amount - attacker_losses.get(unit, 0)) for unit, amount in troops_sent.items()
+        unit: max(0, amount - attacker_losses.get(unit, 0))
+        for unit, amount in troops_sent.items()
     }
     defender_remaining = {
-        unit: max(0, amount - defender_losses.get(unit, 0)) for unit, amount in defender_troops.items()
+        unit: max(0, amount - defender_losses.get(unit, 0))
+        for unit, amount in defender_troops.items()
     }
     attacker_strength = _calculate_strength(attacker_remaining)
     defender_strength = _calculate_strength(defender_remaining)
@@ -62,7 +69,9 @@ def resolve_conquest(
 
     conquered = False
     if victory and troops_sent.get("noble", 0) > 0:
-        target_city.loyalty = max(0.0, target_city.loyalty - LOYALTY_DROP_PER_SUCCESS)
+        target_city.loyalty = max(
+            0.0, target_city.loyalty - LOYALTY_DROP_PER_SUCCESS
+        )
         if target_city.loyalty <= 0:
             target_city.owner_id = attacker_city.owner_id
             target_city.loyalty = 100.0
@@ -75,27 +84,59 @@ def resolve_conquest(
 
 
 def found_city(
-    db: Session, owner: models.User, origin_city: models.City, name: str, x: int, y: int
+    db: Session,
+    owner: models.User,
+    origin_city: models.City,
+    name: str,
+    x: int,
+    y: int,
 ) -> models.City:
-    production.recalculate_resources(db, origin_city)
-    existing_city = db.query(models.City).filter(models.City.x == x, models.City.y == y).first()
+    """Found a city without allowing concurrent requests to double-spend."""
+
+    origin_city, production_gains = production.lock_and_recalculate_resources(
+        db, origin_city
+    )
+
+    existing_city = (
+        db.query(models.City)
+        .filter(
+            models.City.world_id == origin_city.world_id,
+            models.City.x == x,
+            models.City.y == y,
+        )
+        .first()
+    )
     if existing_city:
+        db.rollback()
         raise ValueError("Another city already exists at those coordinates")
 
-    for resource, amount in FOUNDING_COST.items():
-        if getattr(origin_city, resource) < amount:
-            raise ValueError("Not enough resources to found a new city")
+    if not production.check_cost(origin_city, FOUNDING_COST):
+        db.rollback()
+        raise ValueError("Not enough resources to found a new city")
     production.pay_cost(origin_city, FOUNDING_COST)
 
     tile_type = world_gen.get_tile_type(x, y)
-    new_city = models.City(name=name, x=x, y=y, owner_id=owner.id, loyalty=100.0, tile_type=tile_type)
+    new_city = models.City(
+        name=name,
+        x=x,
+        y=y,
+        owner_id=owner.id,
+        world_id=origin_city.world_id,
+        loyalty=100.0,
+        tile_type=tile_type,
+    )
     db.add(new_city)
-    db.commit()
-    db.refresh(new_city)
+    db.flush()
 
     for building in STARTER_BUILDINGS:
-        starter = models.Building(city_id=new_city.id, name=building["name"], level=building["level"])
+        starter = models.Building(
+            city_id=new_city.id,
+            name=building["name"],
+            level=building["level"],
+        )
         db.add(starter)
+
     db.commit()
     db.refresh(new_city)
+    production.record_resource_gains(db, origin_city, production_gains)
     return new_city
