@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MarketOfferBase(BaseModel):
@@ -17,15 +17,14 @@ class MarketOfferCreate(MarketOfferBase):
 
 
 class MarketOfferResponse(MarketOfferBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     city_id: int
     world_id: int
     created_at: datetime
     city_name: str | None = None
     owner_name: str | None = None
-
-    class Config:
-        from_attributes = True
 
 
 class TransportRequest(BaseModel):
