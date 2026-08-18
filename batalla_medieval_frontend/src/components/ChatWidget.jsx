@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useUserStore } from '../store/userStore';
 
 const ChatWidget = () => {
@@ -12,8 +12,8 @@ const ChatWidget = () => {
   useEffect(() => {
     if (isOpen && !ws.current && token) {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/chat/global?token=${token}`;
-      
+      const wsUrl = `${protocol}//${window.location.host}/chat/global?token=${encodeURIComponent(token)}`;
+
       ws.current = new WebSocket(wsUrl);
 
       ws.current.onopen = () => {
@@ -22,10 +22,10 @@ const ChatWidget = () => {
 
       ws.current.onmessage = (event) => {
         try {
-            const data = JSON.parse(event.data);
-            setMessages((prev) => [...prev, data]);
-        } catch (e) {
-            console.error("Error parsing chat message", e);
+          const data = JSON.parse(event.data);
+          setMessages((prev) => [...prev, data]);
+        } catch (error) {
+          console.error('Error parsing chat message', error);
         }
       };
 
@@ -33,9 +33,9 @@ const ChatWidget = () => {
         console.log('Disconnected from global chat');
         ws.current = null;
       };
-      
+
       ws.current.onerror = (error) => {
-          console.error("WebSocket error", error);
+        console.error('WebSocket error', error);
       };
     }
 
@@ -51,17 +51,20 @@ const ChatWidget = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const sendMessage = (e) => {
-    e.preventDefault();
-    if (!input.trim() || !ws.current) return;
-    ws.current.send(input);
+  const sendMessage = (event) => {
+    event.preventDefault();
+    const content = input.trim();
+    if (!content || !ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+
+    // The backend WebSocket contract accepts JSON with a ``content`` field.
+    ws.current.send(JSON.stringify({ content }));
     setInput('');
   };
 
   if (!user) return null;
 
   return (
-    <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end`}>
+    <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end">
       {isOpen && (
         <div className="bg-gray-900 border border-amber-700 rounded-lg w-80 h-96 flex flex-col shadow-xl mb-2">
           <div className="bg-gray-800 p-2 rounded-t-lg flex justify-between items-center border-b border-gray-700">
@@ -70,9 +73,9 @@ const ChatWidget = () => {
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
             {messages.map((msg, idx) => (
-              <div key={idx} className="text-sm break-words">
+              <div key={msg.id ?? idx} className="text-sm break-words">
                 <span className="font-bold text-amber-600">{msg.username}: </span>
-                <span className="text-gray-300">{msg.message}</span>
+                <span className="text-gray-300">{msg.content}</span>
               </div>
             ))}
             <div ref={messagesEndRef} />
