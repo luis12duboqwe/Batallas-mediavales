@@ -5,12 +5,12 @@ import { api } from '../api/axiosClient';
 import { useCityStore } from '../store/cityStore';
 
 const TroopsView = () => {
-  const { queues, train, loadCity, cancelTroop, currentCity } = useCityStore();
+  const { queues, train, loadCity, cancelTroop } = useCityStore();
   const [units, setUnits] = useState([]);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [message, setMessage] = useState('');
 
-  const loadCatalog = useCallback(async (city = currentCity) => {
+  const loadCatalog = useCallback(async (city) => {
     if (!city?.id || !city?.world_id) return [];
     setLoadingCatalog(true);
     try {
@@ -20,7 +20,7 @@ const TroopsView = () => {
     } finally {
       setLoadingCatalog(false);
     }
-  }, [currentCity]);
+  }, []);
 
   useEffect(() => {
     const bootstrap = async () => {
