@@ -1,7 +1,7 @@
 from collections import Counter
 
 from app.main import app
-from app.routers.chat import websocket_chat
+from app.routers.auth import create_access_token
 
 
 MVP_HTTP_CONTRACT = {
@@ -83,12 +83,7 @@ def _http_pairs():
 
 
 def _walk_routes(routes, seen=None):
-    """Recursively traverse Starlette/FastAPI route containers.
-
-    Framework releases have changed which route path attributes are exposed,
-    so traversal is used only for implementation identity and duplicate HTTP
-    detection. The HTTP contract itself is read from OpenAPI above.
-    """
+    """Recursively traverse route containers for duplicate HTTP detection."""
 
     if seen is None:
         seen = set()
@@ -140,16 +135,15 @@ def test_queue_router_is_not_double_prefixed():
     assert all(not path.startswith("/queue/queue/") for _, path in registered)
 
 
-def test_global_chat_websocket_is_registered():
-    """Verify the chat endpoint is mounted without depending on route internals.
+def test_global_chat_websocket_is_registered(client, user):
+    """Prove the real authenticated websocket handshake, not route internals."""
 
-    Starlette 1.x no longer exposes ``path`` consistently on websocket route
-    wrappers. The endpoint callable remains stable and proves that the included
-    chat router reached the application routing tree.
-    """
-
-    endpoints = {
-        getattr(route, "endpoint", None)
-        for route in _walk_routes(app.routes)
-    }
-    assert websocket_chat in endpoints
+    token = create_access_token(
+        {
+            "sub": user.username,
+            "type": "access",
+            "ver": user.auth_version,
+        }
+    )
+    with client.websocket_connect(f"/chat/global?token={token}"):
+        pass
