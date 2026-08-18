@@ -74,7 +74,6 @@ TRAINING_TIMES: Dict[str, int] = {
     "catapult": 180,
 }
 
-
 UNIT_REQUIREMENTS: Dict[str, Dict[str, int]] = {
     "basic_infantry": {"barracks": 1},
     "heavy_infantry": {"barracks": 3, "smithy": 1},
@@ -87,44 +86,51 @@ UNIT_REQUIREMENTS: Dict[str, Dict[str, int]] = {
     "noble": {"town_hall": 20, "workshop": 10},
 }
 
-# RESEARCH_COSTS is now handled in research service, but we might need it here if we want to keep the old logic
-# For now, I will remove it as it is duplicated in research service.
 
 def check_requirements(city: models.City, unit_type: str):
-    # Check buildings
     reqs = UNIT_REQUIREMENTS.get(unit_type, {})
     for building_name, level in reqs.items():
         building = next((b for b in city.buildings if b.name == building_name), None)
         if not building or building.level < level:
             raise ValueError(f"Requirement not met: {building_name} level {level}")
-            
-    # Check research
-    if not research_service.is_researched(db=Session.object_session(city), city_id=city.id, tech_name=unit_type):
+
+    if not research_service.is_researched(
+        db=Session.object_session(city), city_id=city.id, tech_name=unit_type
+    ):
         raise ValueError(f"Unit {unit_type} not researched")
 
 
 def research_unit(db: Session, city: models.City, unit_type: str):
-    # Delegate to research service
     research_service.research_tech(db, city, unit_type)
 
 
 def queue_training(
     db: Session, city: models.City, unit_type: str, quantity: int
 ) -> models.TroopQueue:
-    """Add a troop training order to the queue after validation and payment."""
+    """Add a training order while serializing resource and queue-slot checks."""
 
     if quantity <= 0:
         raise ValueError("Quantity must be positive")
 
     status = premium_service.get_or_create_status(db, city.owner)
+    city, production_gains = production.lock_and_recalculate_resources(db, city)
+    db.expire(city, ["buildings"])
+
     existing_queue = (
-        db.query(models.TroopQueue).filter(models.TroopQueue.city_id == city.id).count()
+        db.query(models.TroopQueue)
+        .filter(models.TroopQueue.city_id == city.id)
+        .count()
     )
     allowed_slots = premium_service.get_troop_queue_limit(status)
     if existing_queue >= allowed_slots:
+        db.rollback()
         raise ValueError("No troop training queue slots available")
 
-    check_requirements(city, unit_type)
+    try:
+        check_requirements(city, unit_type)
+    except Exception:
+        db.rollback()
+        raise
 
     total_cost = {
         resource: cost * quantity
@@ -132,11 +138,10 @@ def queue_training(
         .get(unit_type, {"wood": 10, "clay": 10, "iron": 10})
         .items()
     }
-    production.recalculate_resources(db, city)
-    
     if not production.check_cost(city, total_cost):
+        db.rollback()
         raise ValueError("Insufficient resources")
-        
+
     production.pay_cost(city, total_cost)
 
     base_time = get_training_times().get(unit_type, 45)
@@ -154,6 +159,8 @@ def queue_training(
     db.add(queue_entry)
     db.commit()
     db.refresh(queue_entry)
+    production.record_resource_gains(db, city, production_gains)
+
     logger.info(
         "troop_training_queued",
         extra={
@@ -233,13 +240,11 @@ def process_troop_queues(db: Session) -> List[dict]:
     for owner_id in updated_owners:
         if owner_id and finished_info:
             city_id = finished_info[0]["city_id"]
-            world_id = (
-                db.query(models.City)
-                .filter(models.City.id == city_id)
-                .first()
-            )
-            if world_id:
-                ranking.recalculate_player_and_alliance_scores(db, owner_id, world_id.world_id)
+            world = db.query(models.City).filter(models.City.id == city_id).first()
+            if world:
+                ranking.recalculate_player_and_alliance_scores(
+                    db, owner_id, world.world_id
+                )
     logger.info(
         "troop_training_completed",
         extra={
@@ -251,30 +256,38 @@ def process_troop_queues(db: Session) -> List[dict]:
 
 
 def cancel_troop_queue(db: Session, queue_id: int, user_id: int) -> bool:
-    """Cancel a troop training queue and refund a percentage of resources."""
+    """Cancel a troop queue and refund it inside the city resource lock."""
+
     queue_entry = (
         db.query(models.TroopQueue)
         .join(models.City)
-        .filter(models.TroopQueue.id == queue_id, models.City.owner_id == user_id)
+        .filter(
+            models.TroopQueue.id == queue_id,
+            models.City.owner_id == user_id,
+        )
+        .with_for_update()
         .first()
     )
     if not queue_entry:
         return False
 
-    city = queue_entry.city
-    
-    # Calculate refund (e.g., 80% of cost)
-    unit_cost = get_unit_costs().get(queue_entry.troop_type, {"wood": 0, "clay": 0, "iron": 0})
+    city, production_gains = production.lock_and_recalculate_resources(
+        db, queue_entry.city_id
+    )
+
+    unit_cost = get_unit_costs().get(
+        queue_entry.troop_type, {"wood": 0, "clay": 0, "iron": 0}
+    )
     total_cost = {r: c * queue_entry.amount for r, c in unit_cost.items()}
-    
+
     refund_factor = 0.8
     refund = {r: int(amount * refund_factor) for r, amount in total_cost.items()}
-    
-    production.recalculate_resources(db, city)
+
     for resource, amount in refund.items():
         current_val = getattr(city, resource)
         setattr(city, resource, current_val + amount)
-        
+
     db.delete(queue_entry)
     db.commit()
+    production.record_resource_gains(db, city, production_gains)
     return True
