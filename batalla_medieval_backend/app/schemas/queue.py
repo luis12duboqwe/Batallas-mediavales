@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from .movement import MovementRead
 
@@ -15,12 +15,11 @@ class BuildingQueueCreate(BuildingQueueBase):
 
 
 class BuildingQueueRead(BuildingQueueBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     target_level: int
     finish_time: datetime
-
-    class Config:
-        orm_mode = True
 
 
 class TroopQueueBase(BaseModel):
@@ -34,11 +33,10 @@ class TroopQueueCreate(TroopQueueBase):
 
 
 class TroopQueueRead(TroopQueueBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     finish_time: datetime
-
-    class Config:
-        orm_mode = True
 
 
 class QueueStatus(BaseModel):
