@@ -1,0 +1,51 @@
+name: G1 lock sync
+
+on:
+  push:
+    branches:
+      - security/G1-auth-e2e
+    paths:
+      - .github/workflows/g1-lock-sync.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v7
+        with:
+          ref: security/G1-auth-e2e
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: batalla_medieval_frontend/package-lock.json
+
+      - name: Synchronize package lock
+        working-directory: batalla_medieval_frontend
+        run: npm install --package-lock-only
+
+      - name: Verify install, audit and build
+        working-directory: batalla_medieval_frontend
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npm run lint
+          npm run build
+
+      - name: Commit synchronized lockfile
+        run: |
+          if git diff --quiet -- batalla_medieval_frontend/package-lock.json; then
+            echo "Lockfile already synchronized"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add batalla_medieval_frontend/package-lock.json
+          git commit -m "fix(G1): synchronize frontend lockfile"
+          git push origin HEAD:security/G1-auth-e2e
