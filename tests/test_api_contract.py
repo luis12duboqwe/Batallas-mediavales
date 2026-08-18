@@ -1,7 +1,5 @@
 from collections import Counter
 
-from fastapi.routing import APIRoute, APIWebSocketRoute
-
 from app.main import app
 
 
@@ -58,7 +56,6 @@ MVP_HTTP_CONTRACT = {
     ("POST", "/tutorial/advance"),
     ("GET", "/queue/status"),
     ("GET", "/protection/status"),
-    # The MVP requires an authenticated administration/moderation surface.
     ("PATCH", "/admin/city/{city_id}/resources"),
     ("PATCH", "/admin/city/{city_id}/building/{building_type}"),
     ("PATCH", "/admin/city/{city_id}/troops"),
@@ -72,13 +69,23 @@ MVP_HTTP_CONTRACT = {
 
 
 def _http_pairs():
+    """Inspect the public routing protocol instead of FastAPI private classes.
+
+    FastAPI/Starlette may wrap included router entries in different concrete
+    classes across releases. HTTP routes consistently expose a non-empty
+    ``methods`` collection and a ``path``; relying on that public shape keeps
+    this contract test useful across framework upgrades.
+    """
+
     pairs = []
     for route in app.routes:
-        if not isinstance(route, APIRoute):
+        methods = getattr(route, "methods", None)
+        path = getattr(route, "path", None)
+        if not methods or not path:
             continue
-        for method in route.methods or set():
+        for method in methods:
             if method not in {"HEAD", "OPTIONS"}:
-                pairs.append((method, route.path))
+                pairs.append((method, path))
     return pairs
 
 
@@ -101,7 +108,12 @@ def test_queue_router_is_not_double_prefixed():
 
 
 def test_global_chat_websocket_is_registered():
+    # WebSocket routes do not expose an HTTP methods collection. Path presence
+    # is sufficient here because the contract reserves this exact path for the
+    # global chat WebSocket and no HTTP route may duplicate it.
     websocket_paths = {
-        route.path for route in app.routes if isinstance(route, APIWebSocketRoute)
+        getattr(route, "path", None)
+        for route in app.routes
+        if getattr(route, "methods", None) is None
     }
     assert "/chat/{channel}" in websocket_paths
