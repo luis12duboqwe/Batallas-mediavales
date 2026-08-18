@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class AchievementBase(BaseModel):
@@ -12,23 +12,20 @@ class AchievementBase(BaseModel):
 
 
 class AchievementRead(AchievementBase):
-    id: int
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        orm_mode = True
+    id: int
 
 
 class AchievementProgressRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     status: str
     current_progress: int
 
-    class Config:
-        orm_mode = True
-
 
 class AchievementWithProgress(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     achievement: AchievementRead
     progress: AchievementProgressRead
-
-    class Config:
-        orm_mode = True
