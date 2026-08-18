@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 import socketio
 
-from .database import Base, engine, SessionLocal
+from .database import SessionLocal
 from .middleware.language import LanguageMiddleware
 from .scheduler import start_scheduler, shutdown_scheduler
 from .services import hero as hero_service
@@ -38,8 +38,6 @@ from .routers import (
 )
 
 logger = logging.getLogger(__name__)
-
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Batalla Medieval Backend")
 

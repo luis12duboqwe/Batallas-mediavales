@@ -16,6 +16,20 @@ services:
     networks:
       - web
 
+  migrate:
+    build:
+      context: ./batalla_medieval_backend
+    image: ${BACKEND_IMAGE:-batalla-medieval-backend:local}
+    command: alembic -c /app/alembic.ini upgrade head
+    restart: "no"
+    environment:
+      DATABASE_URL: ${DB_URL:?Set DB_URL in .env}
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - web
+
   backend:
     build:
       context: ./batalla_medieval_backend
@@ -31,8 +45,8 @@ services:
       FROM_EMAIL: ${FROM_EMAIL:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
     depends_on:
-      database:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
