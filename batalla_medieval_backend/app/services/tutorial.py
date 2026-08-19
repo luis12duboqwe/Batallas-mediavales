@@ -68,8 +68,8 @@ def _derive_step(db: Session, user: models.User, city: models.City | None) -> in
         .first()
     )
     if not trained:
-        # An already-dispatched attack is durable proof that usable troops had
-        # been trained even if all of them are currently marching.
+        # A dispatched attack is durable proof that usable troops were trained,
+        # even while every trained unit is currently marching.
         trained = (
             db.query(models.Movement.id)
             .filter(
@@ -145,8 +145,49 @@ def _grant_reward(db: Session, city: models.City) -> dict[str, float]:
     return granted
 
 
+def _response(
+    *,
+    user: models.User,
+    step: int,
+    granted: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    step = max(0, min(int(step), FINAL_STEP))
+    reward_claimed = bool(user.tutorial_reward_claimed)
+    return {
+        "step": step,
+        "total_steps": FINAL_STEP,
+        "completed": step >= FINAL_STEP,
+        "reward_claimed": reward_claimed,
+        "reward": TUTORIAL_REWARD if reward_claimed else None,
+        "reward_granted_now": granted or {},
+        "next_action": STEP_LABELS[step],
+    }
+
+
+def get_progress(db: Session, user: models.User) -> dict[str, Any]:
+    """Return current tutorial state without acquiring write locks or committing.
+
+    The browser polls this endpoint. Keeping it strictly read-only prevents a
+    harmless status refresh from competing with city/profile reads in SQLite
+    development and keeps GET semantics safe in every environment.
+    """
+
+    fresh_user = db.query(models.User).filter(models.User.id == user.id).one()
+    city = _active_city(db, fresh_user)
+    derived_step = _derive_step(db, fresh_user, city)
+    persisted_step = int(fresh_user.tutorial_step or 0)
+    step = max(derived_step, persisted_step)
+    if fresh_user.tutorial_reward_claimed:
+        step = FINAL_STEP
+    return _response(user=fresh_user, step=step)
+
+
 def sync_progress(db: Session, user: models.User) -> dict[str, Any]:
-    """Recompute tutorial progress from durable state and grant reward once."""
+    """Persist verified progress and claim the final reward exactly once.
+
+    This write path is intentionally POST-only. Concurrent final claims are
+    serialized by the user row lock and the reward flag.
+    """
 
     locked_user = (
         db.query(models.User)
@@ -157,7 +198,9 @@ def sync_progress(db: Session, user: models.User) -> dict[str, Any]:
     )
     city = _active_city(db, locked_user)
     derived_step = _derive_step(db, locked_user, city)
-    locked_user.tutorial_step = max(min(derived_step, FINAL_STEP), locked_user.tutorial_step)
+    new_step = max(min(derived_step, FINAL_STEP), int(locked_user.tutorial_step or 0))
+    changed = new_step != int(locked_user.tutorial_step or 0)
+    locked_user.tutorial_step = new_step
 
     granted: dict[str, float] = {}
     if derived_step >= FINAL_STEP and not locked_user.tutorial_reward_claimed:
@@ -166,18 +209,18 @@ def sync_progress(db: Session, user: models.User) -> dict[str, Any]:
         granted = _grant_reward(db, city)
         locked_user.tutorial_reward_claimed = True
         locked_user.tutorial_step = FINAL_STEP
+        changed = True
 
-    db.add(locked_user)
-    db.commit()
-    db.refresh(locked_user)
+    if changed:
+        db.add(locked_user)
+        db.commit()
+        db.refresh(locked_user)
+    else:
+        # Release the SELECT FOR UPDATE transaction without producing a write.
+        db.rollback()
+        locked_user = db.query(models.User).filter(models.User.id == user.id).one()
 
-    step = min(int(locked_user.tutorial_step or 0), FINAL_STEP)
-    return {
-        "step": step,
-        "total_steps": FINAL_STEP,
-        "completed": step >= FINAL_STEP,
-        "reward_claimed": bool(locked_user.tutorial_reward_claimed),
-        "reward": TUTORIAL_REWARD if locked_user.tutorial_reward_claimed else None,
-        "reward_granted_now": granted,
-        "next_action": STEP_LABELS[step],
-    }
+    step = max(int(locked_user.tutorial_step or 0), derived_step)
+    if locked_user.tutorial_reward_claimed:
+        step = FINAL_STEP
+    return _response(user=locked_user, step=step, granted=granted)
