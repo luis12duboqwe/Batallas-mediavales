@@ -1,6 +1,7 @@
 import { chromium } from '@playwright/test';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:4173';
+const API_URL = process.env.VITE_API_URL || 'http://127.0.0.1:8000';
 const USERNAME = 'g2_browser';
 const PASSWORD = 'G2-Browser-Test-2026!';
 
@@ -22,13 +23,63 @@ page.on('response', (response) => {
   }
 });
 
-try {
+async function login() {
   await page.goto(`${BASE_URL}/login`, { waitUntil: 'networkidle' });
   const inputs = page.locator('form input');
   await inputs.nth(0).fill(USERNAME);
   await inputs.nth(1).fill(PASSWORD);
   await page.getByRole('button', { name: 'Entrar' }).click();
   await page.waitForURL(`${BASE_URL}/`, { timeout: 15000 });
+}
+
+async function durableSnapshot() {
+  return page.evaluate(async (apiUrl) => {
+    const token = localStorage.getItem('bm_token');
+    if (!token) throw new Error('Missing bm_token after authenticated navigation');
+    const headers = { Authorization: `Bearer ${token}` };
+    const profileResponse = await fetch(`${apiUrl}/auth/me`, { headers });
+    if (!profileResponse.ok) {
+      throw new Error(`Profile snapshot failed: ${profileResponse.status}`);
+    }
+    const profile = await profileResponse.json();
+    const citiesResponse = await fetch(`${apiUrl}/city/?world_id=${profile.world_id}`, { headers });
+    if (!citiesResponse.ok) {
+      throw new Error(`City snapshot failed: ${citiesResponse.status}`);
+    }
+    const cities = await citiesResponse.json();
+    return {
+      userId: profile.id,
+      worldId: profile.world_id,
+      cityIds: cities.map((city) => city.id).sort((a, b) => a - b),
+    };
+  }, API_URL);
+}
+
+try {
+  await login();
+  const initialSnapshot = await durableSnapshot();
+  if (!initialSnapshot.worldId || initialSnapshot.cityIds.length === 0) {
+    failures.push(`Authenticated fixture has no durable world/city progress: ${JSON.stringify(initialSnapshot)}`);
+  }
+
+  // A full browser reload must preserve the authenticated durable game state.
+  await page.reload({ waitUntil: 'networkidle' });
+  if (new URL(page.url()).pathname !== '/') {
+    failures.push(`Reload did not preserve the game route: ${page.url()}`);
+  }
+  const reloadedSnapshot = await durableSnapshot();
+  if (JSON.stringify(reloadedSnapshot) !== JSON.stringify(initialSnapshot)) {
+    failures.push(`Reload changed durable progress: ${JSON.stringify({ initialSnapshot, reloadedSnapshot })}`);
+  }
+
+  // Closing the session and signing in again must recover the same world/city.
+  await page.getByRole('button', { name: /salir|cerrar sesión|logout/i }).click();
+  await page.waitForURL(`${BASE_URL}/login`, { timeout: 10000 });
+  await login();
+  const reloggedSnapshot = await durableSnapshot();
+  if (JSON.stringify(reloggedSnapshot) !== JSON.stringify(initialSnapshot)) {
+    failures.push(`Re-login changed durable progress: ${JSON.stringify({ initialSnapshot, reloggedSnapshot })}`);
+  }
 
   const acceptedRoutes = [
     '/',
@@ -62,7 +113,7 @@ try {
   if (failures.length > 0) {
     throw new Error(failures.join('\n'));
   }
-  console.log('G2 browser smoke passed without console errors or HTTP 5xx');
+  console.log('G2 browser smoke passed: reload/re-login stable, no console errors or HTTP 5xx');
 } finally {
   await browser.close();
 }
