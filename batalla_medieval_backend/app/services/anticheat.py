@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -111,6 +111,11 @@ def check_multiaccount_ip(db: Session, user: models.User, client_ip: str | None)
 def check_repeated_account_interactions(
     db: Session, origin_city: models.City, target_city: models.City, movement_type: str
 ):
+    # Multi-account heuristics only make sense between two player-owned cities.
+    # Barbarian villages deliberately have owner_id=None.
+    if origin_city.owner is None or target_city.owner is None:
+        return
+
     recent = (
         db.query(models.Movement)
         .filter(
@@ -126,7 +131,8 @@ def check_repeated_account_interactions(
         timestamps = [mv.arrival_time for mv in recent if mv.arrival_time]
         if len(timestamps) >= 2:
             intervals = [
-                abs((timestamps[i] - timestamps[i + 1]).total_seconds()) for i in range(len(timestamps) - 1)
+                abs((timestamps[i] - timestamps[i + 1]).total_seconds())
+                for i in range(len(timestamps) - 1)
             ]
             if intervals and max(intervals) - min(intervals) < 1:
                 flag_violation(
@@ -134,7 +140,8 @@ def check_repeated_account_interactions(
                     origin_city.owner,
                     "multiaccount_actions",
                     "high",
-                    f"Repeated identical {movement_type} actions between {origin_city.owner.username} and {target_city.owner.username}",
+                    f"Repeated identical {movement_type} actions between "
+                    f"{origin_city.owner.username} and {target_city.owner.username}",
                 )
 
 
@@ -147,6 +154,9 @@ def check_movement_legitimacy(
     speed_used: float,
     spy_count: int = 0,
 ):
+    if origin_city.owner is None:
+        return
+
     now = utc_now()
     distance = ((origin_city.x - target_city.x) ** 2 + (origin_city.y - target_city.y) ** 2) ** 0.5
     min_hours = distance / max(speed_used, 0.01)
@@ -176,8 +186,14 @@ def check_movement_legitimacy(
     log_action(db, origin_city.owner, signature, f"Scheduled arrival at {arrival_time}")
     check_repeated_actions(db, origin_city.owner, signature)
 
-    if spy_count and movement_type == "spy" and spy_count <= 0:
-        flag_violation(db, origin_city.owner, "spy_exploit", "medium", "Invalid spy count provided")
+    if movement_type == "spy" and spy_count <= 0:
+        flag_violation(
+            db,
+            origin_city.owner,
+            "spy_exploit",
+            "medium",
+            "Invalid spy count provided",
+        )
 
 
 def check_spy_result(db: Session, attacker: models.User, success_chance: float, success: bool):
