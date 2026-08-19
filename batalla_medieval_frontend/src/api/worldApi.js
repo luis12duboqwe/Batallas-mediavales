@@ -3,12 +3,19 @@ import axiosClient from './axiosClient';
 export const worldApi = {
   listWorlds: () => axiosClient.get('/worlds/'),
 
-  // user.world_id is the persisted selector already used by city loading.
-  // Reading it from the authenticated profile keeps reload/re-login aligned
-  // with the durable session state and avoids an extra boot-time endpoint.
+  // Build the selector snapshot from the same durable sources used elsewhere:
+  // the world catalogue plus the authenticated profile's persisted world_id.
   getActiveWorld: async () => {
-    const profile = await axiosClient.get('/auth/me');
-    return { data: { id: profile.data.world_id ?? null } };
+    const [worldsResponse, profileResponse] = await Promise.all([
+      axiosClient.get('/worlds/'),
+      axiosClient.get('/auth/me'),
+    ]);
+    return {
+      data: {
+        worlds: worldsResponse.data || [],
+        current_world_id: profileResponse.data.world_id ?? null,
+      },
+    };
   },
 
   setActiveWorld: (worldId) =>
