@@ -35,6 +35,13 @@ class WorldRead(WorldBase):
     winner: Optional[WorldWinner] = None
 
 
+class ActiveWorldSnapshot(BaseModel):
+    """Persisted selector state plus the currently active world catalogue."""
+
+    current_world_id: Optional[int] = None
+    worlds: list[WorldRead]
+
+
 class PlayerWorldRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
