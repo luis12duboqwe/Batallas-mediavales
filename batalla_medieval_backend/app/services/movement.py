@@ -559,7 +559,10 @@ def _resolve_oasis_attack_core(
 def _resolve_spy_core(db: Session, movement: models.Movement) -> List[dict[str, Any]]:
     if not movement.origin_city or not movement.target_city:
         return []
-    _, _, surviving_spies, success_chance, success = espionage.resolve_spy(db, movement)
+    attacker_report, _, surviving_spies = espionage.resolve_spy(db, movement)
+    report_data = json.loads(attacker_report.content)
+    success_chance = float(report_data.get("success_chance", 0.0))
+    success = bool(report_data.get("success", False))
     if surviving_spies > 0:
         _create_return_movement(
             db,
