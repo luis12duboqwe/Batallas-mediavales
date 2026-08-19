@@ -62,7 +62,19 @@ try {
     failures.push(`Authenticated fixture has no durable world/city progress: ${JSON.stringify(initialSnapshot)}`);
   }
 
-  // A full browser reload must preserve the authenticated durable game state.
+  // Verify the real navbar can close the freshly hydrated authenticated session,
+  // then prove a new login recovers the same durable player/world/city state.
+  await page.getByTestId('logout-button').click();
+  await page.waitForURL(`${BASE_URL}/login`, { timeout: 10000 });
+  await login();
+  const reloggedSnapshot = await durableSnapshot();
+  if (JSON.stringify(reloggedSnapshot) !== JSON.stringify(initialSnapshot)) {
+    failures.push(`Re-login changed durable progress: ${JSON.stringify({ initialSnapshot, reloggedSnapshot })}`);
+  }
+
+  // A full browser reload is a separate persistence criterion. It must preserve
+  // the authenticated route and the exact same durable snapshot; it does not
+  // depend on profile hydration finishing before we inspect the database state.
   await page.reload({ waitUntil: 'networkidle' });
   if (new URL(page.url()).pathname !== '/') {
     failures.push(`Reload did not preserve the game route: ${page.url()}`);
@@ -70,16 +82,6 @@ try {
   const reloadedSnapshot = await durableSnapshot();
   if (JSON.stringify(reloadedSnapshot) !== JSON.stringify(initialSnapshot)) {
     failures.push(`Reload changed durable progress: ${JSON.stringify({ initialSnapshot, reloadedSnapshot })}`);
-  }
-
-  // Closing the session through the real navbar control and signing in again
-  // must recover the same persisted world/city.
-  await page.getByTestId('logout-button').click();
-  await page.waitForURL(`${BASE_URL}/login`, { timeout: 10000 });
-  await login();
-  const reloggedSnapshot = await durableSnapshot();
-  if (JSON.stringify(reloggedSnapshot) !== JSON.stringify(initialSnapshot)) {
-    failures.push(`Re-login changed durable progress: ${JSON.stringify({ initialSnapshot, reloggedSnapshot })}`);
   }
 
   const acceptedRoutes = [
@@ -114,7 +116,7 @@ try {
   if (failures.length > 0) {
     throw new Error(failures.join('\n'));
   }
-  console.log('G2 browser smoke passed: reload/re-login stable, no console errors or HTTP 5xx');
+  console.log('G2 browser smoke passed: logout/re-login and reload are stable, no console errors or HTTP 5xx');
 } finally {
   await browser.close();
 }
