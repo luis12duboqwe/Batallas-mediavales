@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { SocketProvider } from './context/SocketContext';
 import App from './App.jsx';
 import LoadingScreen from './components/LoadingScreen.jsx';
 import IntroAnimation from './components/IntroAnimation.jsx';
@@ -33,9 +32,7 @@ const ExperienceShell = () => {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
-      <SocketProvider>
-        <ExperienceShell />
-      </SocketProvider>
+      <ExperienceShell />
     </BrowserRouter>
   </React.StrictMode>
 );
