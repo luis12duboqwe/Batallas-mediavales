@@ -20,7 +20,7 @@ def advance_tutorial(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """Refresh tutorial progress without trusting a client-supplied step."""
+    """Persist verified progress without trusting a client-supplied step."""
 
     _ = update.step  # Backwards-compatible request body; intentionally ignored.
     return tutorial_service.sync_progress(db, current_user)
@@ -31,4 +31,6 @@ def get_tutorial_status(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    return tutorial_service.sync_progress(db, current_user)
+    """Return derived tutorial state without mutating the database."""
+
+    return tutorial_service.get_progress(db, current_user)
