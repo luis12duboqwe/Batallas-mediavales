@@ -8,6 +8,7 @@ from app.services import world_membership
 
 USERNAME = "g2_browser"
 PASSWORD = "G2-Browser-Test-2026!"
+EMAIL = "g2-browser@example.com"
 
 
 def main() -> None:
@@ -26,7 +27,7 @@ def main() -> None:
         if user is None:
             user = models.User(
                 username=USERNAME,
-                email="g2-browser@example.test",
+                email=EMAIL,
                 hashed_password=get_password_hash(PASSWORD),
                 is_verified=True,
             )
@@ -34,6 +35,7 @@ def main() -> None:
             db.commit()
             db.refresh(user)
         else:
+            user.email = EMAIL
             user.hashed_password = get_password_hash(PASSWORD)
             user.is_verified = True
             db.add(user)
