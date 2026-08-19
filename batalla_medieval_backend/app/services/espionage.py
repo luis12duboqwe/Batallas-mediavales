@@ -19,6 +19,7 @@ def build_report_content(
     attacker_city: models.City,
     defender_city: models.City,
     success: bool,
+    success_chance: float,
     reported_as_unknown: bool,
     attacker_spies: int,
     defender_spies: int,
@@ -33,6 +34,7 @@ def build_report_content(
             "attacker": {"name": attacker_name, "spies": attacker_spies},
             "defender": {"name": defender_city.name, "spies": defender_spies},
             "success": success,
+            "success_chance": success_chance,
             "resources": resources,
             "troops": troops,
             "buildings": buildings,
@@ -42,12 +44,12 @@ def build_report_content(
 
 def resolve_spy(
     db: Session, movement: models.Movement
-) -> Tuple[models.Report, models.Report, int, float, bool]:
+) -> Tuple[models.Report, models.Report, int]:
     """Resolve espionage without committing the caller's transaction.
 
-    The movement worker owns the transaction. Anti-cheat logging is deliberately
-    returned as metadata and executed only after the movement has been committed
-    as completed, preventing helper commits from releasing the movement lock.
+    The public return shape intentionally remains the historical three-tuple.
+    Audit metadata is embedded in the report JSON so the worker can perform
+    anti-cheat logging after its authoritative transaction commits.
     """
 
     attacker_city = movement.origin_city or (
@@ -94,6 +96,7 @@ def resolve_spy(
             attacker_city=attacker_city,
             defender_city=defender_city,
             success=success,
+            success_chance=success_chance,
             reported_as_unknown=False,
             attacker_spies=attacker_spies,
             defender_spies=defender_spies,
@@ -112,6 +115,7 @@ def resolve_spy(
             attacker_city=attacker_city,
             defender_city=defender_city,
             success=success,
+            success_chance=success_chance,
             reported_as_unknown=reported_as_unknown,
             attacker_spies=attacker_spies,
             defender_spies=defender_spies,
@@ -120,4 +124,4 @@ def resolve_spy(
         defender_city_id=defender_city.id,
     )
     db.add_all([attacker_report, defender_report])
-    return attacker_report, defender_report, surviving_spies, success_chance, success
+    return attacker_report, defender_report, surviving_spies
