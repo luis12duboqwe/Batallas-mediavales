@@ -46,7 +46,9 @@ def test_g2_new_player_vertical_slice_end_to_end(
     # now hydrates from /auth/me + /worlds/ during boot.
     active_world = client.get("/worlds/active", headers=headers)
     assert active_world.status_code == 200, active_world.text
-    assert active_world.json()["id"] == world.id
+    snapshot = active_world.json()
+    assert snapshot["current_world_id"] == world.id
+    assert world.id in {item["id"] for item in snapshot["worlds"]}
 
     db_session.expire_all()
     city = (
