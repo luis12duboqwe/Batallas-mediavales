@@ -32,7 +32,14 @@ const Navbar = () => {
           <Link to="/profile" className="text-sm text-gray-200 hover:text-amber-400 font-bold">
             {user.username}
           </Link>
-          <button onClick={handleLogout} className="btn-ghost text-sm">{t('nav.logout')}</button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            data-testid="logout-button"
+            className="btn-ghost text-sm"
+          >
+            {t('nav.logout')}
+          </button>
         </div>
       )}
     </nav>
