@@ -17,9 +17,19 @@ page.on('console', (message) => {
 page.on('pageerror', (error) => {
   failures.push(`pageerror: ${error.message}`);
 });
-page.on('response', (response) => {
-  if (response.status() >= 500) {
-    failures.push(`HTTP ${response.status()}: ${response.url()}`);
+page.on('response', async (response) => {
+  if (response.status() >= 400) {
+    let body = '';
+    try {
+      body = (await response.text()).slice(0, 1000);
+    } catch {
+      body = '<unreadable>';
+    }
+    const diagnostic = `HTTP ${response.status()}: ${response.url()} body=${body}`;
+    console.log(diagnostic);
+    if (response.status() >= 500) {
+      failures.push(diagnostic);
+    }
   }
 });
 
@@ -62,8 +72,6 @@ try {
     failures.push(`Authenticated fixture has no durable world/city progress: ${JSON.stringify(initialSnapshot)}`);
   }
 
-  // Verify the real navbar can close the freshly hydrated authenticated session,
-  // then prove a new login recovers the same durable player/world/city state.
   await page.getByTestId('logout-button').click();
   await page.waitForURL(`${BASE_URL}/login`, { timeout: 10000 });
   await login();
@@ -72,9 +80,6 @@ try {
     failures.push(`Re-login changed durable progress: ${JSON.stringify({ initialSnapshot, reloggedSnapshot })}`);
   }
 
-  // A full browser reload is a separate persistence criterion. It must preserve
-  // the authenticated route and the exact same durable snapshot; it does not
-  // depend on profile hydration finishing before we inspect the database state.
   await page.reload({ waitUntil: 'networkidle' });
   if (new URL(page.url()).pathname !== '/') {
     failures.push(`Reload did not preserve the game route: ${page.url()}`);
@@ -100,7 +105,6 @@ try {
     }
   }
 
-  // Modules explicitly postponed beyond the MVP must not be routable.
   await page.goto(`${BASE_URL}/hero`, { waitUntil: 'networkidle' });
   if (new URL(page.url()).pathname !== '/') {
     failures.push(`Postponed route /hero did not redirect to /: ${page.url()}`);
