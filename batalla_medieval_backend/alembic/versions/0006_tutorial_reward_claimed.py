@@ -27,6 +27,9 @@ def upgrade() -> None:
             server_default=sa.false(),
         ),
     )
+    # Previous tutorial_step values were client-controlled and could be skipped
+    # arbitrarily. Recompute them from durable game state under the new service.
+    op.execute(sa.text("UPDATE users SET tutorial_step = 0"))
 
 
 def downgrade() -> None:
