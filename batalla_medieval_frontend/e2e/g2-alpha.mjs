@@ -72,8 +72,9 @@ try {
     failures.push(`Reload changed durable progress: ${JSON.stringify({ initialSnapshot, reloadedSnapshot })}`);
   }
 
-  // Closing the session and signing in again must recover the same world/city.
-  await page.getByRole('button', { name: /salir|cerrar sesión|logout/i }).click();
+  // Closing the session through the real navbar control and signing in again
+  // must recover the same persisted world/city.
+  await page.getByTestId('logout-button').click();
   await page.waitForURL(`${BASE_URL}/login`, { timeout: 10000 });
   await login();
   const reloggedSnapshot = await durableSnapshot();
