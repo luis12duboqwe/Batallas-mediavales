@@ -29,6 +29,7 @@ class User(Base):
     last_action_at: Mapped[Optional[datetime]]
     rename_tokens: Mapped[int] = mapped_column(default=0)
     tutorial_step: Mapped[int] = mapped_column(default=0)
+    tutorial_reward_claimed: Mapped[bool] = mapped_column(default=False)
 
     is_verified: Mapped[bool] = mapped_column(default=False)
     verification_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
