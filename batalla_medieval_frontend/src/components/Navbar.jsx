@@ -6,7 +6,8 @@ import SoundToggle from './SoundToggle';
 const Navbar = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { user, logout } = useUserStore();
+  const { user, logout, isAuthenticated } = useUserStore();
+  const authenticated = isAuthenticated();
 
   const handleLogout = () => {
     logout();
@@ -26,11 +27,11 @@ const Navbar = () => {
           </div>
         </Link>
       </div>
-      {user && (
+      {authenticated && (
         <div className="flex items-center gap-4">
           <SoundToggle />
           <Link to="/profile" className="text-sm text-gray-200 hover:text-amber-400 font-bold">
-            {user.username}
+            {user?.username || 'Perfil'}
           </Link>
           <button
             type="button"
