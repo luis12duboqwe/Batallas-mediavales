@@ -21,9 +21,7 @@ import AdminPanel from './pages/AdminPanel';
 import MarketView from './pages/MarketView';
 import AcademyView from './pages/AcademyView';
 import SendMovementView from './pages/SendMovementView';
-import ChatWidget from './components/ChatWidget';
 import TutorialOverlay from './components/TutorialOverlay';
-import NotificationListener from './components/NotificationListener';
 import { useUserStore } from './store/userStore';
 import soundManager from './services/sound';
 import { useTranslation } from 'react-i18next';
@@ -79,8 +77,6 @@ const Layout = ({ children }) => {
           <div className="relative animate-fade-in">{children}</div>
         </main>
       </div>
-      <ChatWidget />
-      <NotificationListener />
     </div>
   );
 };
