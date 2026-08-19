@@ -42,8 +42,6 @@ def test_g2_new_player_vertical_slice_end_to_end(
     joined = client.post(f"/worlds/{world.id}/join", headers=headers)
     assert joined.status_code == 200, joined.text
 
-    # Keep the historical API contract covered even though the browser selector
-    # now hydrates from /auth/me + /worlds/ during boot.
     active_world = client.get("/worlds/active", headers=headers)
     assert active_world.status_code == 200, active_world.text
     snapshot = active_world.json()
@@ -58,7 +56,6 @@ def test_g2_new_player_vertical_slice_end_to_end(
     )
     assert _tutorial(client, headers)["step"] == 1
 
-    # Seed the PvE target that the real world seed provides in deployment.
     barbarian = models.City(
         name="Tutorial Barbarian",
         owner_id=None,
@@ -99,7 +96,6 @@ def test_g2_new_player_vertical_slice_end_to_end(
     db_session.add(troop_queue)
     db_session.commit()
     troops.process_troop_queues(db_session)
-    # Training plus an available barbarian completes the map-discovery milestone.
     assert _tutorial(client, headers)["step"] == 4
 
     user.protection_ends_at = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -154,7 +150,20 @@ def test_g2_new_player_vertical_slice_end_to_end(
         resource: float(getattr(db_session.query(models.City).filter_by(id=city.id).one(), resource))
         for resource in ("wood", "clay", "iron")
     }
-    completed = _tutorial(client, headers)
+
+    # GET is read-only: it may discover completion but never performs a reward write.
+    completed_read = _tutorial(client, headers)
+    assert completed_read["step"] == 7
+    assert completed_read["completed"] is True
+    assert completed_read["reward_claimed"] is False
+
+    claim = client.post(
+        "/tutorial/advance",
+        json={"step": 999},
+        headers=headers,
+    )
+    assert claim.status_code == 200, claim.text
+    completed = claim.json()
     assert completed["step"] == 7
     assert completed["completed"] is True
     assert completed["reward_claimed"] is True
@@ -169,9 +178,15 @@ def test_g2_new_player_vertical_slice_end_to_end(
     for resource in first_balances:
         assert first_balances[resource] >= before_reward[resource]
 
-    # Reloading/retrying the completion endpoint never grants the reward twice.
-    repeated = _tutorial(client, headers)
-    assert repeated["step"] == 7
+    repeated = client.post(
+        "/tutorial/advance",
+        json={"step": 7},
+        headers=headers,
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["reward_granted_now"] == {}
+    assert _tutorial(client, headers)["reward_claimed"] is True
+
     db_session.expire_all()
     after_second = db_session.query(models.City).filter_by(id=city.id).one()
     assert {
