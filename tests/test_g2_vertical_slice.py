@@ -41,6 +41,13 @@ def test_g2_new_player_vertical_slice_end_to_end(
 
     joined = client.post(f"/worlds/{world.id}/join", headers=headers)
     assert joined.status_code == 200, joined.text
+
+    # Keep the historical API contract covered even though the browser selector
+    # now hydrates from /auth/me + /worlds/ during boot.
+    active_world = client.get("/worlds/active", headers=headers)
+    assert active_world.status_code == 200, active_world.text
+    assert active_world.json()["id"] == world.id
+
     db_session.expire_all()
     city = (
         db_session.query(models.City)
