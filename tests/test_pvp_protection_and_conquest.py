@@ -113,14 +113,9 @@ def test_barbarian_city_can_still_be_conquered(db_session, city, monkeypatch):
     db_session.add(models.Troop(city_id=city.id, unit_type="noble", quantity=1))
     db_session.commit()
 
-    monkeypatch.setattr(
-        combat,
-        "simulate_round",
-        lambda attacker, defender: {
-            "attacker_losses": {},
-            "defender_losses": {},
-        },
-    )
+    # Keep the canonical combat engine, but make its luck and loyalty roll deterministic.
+    monkeypatch.setattr(combat, "_luck", lambda: 0.0)
+    monkeypatch.setattr(combat.random, "randint", lambda low, high: 25)
 
     victory, conquered = conquest_service.resolve_conquest(
         db_session,
@@ -133,7 +128,7 @@ def test_barbarian_city_can_still_be_conquered(db_session, city, monkeypatch):
     assert victory is True
     assert conquered is True
     assert target.owner_id == city.owner_id
-    assert target.loyalty == 100.0
+    assert target.loyalty == 25.0
 
 
 @pytest.mark.parametrize(
