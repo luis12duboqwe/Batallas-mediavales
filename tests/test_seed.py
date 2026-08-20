@@ -8,6 +8,12 @@ from app.seed import (
     DEFAULT_WORLD_NAME,
     seed_game,
 )
+from app.services import balance
+
+
+def test_seed_exports_canonical_pve_aliases():
+    assert BARBARIAN_BUILDINGS is balance.BARBARIAN_STARTING_BUILDINGS
+    assert BARBARIAN_TROOPS is balance.BARBARIAN_STARTING_TROOPS
 
 
 def test_canonical_seed_is_idempotent(db_session):
@@ -43,6 +49,10 @@ def test_canonical_seed_is_idempotent(db_session):
     for city in barbarians:
         assert {building.name: building.level for building in city.buildings} == expected_buildings
         assert {troop.unit_type: troop.quantity for troop in city.troops} == expected_troops
+        assert {resource: getattr(city, resource) for resource in balance.RESOURCE_FIELDS} == (
+            balance.BARBARIAN_STARTING_RESOURCES
+        )
+        assert city.population_max == balance.BARBARIAN_POPULATION_MAX
 
 
 def test_seed_does_not_reset_existing_barbarian_progress(db_session):

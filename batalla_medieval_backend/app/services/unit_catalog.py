@@ -1,9 +1,4 @@
-"""Canonical unit, research and training definitions.
-
-The API, research service, training service and frontend availability endpoint all
-consume this module so displayed prices and requirements cannot drift from what
-the server charges.
-"""
+"""Server-side unit availability helpers backed by the versioned balance catalog."""
 
 from __future__ import annotations
 
@@ -13,94 +8,11 @@ from typing import Any, Dict
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import balance
 
-
-UNIT_ORDER = [
-    "basic_infantry",
-    "heavy_infantry",
-    "archer",
-    "fast_cavalry",
-    "heavy_cavalry",
-    "spy",
-    "ram",
-    "catapult",
-    "noble",
-]
-
-UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
-    "basic_infantry": {
-        "training_cost": {"wood": 50.0, "clay": 30.0, "iron": 20.0},
-        "training_time_seconds": 45,
-        "training_requirements": {"barracks": 1},
-        "research_cost": {},
-        "research_requirements": {},
-        "researchable": False,
-    },
-    "heavy_infantry": {
-        "training_cost": {"wood": 70.0, "clay": 60.0, "iron": 50.0},
-        "training_time_seconds": 60,
-        "training_requirements": {"barracks": 3, "smithy": 1},
-        "research_cost": {"wood": 500.0, "clay": 400.0, "iron": 300.0},
-        "research_requirements": {"barracks": 3},
-        "researchable": True,
-    },
-    "archer": {
-        "training_cost": {"wood": 80.0, "clay": 40.0, "iron": 40.0},
-        "training_time_seconds": 50,
-        "training_requirements": {"barracks": 5, "smithy": 3},
-        "research_cost": {"wood": 600.0, "clay": 300.0, "iron": 300.0},
-        "research_requirements": {"barracks": 5},
-        "researchable": True,
-    },
-    "fast_cavalry": {
-        "training_cost": {"wood": 120.0, "clay": 80.0, "iron": 100.0},
-        "training_time_seconds": 70,
-        "training_requirements": {"stable": 1},
-        "research_cost": {"wood": 1000.0, "clay": 800.0, "iron": 600.0},
-        "research_requirements": {"stable": 3},
-        "researchable": True,
-    },
-    "heavy_cavalry": {
-        "training_cost": {"wood": 200.0, "clay": 150.0, "iron": 200.0},
-        "training_time_seconds": 80,
-        "training_requirements": {"stable": 5, "smithy": 5},
-        "research_cost": {"wood": 2000.0, "clay": 1500.0, "iron": 1500.0},
-        "research_requirements": {"stable": 10},
-        "researchable": True,
-    },
-    "spy": {
-        "training_cost": {"wood": 40.0, "clay": 40.0, "iron": 40.0},
-        "training_time_seconds": 30,
-        "training_requirements": {"stable": 1},
-        "research_cost": {"wood": 200.0, "clay": 200.0, "iron": 200.0},
-        "research_requirements": {"stable": 1},
-        "researchable": True,
-    },
-    "ram": {
-        "training_cost": {"wood": 300.0, "clay": 200.0, "iron": 150.0},
-        "training_time_seconds": 90,
-        "training_requirements": {"workshop": 1},
-        "research_cost": {"wood": 1500.0, "clay": 1000.0, "iron": 1000.0},
-        "research_requirements": {"barracks": 10},
-        "researchable": True,
-    },
-    "catapult": {
-        "training_cost": {"wood": 350.0, "clay": 250.0, "iron": 300.0},
-        "training_time_seconds": 120,
-        "training_requirements": {"workshop": 5},
-        "research_cost": {"wood": 2000.0, "clay": 1500.0, "iron": 1500.0},
-        "research_requirements": {"barracks": 15},
-        "researchable": True,
-    },
-    "noble": {
-        "training_cost": {"wood": 1000.0, "clay": 1000.0, "iron": 1000.0},
-        "training_time_seconds": 45,
-        "training_requirements": {"town_hall": 20, "workshop": 10},
-        "research_cost": {"wood": 10000.0, "clay": 10000.0, "iron": 10000.0},
-        "research_requirements": {"town_hall": 20},
-        "researchable": True,
-    },
-}
+# Compatibility aliases: definitions live only in ``balance``.
+UNIT_ORDER = balance.UNIT_ORDER
+UNIT_CATALOG = balance.UNIT_CATALOG
 
 
 def get_unit(unit_type: str) -> Dict[str, Any]:
@@ -119,7 +31,9 @@ def requirements_met(city: models.City, requirements: Dict[str, int]) -> bool:
     return all(levels.get(name, 0) >= level for name, level in requirements.items())
 
 
-def first_missing_requirement(city: models.City, requirements: Dict[str, int]) -> tuple[str, int] | None:
+def first_missing_requirement(
+    city: models.City, requirements: Dict[str, int]
+) -> tuple[str, int] | None:
     levels = _building_levels(city)
     for name, level in requirements.items():
         if levels.get(name, 0) < level:
@@ -141,6 +55,80 @@ def is_researched(db: Session, city_id: int, unit_type: str) -> bool:
     )
 
 
+def _unit_population(unit_type: str, quantity: int) -> int:
+    definition = UNIT_CATALOG.get(unit_type)
+    if definition is None:
+        return 0
+    return max(int(quantity), 0) * int(definition.get("population", 1))
+
+
+def get_population_used(db: Session, city: models.City) -> int:
+    """Return committed population, including troops temporarily away."""
+
+    used = sum(
+        _unit_population(troop.unit_type, troop.quantity)
+        for troop in city.troops
+    )
+
+    outgoing = (
+        db.query(models.Movement)
+        .filter(
+            models.Movement.origin_city_id == city.id,
+            models.Movement.status == "ongoing",
+            models.Movement.movement_type.in_(["attack", "spy", "reinforce"]),
+        )
+        .all()
+    )
+    for movement in outgoing:
+        if movement.movement_type == "spy":
+            used += _unit_population("spy", int(movement.spy_count or 0))
+        else:
+            for unit_type, quantity in (movement.troops or {}).items():
+                used += _unit_population(unit_type, int(quantity))
+
+    returning = (
+        db.query(models.Movement)
+        .filter(
+            models.Movement.target_city_id == city.id,
+            models.Movement.status == "ongoing",
+            models.Movement.movement_type == "return",
+        )
+        .all()
+    )
+    for movement in returning:
+        for unit_type, quantity in (movement.troops or {}).items():
+            used += _unit_population(unit_type, int(quantity))
+
+    return used
+
+
+def get_population_reserved_for_training(db: Session, city_id: int) -> int:
+    queues = (
+        db.query(models.TroopQueue)
+        .filter(models.TroopQueue.city_id == city_id)
+        .all()
+    )
+    return sum(
+        _unit_population(queue.troop_type, queue.amount)
+        for queue in queues
+    )
+
+
+def get_population_available(db: Session, city: models.City) -> int:
+    committed = get_population_used(db, city)
+    reserved = get_population_reserved_for_training(db, city.id)
+    return max(int(city.population_max) - committed - reserved, 0)
+
+
+def has_population_capacity(
+    db: Session,
+    city: models.City,
+    unit_type: str,
+    quantity: int,
+) -> bool:
+    return _unit_population(unit_type, quantity) <= get_population_available(db, city)
+
+
 def _can_afford(city: models.City, cost: Dict[str, float]) -> bool:
     return all(float(getattr(city, resource)) >= amount for resource, amount in cost.items())
 
@@ -149,6 +137,7 @@ def get_availability(db: Session, city: models.City) -> list[dict]:
     """Return the complete server-authoritative unit catalog for one city."""
 
     result = []
+    population_available = get_population_available(db, city)
     for unit_type in UNIT_ORDER:
         definition = get_unit(unit_type)
         researched = is_researched(db, city.id, unit_type)
@@ -159,6 +148,8 @@ def get_availability(db: Session, city: models.City) -> list[dict]:
             city, definition["research_requirements"]
         )
         researchable = bool(definition["researchable"])
+        population_cost = int(definition.get("population", 1))
+        population_capacity_met = population_cost <= population_available
 
         result.append(
             {
@@ -171,9 +162,14 @@ def get_availability(db: Session, city: models.City) -> list[dict]:
                 "researched": researched,
                 "training_requirements_met": train_requirements_met,
                 "research_requirements_met": research_requirements_met,
+                "population_cost": population_cost,
+                "population_available": population_available,
+                "population_capacity_met": population_capacity_met,
+                "upkeep_per_hour": float(definition.get("upkeep_per_hour", 0.0)),
                 "can_train": (
                     researched
                     and train_requirements_met
+                    and population_capacity_met
                     and _can_afford(city, definition["training_cost"])
                 ),
                 "can_research": (

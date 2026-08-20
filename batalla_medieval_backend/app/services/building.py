@@ -12,35 +12,18 @@ from sqlalchemy.orm import Session, selectinload
 from .. import models
 from ..utils import utc_now
 from . import achievement as achievement_service
+from . import balance
 from . import notification as notification_service
 from . import premium as premium_service
 from . import production, quest as quest_service, ranking
 
 logger = logging.getLogger(__name__)
-BUILDING_COSTS: Dict[str, Dict[str, float]] = {
-    "town_hall": {"wood": 260, "clay": 200, "iron": 150},
-    "barracks": {"wood": 200, "clay": 160, "iron": 170},
-    "stable": {"wood": 320, "clay": 260, "iron": 260},
-    "wall": {"wood": 100, "clay": 100, "iron": 50},
-    "market": {"wood": 100, "clay": 100, "iron": 100},
-    "farm": {"wood": 80, "clay": 80, "iron": 60},
-    "warehouse": {"wood": 130, "clay": 100, "iron": 90},
-    "smithy": {"wood": 220, "clay": 180, "iron": 240},
-    "workshop": {"wood": 460, "clay": 510, "iron": 600},
-    "world_wonder": {"wood": 10000, "clay": 10000, "iron": 10000},
-}
 
-BUILDING_PREREQUISITES: Dict[str, Dict[str, int]] = {
-    "stable": {"barracks": 5, "town_hall": 3},
-    "market": {"warehouse": 1, "town_hall": 2},
-    "wall": {"barracks": 1},
-    "smithy": {"town_hall": 5, "barracks": 1},
-    "workshop": {"town_hall": 10, "stable": 10},
-    "world_wonder": {"town_hall": 20, "warehouse": 20},
-}
-
-BASE_BUILD_TIME_SECONDS = 420
-REFUND_FACTOR = 0.8
+# Compatibility aliases. Balance literals live only in ``balance``.
+BUILDING_COSTS = balance.BUILDING_COSTS
+BUILDING_PREREQUISITES = balance.BUILDING_PREREQUISITES
+BASE_BUILD_TIME_SECONDS = balance.BASE_BUILD_TIME_SECONDS
+REFUND_FACTOR = balance.QUEUE_REFUND_FACTOR
 
 
 @lru_cache(maxsize=1)
@@ -57,20 +40,9 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def calculate_upgrade_cost(building_name: str, target_level: int) -> Dict[str, float]:
-    """Return the canonical cost for reaching ``target_level``.
+    """Return the canonical cost for reaching ``target_level``."""
 
-    Both the quote endpoint and the payment path call this exact function. The
-    target level is explicit so a current-level object cannot accidentally be
-    interpreted as either the source or destination level.
-    """
-
-    if target_level < 1:
-        raise ValueError("Target building level must be at least 1")
-    base = get_building_costs().get(building_name)
-    if base is None:
-        raise ValueError(f"Unknown building type: {building_name}")
-    multiplier = 1.2 ** (target_level - 1)
-    return {resource: float(value * multiplier) for resource, value in base.items()}
+    return balance.get_building_cost(building_name, target_level)
 
 
 def calculate_build_time(target_level: int) -> int:
@@ -118,7 +90,6 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
     if building_name not in BUILDING_COSTS:
         raise ValueError(f"Unknown building type: {building_name}")
 
-    # Premium status may need to be created before the city resource lock.
     status = premium_service.get_or_create_status(db, city.owner)
 
     city, production_gains = production.lock_and_recalculate_resources(db, city)
@@ -205,12 +176,7 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
 
 
 def _run_completion_side_effects(db: Session, info: dict) -> None:
-    """Run non-authoritative progress/notification effects after queue commit.
-
-    The queue row has already been deleted before any helper here can commit.
-    This prevents a concurrent processor from observing the same due queue after
-    quest/achievement services release the transaction lock.
-    """
+    """Run non-authoritative progress/notification effects after queue commit."""
 
     owner_id = info.get("owner_id")
     world_id = info.get("world_id")
@@ -329,9 +295,6 @@ def process_building_queues(db: Session) -> List[dict]:
         )
         db.delete(queue_entry)
 
-    # The authoritative mutation and queue deletion happen before helpers that
-    # perform their own commits. Once this commit succeeds, another processor
-    # cannot ever finish these queue rows again.
     db.commit()
 
     for info in finished_info:

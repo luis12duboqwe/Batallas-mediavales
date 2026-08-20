@@ -7,11 +7,12 @@ from typing import Dict, Tuple
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import balance
 from . import event as event_service
 
 
 def calculate_success(attacker_spies: int, defender_spies: int) -> float:
-    return attacker_spies / (defender_spies + 1)
+    return attacker_spies / (defender_spies + balance.SPY_DEFENDER_OFFSET)
 
 
 def build_report_content(
@@ -45,12 +46,7 @@ def build_report_content(
 def resolve_spy(
     db: Session, movement: models.Movement
 ) -> Tuple[models.Report, models.Report, int]:
-    """Resolve espionage without committing the caller's transaction.
-
-    The public return shape intentionally remains the historical three-tuple.
-    Audit metadata is embedded in the report JSON so the worker can perform
-    anti-cheat logging after its authoritative transaction commits.
-    """
+    """Resolve espionage without committing the caller's transaction."""
 
     attacker_city = movement.origin_city or (
         db.query(models.City).filter(models.City.id == movement.origin_city_id).first()
@@ -79,11 +75,12 @@ def resolve_spy(
     success = random.random() < success_chance
     surviving_spies = attacker_spies if success else 0
 
-    reported_as_unknown = bool(not success and random.random() < 0.1)
+    reported_as_unknown = bool(
+        not success and random.random() < balance.SPY_UNKNOWN_ATTACKER_CHANCE
+    )
     resources = {
-        "wood": defender_city.wood,
-        "clay": defender_city.clay,
-        "iron": defender_city.iron,
+        resource: float(getattr(defender_city, resource))
+        for resource in balance.RESOURCE_FIELDS
     }
     troops = {troop.unit_type: troop.quantity for troop in defender_city.troops}
     buildings = {building.name: building.level for building in defender_city.buildings}
@@ -102,7 +99,11 @@ def resolve_spy(
             defender_spies=defender_spies,
             resources=resources if success else None,
             troops=troops if success else None,
-            buildings=buildings if success else None,
+            buildings=(
+                buildings
+                if success and balance.SPY_REVEALS_BUILDINGS_ON_SUCCESS
+                else None
+            ),
         ),
         attacker_city_id=attacker_city.id,
         defender_city_id=defender_city.id,

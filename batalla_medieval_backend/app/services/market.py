@@ -8,16 +8,17 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..utils import utc_now
-from . import anticheat
+from . import anticheat, balance
 from . import event as event_service
 from . import movement as movement_service
 from . import production
 
 logger = logging.getLogger(__name__)
 
-MARKET_BUILDING_NAME = "market"
-MERCHANT_CAPACITY = 1000
-TRANSPORT_BASE_SPEED = 1.0
+# Compatibility aliases. Market balance lives only in ``balance``.
+MARKET_BUILDING_NAME = balance.MARKET_BUILDING_KEY
+MERCHANT_CAPACITY = balance.MERCHANT_CAPACITY_PER_LEVEL
+TRANSPORT_BASE_SPEED = balance.TRANSPORT_BASE_SPEED
 
 
 def _get_market_capacity(city: models.City) -> int:

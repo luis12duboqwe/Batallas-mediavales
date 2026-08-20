@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models
 from ..utils import utc_now
-from . import anticheat, combat, espionage
+from . import anticheat, balance, combat, espionage
 from . import event as event_service
 from . import notification as notification_service
 from . import production
@@ -20,20 +20,11 @@ from . import quest as quest_service
 
 logger = logging.getLogger(__name__)
 
-UNIT_SPEED = {
-    "basic_infantry": 0.6,
-    "heavy_infantry": 0.55,
-    "archer": 0.7,
-    "fast_cavalry": 1.2,
-    "heavy_cavalry": 0.9,
-    "spy": 1.5,
-    "ram": 0.5,
-    "catapult": 0.45,
-    "noble": 0.4,
-}
+# Compatibility aliases. Movement numbers live only in ``balance``.
+UNIT_SPEED = balance.UNIT_SPEED
 
 PLAYER_MOVEMENT_TYPES = {"attack", "spy", "reinforce", "transport"}
-RESOURCE_FIELDS = ("wood", "clay", "iron")
+RESOURCE_FIELDS = balance.RESOURCE_FIELDS
 
 
 def calculate_distance(origin: models.City, target: models.City) -> float:
@@ -70,7 +61,7 @@ def _get_base_speed(movement_type: str, troops: Dict[str, int]) -> float:
     if movement_type == "spy":
         return UNIT_SPEED["spy"]
     if movement_type == "transport":
-        return 1.0
+        return balance.TRANSPORT_BASE_SPEED
     speeds = [UNIT_SPEED[unit] for unit, amount in troops.items() if amount > 0]
     return min(speeds) if speeds else UNIT_SPEED["basic_infantry"]
 
@@ -705,7 +696,7 @@ def _resolve_transport_core(
             defender_city_id=receiver.id,
         )
 
-    speed = movement.speed_used or 1.0
+    speed = movement.speed_used or balance.TRANSPORT_BASE_SPEED
     db.add(
         models.Movement(
             origin_city_id=receiver.id,

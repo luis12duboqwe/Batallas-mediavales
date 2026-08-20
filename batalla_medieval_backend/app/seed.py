@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from . import models
 from .database import SessionLocal
-from .services import hero as hero_service
+from .services import balance, hero as hero_service
 from .services.world_gen import get_tile_type
 
 logger = logging.getLogger(__name__)
@@ -30,17 +30,9 @@ CANONICAL_BARBARIANS = (
     (15, 80),
 )
 
-BARBARIAN_BUILDINGS = (
-    ("town_hall", 1),
-    ("barracks", 1),
-    ("wall", 1),
-)
-
-BARBARIAN_TROOPS = (
-    ("basic_infantry", 20),
-    ("archer", 10),
-    ("spy", 2),
-)
+# Compatibility aliases. PvE content numbers live in the balance catalog.
+BARBARIAN_BUILDINGS = balance.BARBARIAN_STARTING_BUILDINGS
+BARBARIAN_TROOPS = balance.BARBARIAN_STARTING_TROOPS
 
 
 @dataclass(frozen=True)
@@ -81,17 +73,18 @@ def _create_barbarian_city(
     x: int,
     y: int,
 ) -> models.City:
+    resources = balance.BARBARIAN_STARTING_RESOURCES
     city = models.City(
         name=f"Aldea Bárbara {index:02d}",
         owner_id=None,
         world_id=world.id,
         x=x,
         y=y,
-        wood=1000.0,
-        clay=1000.0,
-        iron=1000.0,
-        population_max=100,
-        loyalty=100.0,
+        wood=resources["wood"],
+        clay=resources["clay"],
+        iron=resources["iron"],
+        population_max=balance.BARBARIAN_POPULATION_MAX,
+        loyalty=balance.LOYALTY_MAX,
         tile_type=get_tile_type(x, y),
     )
     db.add(city)

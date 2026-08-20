@@ -13,10 +13,18 @@ axiosClient.interceptors.request.use((config) => {
   return config;
 });
 
-const PRODUCTION_PER_HOUR = {
-  wood: 15,
-  clay: 12,
-  iron: 10,
+let balanceSnapshotPromise = null;
+const loadBalanceSnapshot = () => {
+  if (!balanceSnapshotPromise) {
+    balanceSnapshotPromise = axiosClient
+      .get('/economy/balance_preview')
+      .then((response) => response.data)
+      .catch((error) => {
+        balanceSnapshotPromise = null;
+        throw error;
+      });
+  }
+  return balanceSnapshotPromise;
 };
 
 const EMPTY_OVERVIEW = {
@@ -60,8 +68,15 @@ export const api = {
   resetPassword: (token, newPassword) => axiosClient.post('/auth/reset-password', { token, new_password: newPassword }),
   getProfile: () => axiosClient.get('/auth/me'),
   updateProfile: (data) => axiosClient.patch('/auth/me', data),
+  getBalance: () => loadBalanceSnapshot(),
   getCity: async ({ worldId, cityId } = {}) => {
-    const profileResp = await axiosClient.get('/auth/me');
+    const [profileResp, balanceResult] = await Promise.all([
+      axiosClient.get('/auth/me'),
+      loadBalanceSnapshot().catch((error) => {
+        console.warn('Unable to load balance snapshot', error);
+        return null;
+      }),
+    ]);
     const resolvedWorldId = worldId ?? profileResp.data.world_id ?? null;
 
     let cities = [];
@@ -105,15 +120,19 @@ export const api = {
       }
     }
 
+    const productionBalance = balanceResult?.production ?? {};
+
     return {
       data: {
         user: profileResp.data,
         cities,
         city: activeCity,
         resources: statusData ? statusData : buildResourceSnapshot(activeCity),
-        storage_limit: statusData?.storage_limit ?? 5000,
+        storage_limit: statusData?.storage_limit ?? productionBalance.storage_base_capacity ?? null,
         buildings: availableBuildings.length > 0 ? availableBuildings : (activeCity?.buildings ?? []),
-        production: statusData?.production_per_hour ?? { ...PRODUCTION_PER_HOUR },
+        production: statusData?.production_per_hour ?? productionBalance.base_rates_per_hour ?? {},
+        balance: balanceResult,
+        balance_version: balanceResult?.version ?? null,
         queues: {
           buildings: queueData?.building_queues ?? [],
           troops: queueData?.troop_queues ?? [],
@@ -220,9 +239,6 @@ export const api = {
   advanceTutorial: (step) => axiosClient.post('/tutorial/advance', { step }),
 };
 
-// AllianceView predates the grouped `api` facade and still calls these three
-// helpers on the axios instance. Keep a small compatibility surface until that
-// page is refactored, while sharing the same implementation and auth pipeline.
 axiosClient.acceptInvitation = api.acceptInvitation;
 axiosClient.searchPlayers = api.searchPlayers;
 axiosClient.invitePlayer = api.invitePlayer;

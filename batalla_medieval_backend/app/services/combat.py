@@ -1,39 +1,27 @@
 """Combat resolution helpers for calculating battle outcomes."""
 
+import json
 import math
 import random
-import json
 from typing import Dict, Tuple
 
 from .. import models
+from . import balance
 from . import event as event_service
 
-UNIT_STATS: Dict[str, Dict[str, float]] = {
-    "lancero_comun": {"attack": 10, "def_inf": 20, "def_cav": 10, "def_siege": 20, "type": "infantry", "carry": 40},
-    "soldado_de_acero": {"attack": 25, "def_inf": 40, "def_cav": 30, "def_siege": 40, "type": "infantry", "carry": 30},
-    "arquero_real": {"attack": 30, "def_inf": 10, "def_cav": 40, "def_siege": 15, "type": "infantry", "carry": 35},
-    "jinete_explorador": {"attack": 60, "def_inf": 20, "def_cav": 20, "def_siege": 20, "type": "cavalry", "carry": 80},
-    "caballero_imperial": {"attack": 100, "def_inf": 40, "def_cav": 60, "def_siege": 40, "type": "cavalry", "carry": 60},
-    "infiltrador": {"attack": 0, "def_inf": 0, "def_cav": 0, "def_siege": 0, "type": "infantry", "carry": 0},
-    "quebramuros": {"attack": 2, "def_inf": 40, "def_cav": 35, "def_siege": 60, "type": "siege", "carry": 0},
-    "tormenta_de_piedra": {"attack": 2, "def_inf": 70, "def_cav": 70, "def_siege": 90, "type": "siege", "carry": 0},
-    "noble": {"attack": 30, "def_inf": 50, "def_cav": 50, "def_siege": 50, "type": "infantry", "carry": 0},
-    # Aliases for backwards compatibility with previous unit naming
-    "basic_infantry": {"attack": 10, "def_inf": 20, "def_cav": 10, "def_siege": 20, "type": "infantry", "carry": 40},
-    "heavy_infantry": {"attack": 25, "def_inf": 40, "def_cav": 30, "def_siege": 40, "type": "infantry", "carry": 30},
-    "archer": {"attack": 30, "def_inf": 10, "def_cav": 40, "def_siege": 15, "type": "infantry", "carry": 35},
-    "fast_cavalry": {"attack": 60, "def_inf": 20, "def_cav": 20, "def_siege": 20, "type": "cavalry", "carry": 80},
-    "heavy_cavalry": {"attack": 100, "def_inf": 40, "def_cav": 60, "def_siege": 40, "type": "cavalry", "carry": 60},
-    "spy": {"attack": 0, "def_inf": 0, "def_cav": 0, "def_siege": 0, "type": "infantry", "carry": 0},
-    "ram": {"attack": 2, "def_inf": 40, "def_cav": 35, "def_siege": 60, "type": "siege", "carry": 0},
-    "catapult": {"attack": 2, "def_inf": 70, "def_cav": 70, "def_siege": 90, "type": "siege", "carry": 0},
-}
-
-WALL_NAME = "Muralla de Guardia"
-WALL_BONUS_PER_LEVEL = 0.05
+# Compatibility aliases. Canonical unit numbers live only in ``balance``.
+UNIT_STATS = balance.unit_combat_stats_with_legacy_aliases()
+WALL_NAME = balance.WALL_BUILDING_KEY
+WALL_BONUS_PER_LEVEL = balance.WALL_BONUS_PER_LEVEL
 
 
-def _split_attack_by_type(troops: Dict[str, int], hero: models.Hero | None = None) -> Tuple[Dict[str, float], float]:
+def _wall_names() -> set[str]:
+    return {balance.WALL_BUILDING_KEY, balance.LEGACY_WALL_BUILDING_NAME}
+
+
+def _split_attack_by_type(
+    troops: Dict[str, int], hero: models.Hero | None = None
+) -> Tuple[Dict[str, float], float]:
     """Return attack totals split by troop category and total attack value."""
 
     attack_by_type = {"infantry": 0.0, "cavalry": 0.0, "siege": 0.0}
@@ -46,18 +34,18 @@ def _split_attack_by_type(troops: Dict[str, int], hero: models.Hero | None = Non
         attack_value = unit_attack * amount
         attack_by_type[stats["type"]] += attack_value
         total_attack += attack_value
-    
+
     if hero and hero.status == "moving":
-        # Hero bonus: 100 base + 10 per attack point
         hero_attack = 100 + (hero.attack_points * 10)
-        # Hero counts as infantry for now
         attack_by_type["infantry"] += hero_attack
         total_attack += hero_attack
 
     return attack_by_type, total_attack
 
 
-def _defense_values(defender_troops: Dict[str, int], hero: models.Hero | None = None) -> Dict[str, float]:
+def _defense_values(
+    defender_troops: Dict[str, int], hero: models.Hero | None = None
+) -> Dict[str, float]:
     """Calculate defense values per troop category."""
 
     defenses = {"infantry": 0.0, "cavalry": 0.0, "siege": 0.0}
@@ -68,9 +56,8 @@ def _defense_values(defender_troops: Dict[str, int], hero: models.Hero | None = 
         defenses["infantry"] += stats.get("def_inf", 0) * amount
         defenses["cavalry"] += stats.get("def_cav", 0) * amount
         defenses["siege"] += stats.get("def_siege", stats.get("def_inf", 0)) * amount
-    
+
     if hero and hero.status == "home":
-        # Hero bonus: 100 base + 10 per defense point
         hero_def = 100 + (hero.defense_points * 10)
         defenses["infantry"] += hero_def
         defenses["cavalry"] += hero_def
@@ -80,9 +67,9 @@ def _defense_values(defender_troops: Dict[str, int], hero: models.Hero | None = 
 
 
 def _wall_bonus(city: models.City) -> float:
-    """Return defense multiplier provided by the wall level."""
+    """Return defense multiplier provided by the canonical/legacy wall."""
 
-    wall = next((b for b in city.buildings if b.name == WALL_NAME), None)
+    wall = next((b for b in city.buildings if b.name in _wall_names()), None)
     if not wall:
         return 1.0
     return 1.0 + wall.level * WALL_BONUS_PER_LEVEL
@@ -93,17 +80,20 @@ def _moral(attacker_strength: float, defender_strength: float) -> float:
 
     attacker_points = max(attacker_strength, 1)
     defender_points = max(defender_strength, 1)
-    return min(1.5, max(0.3, math.sqrt(defender_points / attacker_points)))
+    raw = math.sqrt(defender_points / attacker_points)
+    return min(balance.MORALE_MAX, max(balance.MORALE_MIN, raw))
 
 
 def _luck() -> float:
-    """Return a random luck modifier."""
+    """Return a random luck modifier inside the versioned balance limits."""
 
-    return random.uniform(-0.25, 0.25)
+    return random.uniform(balance.LUCK_MIN, balance.LUCK_MAX)
 
 
 def _weighted_defense(
-    defenses: Dict[str, float], attack_distribution: Dict[str, float], wall_multiplier: float
+    defenses: Dict[str, float],
+    attack_distribution: Dict[str, float],
+    wall_multiplier: float,
 ) -> float:
     """Weight defense by attack distribution and wall effects."""
 
@@ -125,9 +115,10 @@ def _loss_ratios(effective_attack: float, defense_value: float) -> Tuple[float, 
     if defense_value <= 0:
         return 0.0, 1.0
 
-    if effective_attack > defense_value * 1.2:
+    decisive = balance.DECISIVE_STRENGTH_RATIO
+    if effective_attack > defense_value * decisive:
         return (max(0.05, (defense_value / effective_attack) ** 0.5)), 1.0
-    if defense_value > effective_attack * 1.2:
+    if defense_value > effective_attack * decisive:
         return 1.0, max(0.05, (effective_attack / defense_value) ** 0.5)
 
     balance_factor = effective_attack / defense_value
@@ -137,12 +128,17 @@ def _loss_ratios(effective_attack: float, defense_value: float) -> Tuple[float, 
 
 
 def _apply_losses(troops: Dict[str, int], loss_ratio: float) -> Dict[str, int]:
-    """Return troop losses by unit using a given ratio."""
-
     losses = {}
     for unit, amount in troops.items():
         losses[unit] = min(amount, int(round(amount * loss_ratio)))
     return losses
+
+
+def _find_target_building(city: models.City, target_building: str):
+    names = {target_building}
+    if target_building in _wall_names():
+        names = _wall_names()
+    return next((building for building in city.buildings if building.name in names), None)
 
 
 def resolve_battle(
@@ -156,12 +152,16 @@ def resolve_battle(
     """Resolve combat between attacking and defending cities."""
 
     modifiers = modifiers or event_service.DEFAULT_MODIFIERS
-    defender_troops = {troop.unit_type: troop.quantity for troop in defender_city.troops}
+    defender_troops = {
+        troop.unit_type: troop.quantity for troop in defender_city.troops
+    }
     defender_hero = defender_city.owner.hero if defender_city.owner else None
     if defender_hero and defender_hero.city_id != defender_city.id:
-        defender_hero = None # Hero not in city
+        defender_hero = None
 
-    attack_distribution, base_attack = _split_attack_by_type(attacking_troops, attacker_hero)
+    attack_distribution, base_attack = _split_attack_by_type(
+        attacking_troops, attacker_hero
+    )
     defenses = _defense_values(defender_troops, defender_hero)
     wall_multiplier = _wall_bonus(defender_city)
 
@@ -169,33 +169,39 @@ def resolve_battle(
     luck_factor = _luck()
 
     effective_attack = base_attack * moral * (1 + luck_factor)
-    defense_value = _weighted_defense(defenses, attack_distribution, wall_multiplier)
+    defense_value = _weighted_defense(
+        defenses, attack_distribution, wall_multiplier
+    )
 
-    attacker_loss_ratio, defender_loss_ratio = _loss_ratios(effective_attack, defense_value)
+    attacker_loss_ratio, defender_loss_ratio = _loss_ratios(
+        effective_attack, defense_value
+    )
     attacker_losses = _apply_losses(attacking_troops, attacker_loss_ratio)
     defender_losses = _apply_losses(defender_troops, defender_loss_ratio)
 
-    # Hero damage logic
     if attacker_hero and attacker_loss_ratio > 0.9:
         attacker_hero.health = 0
         attacker_hero.status = "dead"
     elif attacker_hero:
-        attacker_hero.health = max(0, attacker_hero.health - (attacker_loss_ratio * 100))
+        attacker_hero.health = max(
+            0, attacker_hero.health - (attacker_loss_ratio * 100)
+        )
         if attacker_hero.health <= 0:
             attacker_hero.status = "dead"
-            
+
     if defender_hero and defender_loss_ratio > 0.9:
         defender_hero.health = 0
         defender_hero.status = "dead"
     elif defender_hero:
-        defender_hero.health = max(0, defender_hero.health - (defender_loss_ratio * 100))
+        defender_hero.health = max(
+            0, defender_hero.health - (defender_loss_ratio * 100)
+        )
         if defender_hero.health <= 0:
             defender_hero.status = "dead"
 
-    # Ranking points
-    attacker_points_gained = sum(defender_losses.values()) # Simplified: 1 point per unit
+    attacker_points_gained = sum(defender_losses.values())
     defender_points_gained = sum(attacker_losses.values())
-    
+
     xp_gained = 0
     if attacker_city.owner:
         attacker_city.owner.attacker_points += attacker_points_gained
@@ -204,36 +210,38 @@ def resolve_battle(
     if defender_city.owner:
         defender_city.owner.defender_points += defender_points_gained
         if defender_hero and defender_hero.status != "dead":
-             defender_hero.xp += defender_points_gained
+            defender_hero.xp += defender_points_gained
 
-    attacker_survivors = {u: max(0, attacking_troops.get(u, 0) - attacker_losses.get(u, 0)) for u in attacking_troops}
-    defender_survivors = {u: max(0, defender_troops.get(u, 0) - defender_losses.get(u, 0)) for u in defender_troops}
+    attacker_survivors = {
+        unit: max(0, attacking_troops.get(unit, 0) - attacker_losses.get(unit, 0))
+        for unit in attacking_troops
+    }
+    defender_survivors = {
+        unit: max(0, defender_troops.get(unit, 0) - defender_losses.get(unit, 0))
+        for unit in defender_troops
+    }
 
-    # Loot Logic
     loot = {"wood": 0, "clay": 0, "iron": 0}
     if sum(defender_survivors.values()) == 0 and base_attack > 0:
-        # Calculate total carry capacity
         total_carry = 0
         for unit, amount in attacker_survivors.items():
             stats = UNIT_STATS.get(unit)
             if stats:
                 total_carry += stats.get("carry", 0) * amount
-        
-        # Available resources
+
+        loot_modifier = max(float(modifiers.get("loot_modifier", 1.0)), 0.0)
+        effective_carry = total_carry * loot_modifier
         available_wood = defender_city.wood
         available_clay = defender_city.clay
         available_iron = defender_city.iron
-        
-        # Simple distribution: take proportional to what is available
         total_resources = available_wood + available_clay + available_iron
         if total_resources > 0:
-            take_ratio = min(1.0, total_carry / total_resources)
+            take_ratio = min(1.0, effective_carry / total_resources)
             loot = {
                 "wood": int(available_wood * take_ratio),
                 "clay": int(available_clay * take_ratio),
                 "iron": int(available_iron * take_ratio),
             }
-            
             defender_city.wood -= loot["wood"]
             defender_city.clay -= loot["clay"]
             defender_city.iron -= loot["iron"]
@@ -241,74 +249,62 @@ def resolve_battle(
             attacker_city.clay += loot["clay"]
             attacker_city.iron += loot["iron"]
 
-    # Siege & Loyalty Logic
     wall_damage = None
     building_damage = None
     loyalty_change = 0.0
     conquest = False
-    
+
     if sum(defender_survivors.values()) == 0:
-        # Wall damage (Rams)
-        siege_survivors = attacker_survivors.get("quebramuros", 0) + attacker_survivors.get("ram", 0)
+        siege_survivors = (
+            attacker_survivors.get("quebramuros", 0)
+            + attacker_survivors.get("ram", 0)
+        )
         if siege_survivors > 0:
-            wall = next((b for b in defender_city.buildings if b.name == WALL_NAME), None)
+            wall = next(
+                (b for b in defender_city.buildings if b.name in _wall_names()),
+                None,
+            )
             if wall and wall.level > 0:
-                damage = max(1, int(siege_survivors ** 0.5))
+                damage = max(1, int(siege_survivors**0.5))
                 old_level = wall.level
                 wall.level = max(0, wall.level - damage)
                 wall_damage = (old_level, wall.level)
-        
-        # Catapult damage (Target Building)
+
         catapult_survivors = attacker_survivors.get("catapult", 0)
         if catapult_survivors > 0 and target_building:
-            # If target is wall, we add to the damage (or damage it again if rams already hit it)
-            # If target is something else, we find it and damage it
-            
-            target_b = next((b for b in defender_city.buildings if b.name == target_building), None)
-            
-            # Special case: if target is wall and we already damaged it with rams, we use the current (reduced) level
+            target_b = _find_target_building(defender_city, target_building)
             if target_b and target_b.level > 0:
-                # Damage formula for catapults
-                catapult_damage = max(1, int(catapult_survivors ** 0.5))
-                
+                catapult_damage = max(1, int(catapult_survivors**0.5))
                 old_b_level = target_b.level
                 target_b.level = max(0, target_b.level - catapult_damage)
-                
-                # If it was the wall, update wall_damage tuple to reflect total change
-                if target_building == WALL_NAME and wall_damage:
-                    # wall_damage is (original_level, level_after_rams)
-                    # We want (original_level, level_after_catapults)
+
+                if target_b.name in _wall_names() and wall_damage:
                     wall_damage = (wall_damage[0], target_b.level)
-                elif target_building == WALL_NAME:
+                elif target_b.name in _wall_names():
                     wall_damage = (old_b_level, target_b.level)
                 else:
                     building_damage = {
                         "building": target_building,
                         "old_level": old_b_level,
-                        "new_level": target_b.level
+                        "new_level": target_b.level,
                     }
 
-        # Loyalty reduction (Nobles)
         nobles = attacker_survivors.get("noble", 0)
-        # Only allow conquest if defender is barbarian (owner_id is None)
         if nobles > 0 and defender_city.owner_id is None:
-            # Each noble reduces loyalty by 20-35
-            reduction = 0
-            for _ in range(nobles):
-                reduction += random.randint(20, 35)
-            
-            old_loyalty = defender_city.loyalty
+            reduction = sum(
+                random.randint(
+                    balance.BARBARIAN_LOYALTY_DROP_MIN,
+                    balance.BARBARIAN_LOYALTY_DROP_MAX,
+                )
+                for _ in range(nobles)
+            )
             defender_city.loyalty -= reduction
             loyalty_change = reduction
-            
+
             if defender_city.loyalty <= 0:
                 conquest = True
                 defender_city.owner_id = attacker_city.owner_id
-                defender_city.loyalty = 25.0 # Reset loyalty for new owner
-                # Troops in the city (if any survivors, which is 0 here) belong to old owner? 
-                # But they are dead.
-                # What about support troops? They should be sent back?
-                # For simplicity, we assume all defenders are dead.
+                defender_city.loyalty = balance.BARBARIAN_CONQUEST_RESET_LOYALTY
 
     report = {
         "attacker_losses": attacker_losses,
@@ -329,7 +325,11 @@ def resolve_battle(
     return report
 
 
-def build_battle_report_content(attacker_city: models.City, defender_city: models.City, battle_result: Dict) -> str:
+def build_battle_report_content(
+    attacker_city: models.City,
+    defender_city: models.City,
+    battle_result: Dict,
+) -> str:
     """Generate a JSON battle report for attacker and defender."""
 
     attacker_losses = battle_result.get("attacker_losses", {})
@@ -343,7 +343,6 @@ def build_battle_report_content(attacker_city: models.City, defender_city: model
     conquest = battle_result.get("conquest", False)
     xp_gained = battle_result.get("xp_gained", 0)
 
-    # Calculate initial troops
     attacker_initial = {
         unit: attacker_survivors.get(unit, 0) + attacker_losses.get(unit, 0)
         for unit in set(attacker_survivors) | set(attacker_losses)
@@ -361,14 +360,14 @@ def build_battle_report_content(attacker_city: models.City, defender_city: model
             "owner": attacker_city.owner.username if attacker_city.owner else "Bárbaros",
             "initial": attacker_initial,
             "losses": attacker_losses,
-            "xp_gained": xp_gained
+            "xp_gained": xp_gained,
         },
         "defender": {
             "id": defender_city.id,
             "name": defender_city.name,
             "owner": defender_city.owner.username if defender_city.owner else "Bárbaros",
             "initial": defender_initial,
-            "losses": defender_losses
+            "losses": defender_losses,
         },
         "loot": loot,
         "wall_damage": wall_damage,
@@ -378,9 +377,9 @@ def build_battle_report_content(attacker_city: models.City, defender_city: model
         "moral": battle_result.get("moral"),
         "luck": battle_result.get("luck"),
         "effective_attack": battle_result.get("effective_attack"),
-        "defense_value": battle_result.get("defense_value")
+        "defense_value": battle_result.get("defense_value"),
     }
-    
+
     return json.dumps(report_data)
 
 
@@ -395,42 +394,47 @@ def resolve_oasis_battle(
 
     modifiers = modifiers or event_service.DEFAULT_MODIFIERS
     defender_troops = oasis.troops or {}
-    
-    attack_distribution, base_attack = _split_attack_by_type(attacking_troops, attacker_hero)
-    defenses = _defense_values(defender_troops, None) # No hero in oasis
-    wall_multiplier = 1.0 # No wall in oasis
 
-    moral = 1.0 # No moral penalty against nature
+    attack_distribution, base_attack = _split_attack_by_type(
+        attacking_troops, attacker_hero
+    )
+    defenses = _defense_values(defender_troops, None)
+    wall_multiplier = 1.0
+
+    moral = 1.0
     luck_factor = _luck()
 
     effective_attack = base_attack * moral * (1 + luck_factor)
-    defense_value = _weighted_defense(defenses, attack_distribution, wall_multiplier)
+    defense_value = _weighted_defense(
+        defenses, attack_distribution, wall_multiplier
+    )
 
-    attacker_loss_ratio, defender_loss_ratio = _loss_ratios(effective_attack, defense_value)
+    attacker_loss_ratio, defender_loss_ratio = _loss_ratios(
+        effective_attack, defense_value
+    )
     attacker_losses = _apply_losses(attacking_troops, attacker_loss_ratio)
     defender_losses = _apply_losses(defender_troops, defender_loss_ratio)
 
-    # Hero damage logic
     if attacker_hero and attacker_loss_ratio > 0.9:
         attacker_hero.health = 0
         attacker_hero.status = "dead"
     elif attacker_hero:
-        attacker_hero.health = max(0, attacker_hero.health - (attacker_loss_ratio * 100))
+        attacker_hero.health = max(
+            0, attacker_hero.health - (attacker_loss_ratio * 100)
+        )
         if attacker_hero.health <= 0:
             attacker_hero.status = "dead"
 
-    # Ranking points
-    attacker_points_gained = sum(defender_losses.values()) # Simplified
-    
-    xp_gained = 0
-    if attacker_city.owner:
-        xp_gained = attacker_points_gained # 1 XP per unit killed
+    attacker_points_gained = sum(defender_losses.values())
+    xp_gained = attacker_points_gained if attacker_city.owner else 0
 
     attacker_survivors = {
-        u: q - attacker_losses.get(u, 0) for u, q in attacking_troops.items()
+        unit: quantity - attacker_losses.get(unit, 0)
+        for unit, quantity in attacking_troops.items()
     }
     defender_survivors = {
-        u: q - defender_losses.get(u, 0) for u, q in defender_troops.items()
+        unit: quantity - defender_losses.get(unit, 0)
+        for unit, quantity in defender_troops.items()
     }
 
     return {
@@ -439,14 +443,22 @@ def resolve_oasis_battle(
         "attacker_survivors": attacker_survivors,
         "defender_survivors": defender_survivors,
         "xp_gained": xp_gained,
-        "loot": {}, 
-        "conquered": sum(defender_survivors.values()) == 0 and attacker_hero and attacker_hero.health > 0
+        "loot": {},
+        "conquered": (
+            sum(defender_survivors.values()) == 0
+            and attacker_hero
+            and attacker_hero.health > 0
+        ),
     }
 
 
-def build_oasis_report_content(attacker_city: models.City, oasis: models.Oasis, battle_result: Dict) -> str:
+def build_oasis_report_content(
+    attacker_city: models.City,
+    oasis: models.Oasis,
+    battle_result: Dict,
+) -> str:
     """Generate a JSON battle report for oasis combat."""
-    
+
     attacker_losses = battle_result.get("attacker_losses", {})
     defender_losses = battle_result.get("defender_losses", {})
     attacker_survivors = battle_result.get("attacker_survivors", {})
@@ -471,21 +483,19 @@ def build_oasis_report_content(attacker_city: models.City, oasis: models.Oasis, 
             "owner": attacker_city.owner.username if attacker_city.owner else "Bárbaros",
             "initial": attacker_initial,
             "losses": attacker_losses,
-            "xp_gained": xp_gained
+            "xp_gained": xp_gained,
         },
         "defender": {
             "id": oasis.id,
             "name": f"Oasis ({oasis.resource_type})",
             "owner": "Naturaleza",
             "initial": defender_initial,
-            "losses": defender_losses
+            "losses": defender_losses,
         },
         "conquest": conquest,
         "loot": {},
         "moral": 1.0,
         "luck": 0.0,
     }
-    
+
     return json.dumps(report_data)
-
-

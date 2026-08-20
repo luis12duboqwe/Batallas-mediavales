@@ -7,10 +7,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import production
+from . import balance, production
 
 FINAL_STEP = 7
-TUTORIAL_REWARD = {"wood": 250, "clay": 250, "iron": 250}
+TUTORIAL_REWARD = balance.TUTORIAL_REWARD
 
 STEP_LABELS = {
     0: "Únete a un mundo para recibir tu capital.",
@@ -68,8 +68,6 @@ def _derive_step(db: Session, user: models.User, city: models.City | None) -> in
         .first()
     )
     if not trained:
-        # A dispatched attack is durable proof that usable troops were trained,
-        # even while every trained unit is currently marching.
         trained = (
             db.query(models.Movement.id)
             .filter(
@@ -216,7 +214,6 @@ def sync_progress(db: Session, user: models.User) -> dict[str, Any]:
         db.commit()
         db.refresh(locked_user)
     else:
-        # Release the SELECT FOR UPDATE transaction without producing a write.
         db.rollback()
         locked_user = db.query(models.User).filter(models.User.id == user.id).one()
 

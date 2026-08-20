@@ -5,21 +5,14 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..utils import utc_now
-from . import economy, event as event_service
+from . import balance, event as event_service
 
-PRODUCTION_RATES = {
-    "wood": 15.0,
-    "clay": 12.0,
-    "iron": 10.0,
-}
-RESOURCE_FIELDS = frozenset(PRODUCTION_RATES)
-
-LOYALTY_RECOVERY_PER_HOUR = 2.0
-
-# Compatibility aliases for callers that imported the old production constants.
-# The authoritative values live in ``economy``.
-BASE_STORAGE = economy.STORAGE_BASE_CAPACITY
-STORAGE_PER_WAREHOUSE_LEVEL = economy.STORAGE_PER_WAREHOUSE_LEVEL
+# Compatibility aliases. The objects and values are owned by ``balance``.
+PRODUCTION_RATES = balance.PRODUCTION_RATES_PER_HOUR
+RESOURCE_FIELDS = frozenset(balance.RESOURCE_FIELDS)
+LOYALTY_RECOVERY_PER_HOUR = balance.LOYALTY_RECOVERY_PER_HOUR
+BASE_STORAGE = balance.STORAGE_BASE_CAPACITY
+STORAGE_PER_WAREHOUSE_LEVEL = balance.STORAGE_PER_WAREHOUSE_LEVEL
 
 
 def _ensure_timezone(dt):
@@ -27,18 +20,14 @@ def _ensure_timezone(dt):
 
 
 def get_storage_limit(city: models.City) -> float:
-    """Return server-authoritative storage capacity for the city.
-
-    A city always has the base capacity. Each completed ``warehouse`` level
-    increases the capacity; unrelated buildings such as the town hall do not.
-    """
+    """Return server-authoritative storage capacity for the city."""
 
     warehouse_level = 0
     for building in city.buildings or []:
         if building.name == "warehouse":
             warehouse_level = max(int(building.level), 0)
             break
-    return economy.get_storage_capacity(warehouse_level)
+    return balance.get_storage_capacity(warehouse_level)
 
 
 def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
@@ -48,7 +37,7 @@ def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
     rate_multiplier = modifiers.get("production_speed", 1.0)
     world_modifier = city.world.resource_modifier if city.world else 1.0
 
-    oasis_bonuses = {"wood": 0.0, "clay": 0.0, "iron": 0.0}
+    oasis_bonuses = {resource: 0.0 for resource in balance.RESOURCE_FIELDS}
     oases = getattr(city, "oases", [])
     for oasis in oases:
         if oasis.resource_type in oasis_bonuses:
@@ -115,8 +104,6 @@ def recalculate_resources(
         produced = rate * elapsed_hours
         current_value = float(getattr(city, resource))
 
-        # Reaching storage stops future accumulation. If legacy/admin data is
-        # already above the current cap, recalculation must not delete it.
         if current_value >= storage_limit:
             new_value = current_value
             actual_gain = 0.0
