@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models, schemas
 from ..database import get_db
-from ..services import world_gen
+from ..services import ranking, world_gen
 from .responses import error_response
 
 router = APIRouter(
@@ -42,10 +42,14 @@ def get_map_tiles(
         .selectinload(models.AllianceMember.alliance)
     )
 
-    # Fetch cities in range
+    # Fetch cities in range with everything needed for labels and canonical score.
     cities = (
         db.query(models.City)
-        .options(owner_alliance)
+        .options(
+            owner_alliance,
+            selectinload(models.City.buildings),
+            selectinload(models.City.troops),
+        )
         .filter(
             models.City.world_id == world_id,
             models.City.x >= min_x,
@@ -89,7 +93,7 @@ def get_map_tiles(
 
             city_id = city.id if city else None
             city_name = city.name if city else None
-            points = city.points if city else 0
+            points = ranking.calculate_city_points(city) if city else 0
             owner_id = None
             owner_name = None
             alliance_name = None
