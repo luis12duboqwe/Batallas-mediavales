@@ -4,6 +4,8 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 import LoadingScreen from './components/LoadingScreen.jsx';
 import IntroAnimation from './components/IntroAnimation.jsx';
+import NotificationListener from './components/NotificationListener.jsx';
+import { SocketProvider } from './context/SocketContext.jsx';
 import './index.css';
 import './i18n';
 
@@ -24,6 +26,7 @@ const ExperienceShell = () => {
     <>
       {!introFinished && <IntroAnimation onComplete={handleIntroComplete} />}
       {showLoading && <LoadingScreen onComplete={handleLoadingComplete} />}
+      <NotificationListener />
       <App />
     </>
   );
@@ -32,7 +35,9 @@ const ExperienceShell = () => {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
-      <ExperienceShell />
+      <SocketProvider>
+        <ExperienceShell />
+      </SocketProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

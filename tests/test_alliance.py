@@ -8,17 +8,29 @@ def test_alliance_join_leave_promote(db_session, user):
     db_session.add(membership_record)
     db_session.commit()
 
-    payload = models.Alliance(name="Knights", description="", diplomacy="neutral", leader_id=user.id, world_id=world.id)
+    payload = models.Alliance(
+        name="Knights",
+        description="",
+        diplomacy="neutral",
+        leader_id=user.id,
+        world_id=world.id,
+    )
     db_session.add(payload)
     db_session.commit()
     db_session.refresh(payload)
 
-    leader_member = models.AllianceMember(alliance_id=payload.id, user_id=user.id, rank=2)
+    leader_member = models.AllianceMember(
+        alliance_id=payload.id,
+        user_id=user.id,
+        rank=2,
+    )
     db_session.add(leader_member)
     db_session.commit()
 
     new_user = models.User(username="ally", email="ally@example.com", hashed_password="")
     db_session.add(new_user)
+    db_session.flush()
+    db_session.add(models.PlayerWorld(user_id=new_user.id, world_id=world.id))
     db_session.commit()
     db_session.refresh(new_user)
 
@@ -29,5 +41,5 @@ def test_alliance_join_leave_promote(db_session, user):
     promoted = alliance.promote_member(db_session, payload.id, user, membership.id)
     assert promoted.rank > membership.rank - 1
 
-    alliance.leave_alliance(db_session, new_user)
+    alliance.leave_alliance(db_session, new_user, world.id)
     assert db_session.query(models.AllianceMember).filter_by(user_id=new_user.id).first() is None

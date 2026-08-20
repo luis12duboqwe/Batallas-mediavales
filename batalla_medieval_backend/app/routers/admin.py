@@ -1,6 +1,6 @@
 from typing import Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,7 @@ class TroopUpdate(BaseModel):
 class AdminCityCreate(BaseModel):
     name: str
     owner_id: int
+    world_id: int
     x: int = 0
     y: int = 0
     wood: float = 500.0
@@ -43,10 +44,40 @@ class CoordinatesUpdate(BaseModel):
     y: int
 
 
+class UserFreezeUpdate(BaseModel):
+    is_frozen: bool
+    reason: str | None = None
+
+
 def require_admin(current_user: models.User = Depends(get_current_user)):
     if not getattr(current_user, "is_admin", False):
         raise HTTPException(status_code=403, detail="Admin privileges required")
     return current_user
+
+
+@router.get("/logs", response_model=List[schemas.LogRead])
+def list_admin_logs(
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(require_admin),
+):
+    return admin_service.list_logs(db, limit=limit)
+
+
+@router.patch("/user/{user_id}/freeze", response_model=schemas.UserRead)
+def set_user_freeze(
+    user_id: int,
+    payload: UserFreezeUpdate,
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(require_admin),
+):
+    return admin_service.set_user_freeze(
+        db,
+        user_id,
+        is_frozen=payload.is_frozen,
+        reason=payload.reason,
+        admin_user=current_admin,
+    )
 
 
 @router.patch("/city/{city_id}/resources", response_model=schemas.CityRead)

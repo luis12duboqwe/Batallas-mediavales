@@ -15,6 +15,62 @@ def log_action(db: Session, user_id: int, action: str, details: Dict) -> models.
     return log_entry
 
 
+def list_logs(db: Session, limit: int = 100) -> list[models.Log]:
+    """Return recent audit/anti-abuse logs for authenticated administrators."""
+
+    return (
+        db.query(models.Log)
+        .order_by(models.Log.timestamp.desc(), models.Log.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def set_user_freeze(
+    db: Session,
+    user_id: int,
+    *,
+    is_frozen: bool,
+    reason: str | None,
+    admin_user: models.User,
+) -> models.User:
+    """Freeze/unfreeze an account and revoke existing sessions when state changes."""
+
+    user = db.query(models.User).filter(models.User.id == user_id).with_for_update().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.id == admin_user.id and is_frozen:
+        raise HTTPException(status_code=400, detail="Administrators cannot freeze themselves")
+
+    normalized_reason = (reason or "").strip() or None
+    if is_frozen and normalized_reason is None:
+        raise HTTPException(status_code=400, detail="Freeze reason is required")
+
+    changed = user.is_frozen != is_frozen
+    user.is_frozen = is_frozen
+    user.freeze_reason = normalized_reason if is_frozen else None
+    if changed:
+        # Both HTTP and Socket.IO access tokens include auth_version. Revoking
+        # it prevents an already-issued token from remaining valid after a
+        # moderation state transition.
+        user.auth_version += 1
+
+    log_action(
+        db,
+        admin_user.id,
+        "set_user_freeze",
+        {
+            "target_user_id": user.id,
+            "is_frozen": is_frozen,
+            "reason": user.freeze_reason,
+            "session_revoked": changed,
+        },
+    )
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def create_alliance(db: Session, payload: schemas.AllianceCreate, leader: models.User) -> models.Alliance:
     alliance = models.Alliance(
         name=payload.name,
@@ -121,11 +177,46 @@ def create_city(
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
 
+    world = (
+        db.query(models.World)
+        .filter(
+            models.World.id == payload["world_id"],
+            models.World.is_active.is_(True),
+        )
+        .first()
+    )
+    if not world:
+        raise HTTPException(status_code=404, detail="World not available")
+
+    membership = (
+        db.query(models.PlayerWorld)
+        .filter(
+            models.PlayerWorld.user_id == owner.id,
+            models.PlayerWorld.world_id == world.id,
+        )
+        .first()
+    )
+    if not membership:
+        raise HTTPException(status_code=400, detail="Owner has not joined this world")
+
+    occupied = (
+        db.query(models.City)
+        .filter(
+            models.City.world_id == world.id,
+            models.City.x == payload.get("x", 0),
+            models.City.y == payload.get("y", 0),
+        )
+        .first()
+    )
+    if occupied:
+        raise HTTPException(status_code=409, detail="Coordinates already occupied in this world")
+
     city = models.City(
         name=payload["name"],
         x=payload.get("x", 0),
         y=payload.get("y", 0),
         owner_id=owner.id,
+        world_id=world.id,
         wood=payload.get("wood", 500.0),
         clay=payload.get("clay", 500.0),
         iron=payload.get("iron", 500.0),
@@ -135,7 +226,12 @@ def create_city(
     db.commit()
     db.refresh(city)
     production.recalculate_resources(db, city)
-    log_action(db, admin_user.id, "create_city", {"city_id": city.id, "owner_id": owner.id})
+    log_action(
+        db,
+        admin_user.id,
+        "create_city",
+        {"city_id": city.id, "owner_id": owner.id, "world_id": world.id},
+    )
     db.commit()
     db.refresh(city)
     return city
@@ -145,6 +241,19 @@ def teleport_city(db: Session, city_id: int, x: int, y: int, admin_user: models.
     city = db.query(models.City).filter(models.City.id == city_id).first()
     if not city:
         raise HTTPException(status_code=404, detail="City not found")
+
+    occupied = (
+        db.query(models.City)
+        .filter(
+            models.City.world_id == city.world_id,
+            models.City.x == x,
+            models.City.y == y,
+            models.City.id != city.id,
+        )
+        .first()
+    )
+    if occupied:
+        raise HTTPException(status_code=409, detail="Coordinates already occupied in this world")
 
     city.x = x
     city.y = y

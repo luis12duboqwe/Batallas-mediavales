@@ -1,7 +1,9 @@
 from collections import Counter
 
+from app import models
 from app.main import app
 from app.routers.auth import create_access_token
+from app.services import world_membership
 
 
 MVP_HTTP_CONTRACT = {
@@ -58,6 +60,8 @@ MVP_HTTP_CONTRACT = {
     ("POST", "/tutorial/advance"),
     ("GET", "/queue/status"),
     ("GET", "/protection/status"),
+    ("GET", "/admin/logs"),
+    ("PATCH", "/admin/user/{user_id}/freeze"),
     ("PATCH", "/admin/city/{city_id}/resources"),
     ("PATCH", "/admin/city/{city_id}/building/{building_type}"),
     ("PATCH", "/admin/city/{city_id}/troops"),
@@ -136,8 +140,12 @@ def test_queue_router_is_not_double_prefixed():
     assert all(not path.startswith("/queue/queue/") for _, path in registered)
 
 
-def test_global_chat_websocket_is_registered(client, user):
-    """Prove the real authenticated websocket handshake, not route internals."""
+def test_global_chat_websocket_is_registered(client, db_session, user):
+    """Prove the real authenticated websocket handshake after canonical world join."""
+
+    world = db_session.query(models.World).first()
+    world_membership.join_world(db_session, user, world.id)
+    db_session.refresh(user)
 
     token = create_access_token(
         {

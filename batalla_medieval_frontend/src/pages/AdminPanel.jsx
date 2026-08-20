@@ -20,7 +20,7 @@ const AdminPanel = () => {
   const [coords, setCoords] = useState({ x: 0, y: 0 });
 
   // Create City
-  const [newCity, setNewCity] = useState({ owner_id: '', name: 'New City', x: 0, y: 0 });
+  const [newCity, setNewCity] = useState({ owner_id: '', world_id: '', name: 'New City', x: 0, y: 0 });
 
   // Delete User
   const [deleteUserId, setDeleteUserId] = useState('');
@@ -61,9 +61,15 @@ const AdminPanel = () => {
 
   const createCity = async () => {
       if (!newCity.owner_id) return log('Owner ID required');
+      if (!newCity.world_id) return log('World ID required');
       try {
-          const res = await api.adminCreateCity(newCity);
-          log(`City created! ID: ${res.data.id}`);
+          const payload = {
+              ...newCity,
+              owner_id: Number(newCity.owner_id),
+              world_id: Number(newCity.world_id),
+          };
+          const response = await api.adminCreateCity(payload);
+          log(`City created! ID: ${response.data.id}`);
       } catch (e) { log('Error: ' + (e.response?.data?.detail || e.message)); }
   };
 
@@ -174,6 +180,7 @@ const AdminPanel = () => {
                   <h3 className="font-bold mb-4 text-green-500">Crear Nueva Ciudad</h3>
                   <div className="grid grid-cols-2 gap-2">
                       <input type="number" value={newCity.owner_id} onChange={e => setNewCity({...newCity, owner_id: e.target.value})} className="input input-sm bg-black/50 border-gray-600" placeholder="ID Dueño" />
+                      <input type="number" value={newCity.world_id} onChange={e => setNewCity({...newCity, world_id: e.target.value})} className="input input-sm bg-black/50 border-gray-600" placeholder="ID Mundo" />
                       <input type="text" value={newCity.name} onChange={e => setNewCity({...newCity, name: e.target.value})} className="input input-sm bg-black/50 border-gray-600" placeholder="Nombre Ciudad" />
                       <input type="number" value={newCity.x} onChange={e => setNewCity({...newCity, x: +e.target.value})} className="input input-sm bg-black/50 border-gray-600" placeholder="X" />
                       <input type="number" value={newCity.y} onChange={e => setNewCity({...newCity, y: +e.target.value})} className="input input-sm bg-black/50 border-gray-600" placeholder="Y" />

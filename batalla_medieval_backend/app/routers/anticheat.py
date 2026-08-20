@@ -5,6 +5,7 @@ from .. import models
 from ..database import get_db
 from ..routers.auth import get_current_user
 from ..schemas import anticheat as anticheat_schema
+from ..services import admin as admin_service
 
 router = APIRouter(prefix="/anticheat", tags=["anticheat"])
 
@@ -32,9 +33,21 @@ def resolve_flag(
     flag = db.query(models.AntiCheatFlag).filter(models.AntiCheatFlag.id == flag_id).first()
     if not flag:
         raise HTTPException(status_code=404, detail="Flag not found")
+
     flag.resolved_status = payload.resolved_status
     flag.reviewed_by_admin = payload.reviewed_by_admin
     flag.reviewer_id = current_user.id
+    admin_service.log_action(
+        db,
+        current_user.id,
+        "resolve_anticheat_flag",
+        {
+            "flag_id": flag.id,
+            "target_user_id": flag.user_id,
+            "resolved_status": payload.resolved_status,
+            "reviewed_by_admin": payload.reviewed_by_admin,
+        },
+    )
     db.add(flag)
     db.commit()
     db.refresh(flag)

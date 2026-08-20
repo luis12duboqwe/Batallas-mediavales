@@ -14,12 +14,43 @@ class WorldNotAvailableError(ValueError):
     """Raised when a requested world does not exist or cannot be joined."""
 
 
+class WorldAccessDeniedError(PermissionError):
+    """Raised when a player attempts to access a world they never joined."""
+
+
 class SpawnUnavailableError(RuntimeError):
     """Raised when an active world cannot allocate a valid player tile."""
 
 
 class StartingCityConsistencyError(RuntimeError):
     """Raised when persisted membership data points at an invalid city."""
+
+
+def require_world_membership(
+    db: Session,
+    *,
+    user_id: int,
+    world_id: int,
+) -> models.PlayerWorld:
+    """Return the durable membership or deny cross-world access.
+
+    ``User.world_id`` is only the currently selected world. ``PlayerWorld`` is
+    the authoritative record of every world a player has actually joined.
+    Read and mutation endpoints that accept an arbitrary ``world_id`` should
+    use this guard before returning world-scoped data.
+    """
+
+    membership = (
+        db.query(models.PlayerWorld)
+        .filter(
+            models.PlayerWorld.user_id == user_id,
+            models.PlayerWorld.world_id == world_id,
+        )
+        .one_or_none()
+    )
+    if membership is None:
+        raise WorldAccessDeniedError("Player has not joined this world")
+    return membership
 
 
 def _get_locked_active_world(db: Session, world_id: int) -> models.World:

@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from .. import models
 from . import combat, production, world_gen
 
-LOYALTY_DROP_PER_SUCCESS = 25.0
 FOUNDING_COST = {"wood": 800.0, "clay": 800.0, "iron": 800.0}
 STARTER_BUILDINGS = [
     {"name": "town_hall", "level": 1},
@@ -15,20 +14,61 @@ STARTER_BUILDINGS = [
 
 def _validate_troops_available(city: models.City, troops_sent: Dict[str, int]):
     for unit, amount in troops_sent.items():
+        if amount <= 0:
+            raise ValueError("Conquest troop amounts must be positive")
         troop = next((t for t in city.troops if t.unit_type == unit), None)
         if not troop or troop.quantity < amount:
             raise ValueError(f"Not enough {unit} in the city")
+
+
+def _validate_conquest_target(
+    attacker_city: models.City,
+    target_city: models.City,
+) -> None:
+    """Enforce the canonical v1 rule: only neutral/barbarian cities are conquerable."""
+
+    if attacker_city.owner_id is None:
+        raise ValueError("Attacker city must belong to a player")
+    if attacker_city.id == target_city.id:
+        raise ValueError("A city cannot conquer itself")
+    if attacker_city.world_id != target_city.world_id:
+        raise ValueError("Cross-world conquest is not allowed")
+    if target_city.owner_id is not None:
+        raise ValueError("Player cities cannot be conquered")
+
+
+def _lock_conquest_cities(
+    db: Session,
+    attacker_city_id: int,
+    target_city_id: int,
+) -> tuple[models.City, models.City]:
+    """Lock both city rows in deterministic id order to serialize conquest races."""
+
+    rows = (
+        db.query(models.City)
+        .filter(models.City.id.in_([attacker_city_id, target_city_id]))
+        .order_by(models.City.id.asc())
+        .with_for_update()
+        .populate_existing()
+        .all()
+    )
+    by_id = {city.id: city for city in rows}
+    attacker = by_id.get(attacker_city_id)
+    target = by_id.get(target_city_id)
+    if attacker is None:
+        raise ValueError("Attacker city not found")
+    if target is None:
+        raise ValueError("Target city not found")
+    return attacker, target
 
 
 def _apply_losses(city: models.City, losses: Dict[str, int]):
     for unit, loss in losses.items():
         troop = next((t for t in city.troops if t.unit_type == unit), None)
         if troop:
-            troop.quantity = max(0, troop.quantity - loss)
-
-
-def _calculate_strength(troops_sent: Dict[str, int]) -> int:
-    return sum(troops_sent.values())
+            troop.quantity = max(0, troop.quantity - int(loss))
+            if troop.quantity < 0:
+                raise ValueError("Troop quantity cannot become negative")
 
 
 def resolve_conquest(
@@ -37,50 +77,51 @@ def resolve_conquest(
     target_city: models.City,
     troops_sent: Dict[str, int],
 ) -> Tuple[bool, bool]:
-    production.recalculate_resources(db, attacker_city)
-    production.recalculate_resources(db, target_city)
-    _validate_troops_available(attacker_city, troops_sent)
+    """Resolve an instant conquest attempt against a barbarian city only.
 
-    defender_troops = {
-        troop.unit_type: troop.quantity for troop in target_city.troops
-    }
+    The target city row is locked before the ownership rule is checked again, so
+    two concurrent players cannot both conquer the same neutral city. Combat is
+    delegated to the canonical battle engine instead of maintaining a second
+    combat implementation.
+    """
 
-    battle_result = combat.simulate_round(troops_sent, defender_troops)
-    attacker_losses = battle_result["attacker_losses"]
-    defender_losses = battle_result["defender_losses"]
-
-    _apply_losses(attacker_city, attacker_losses)
-    _apply_losses(target_city, defender_losses)
-
-    db.add(attacker_city)
-    db.add(target_city)
-
-    attacker_remaining = {
-        unit: max(0, amount - attacker_losses.get(unit, 0))
-        for unit, amount in troops_sent.items()
-    }
-    defender_remaining = {
-        unit: max(0, amount - defender_losses.get(unit, 0))
-        for unit, amount in defender_troops.items()
-    }
-    attacker_strength = _calculate_strength(attacker_remaining)
-    defender_strength = _calculate_strength(defender_remaining)
-    victory = attacker_strength >= defender_strength
-
-    conquered = False
-    if victory and troops_sent.get("noble", 0) > 0:
-        target_city.loyalty = max(
-            0.0, target_city.loyalty - LOYALTY_DROP_PER_SUCCESS
+    try:
+        attacker_city, target_city = _lock_conquest_cities(
+            db,
+            attacker_city.id,
+            target_city.id,
         )
-        if target_city.loyalty <= 0:
-            target_city.owner_id = attacker_city.owner_id
-            target_city.loyalty = 100.0
-            conquered = True
+        _validate_conquest_target(attacker_city, target_city)
+        _validate_troops_available(attacker_city, troops_sent)
 
-    db.commit()
-    db.refresh(attacker_city)
-    db.refresh(target_city)
-    return victory, conquered
+        production.recalculate_resources(db, attacker_city, commit=False)
+        production.recalculate_resources(db, target_city, commit=False)
+
+        battle_result = combat.resolve_battle(
+            attacker_city,
+            target_city,
+            troops_sent,
+        )
+        _apply_losses(attacker_city, battle_result.get("attacker_losses", {}))
+        _apply_losses(target_city, battle_result.get("defender_losses", {}))
+
+        attacker_survivors = battle_result.get("attacker_survivors", {})
+        defender_survivors = battle_result.get("defender_survivors", {})
+        victory = (
+            sum(int(amount) for amount in attacker_survivors.values()) > 0
+            and sum(int(amount) for amount in defender_survivors.values()) == 0
+        )
+        conquered = bool(battle_result.get("conquest", False))
+
+        db.add(attacker_city)
+        db.add(target_city)
+        db.commit()
+        db.refresh(attacker_city)
+        db.refresh(target_city)
+        return victory, conquered
+    except Exception:
+        db.rollback()
+        raise
 
 
 def found_city(

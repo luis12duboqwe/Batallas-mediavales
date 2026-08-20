@@ -8,8 +8,9 @@ from ..database import get_db
 from ..routers.auth import get_current_user
 from ..routers.responses import error_response
 from ..services import market
+from .world_access import require_world_access
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_world_access)])
 
 
 def get_city_or_404(db: Session, city_id: int, user: models.User, world_id: int) -> models.City:
@@ -51,6 +52,7 @@ def get_offers(
 ):
     offers = market.get_offers(db, world_id, current_user.id, filter_alliance, skip, limit)
     return offers
+
 
 @router.post("/npc_trade")
 def npc_trade(

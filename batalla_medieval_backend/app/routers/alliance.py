@@ -9,23 +9,45 @@ from ..routers.auth import get_current_user
 from ..schemas import diplomacy as diplomacy_schema
 from ..services import alliance as alliance_service
 from ..services import diplomacy as diplomacy_service
+from .world_access import require_world_access
 
 router = APIRouter(tags=["alliance"])
 
 
+def _resolve_world_id(current_user: models.User, world_id: int | None) -> int:
+    resolved = world_id if world_id is not None else current_user.world_id
+    if resolved is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active world selected",
+        )
+    return int(resolved)
+
+
+def _require_alliance_world_access(
+    db: Session,
+    current_user: models.User,
+    alliance_id: int,
+) -> models.Alliance:
+    alliance = alliance_service.get_alliance_or_404(db, alliance_id)
+    require_world_access(alliance.world_id, db, current_user)
+    return alliance
+
+
 @router.get("/", response_model=Optional[schemas.AllianceRead])
 def get_my_alliance(
+    world_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    membership = (
-        db.query(models.AllianceMember)
-        .filter(models.AllianceMember.user_id == current_user.id)
-        .first()
+    resolved_world_id = _resolve_world_id(current_user, world_id)
+    require_world_access(resolved_world_id, db, current_user)
+    membership = alliance_service.get_membership_in_world(
+        db,
+        current_user.id,
+        resolved_world_id,
     )
-    if not membership:
-        return None
-    return membership.alliance
+    return membership.alliance if membership else None
 
 
 @router.post("/create", response_model=schemas.AllianceRead)
@@ -38,7 +60,12 @@ def create_alliance(
 
 
 @router.get("/{alliance_id}/members", response_model=list[schemas.AllianceMemberPublic])
-def list_alliance_members(alliance_id: int, db: Session = Depends(get_db)):
+def list_alliance_members(
+    alliance_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    _require_alliance_world_access(db, current_user, alliance_id)
     return alliance_service.list_members(db, alliance_id)
 
 
@@ -70,15 +97,19 @@ def list_my_invitations(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    require_world_access(world_id, db, current_user)
     return alliance_service.get_user_invitations(db, current_user.id, world_id)
 
 
 @router.post("/leave", status_code=status.HTTP_204_NO_CONTENT)
 def leave_alliance(
+    world_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    alliance_service.leave_alliance(db, current_user)
+    resolved_world_id = _resolve_world_id(current_user, world_id)
+    require_world_access(resolved_world_id, db, current_user)
+    alliance_service.leave_alliance(db, current_user, resolved_world_id)
 
 
 @router.post("/{alliance_id}/members/{member_id}/promote", response_model=schemas.AllianceMemberRead)
@@ -187,7 +218,6 @@ def request_diplomacy(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient rank",
         )
-
     return diplomacy_service.request_relation(
         db,
         alliance_id,
@@ -212,7 +242,6 @@ def accept_diplomacy(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient rank",
         )
-
     return diplomacy_service.accept_relation(db, alliance_id, diplomacy_id)
 
 
@@ -229,5 +258,4 @@ def cancel_diplomacy(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient rank",
         )
-
     return diplomacy_service.cancel_relation(db, alliance_id, diplomacy_id)
