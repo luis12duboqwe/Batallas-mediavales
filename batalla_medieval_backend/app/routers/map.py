@@ -3,8 +3,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models, schemas
 from ..database import get_db
-from ..services import ranking, world_gen
+from ..services import ranking, world_gen, world_membership
+from .auth import get_current_user
 from .responses import error_response
+from .world_access import require_world_access
 
 router = APIRouter(
     prefix="/map",
@@ -30,6 +32,7 @@ def get_map_tiles(
     y: int,
     radius: int = Query(10, le=20),  # Limit radius to avoid huge payloads
     db: Session = Depends(get_db),
+    _membership: models.PlayerWorld = Depends(require_world_access),
 ):
     min_x = x - radius
     max_x = x + radius
@@ -148,8 +151,22 @@ def get_map_tiles(
 def get_oasis(
     oasis_id: int,
     db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
 ):
     oasis = db.query(models.Oasis).filter(models.Oasis.id == oasis_id).first()
     if not oasis:
         raise error_response(404, "oasis_not_found", "Oasis not found")
+    try:
+        world_membership.require_world_membership(
+            db,
+            user_id=current_user.id,
+            world_id=oasis.world_id,
+        )
+    except world_membership.WorldAccessDeniedError as exc:
+        raise error_response(
+            403,
+            "world_access_denied",
+            "You have not joined this world",
+            {"world_id": oasis.world_id},
+        ) from exc
     return oasis
