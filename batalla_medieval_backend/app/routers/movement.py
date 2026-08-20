@@ -11,6 +11,8 @@ from ..services import movement, protection
 
 router = APIRouter(tags=["movements"])
 
+HOSTILE_PLAYER_MOVEMENT_TYPES = {"attack", "spy"}
+
 
 @router.post("/", response_model=schemas.MovementRead)
 def create_movement(
@@ -57,20 +59,23 @@ def create_movement(
                 {"city_id": payload.target_city_id},
             )
 
-        if payload.movement_type == "attack":
+        is_hostile_pvp = (
+            payload.movement_type in HOSTILE_PLAYER_MOVEMENT_TYPES
+            and target_city.owner is not None
+            and target_city.owner_id != current_user.id
+        )
+        if is_hostile_pvp:
             if protection.is_user_protected(current_user):
                 raise error_response(
                     400,
                     "protection_active",
-                    "Protected players cannot launch attacks",
+                    "Protected players cannot launch PvP hostilities",
                 )
-            # Barbarian cities intentionally have no owner and therefore no
-            # player protection window.
-            if target_city.owner and protection.is_user_protected(target_city.owner):
+            if protection.is_user_protected(target_city.owner):
                 raise error_response(
                     400,
                     "target_protected",
-                    "Target city is under protection",
+                    "Target player is under protection",
                 )
     elif payload.target_oasis_id is not None:
         target_oasis = (
@@ -120,7 +125,7 @@ def list_movements(
 ):
     """List movements related to the current user's cities without resolving them."""
 
-    user_city_ids = [city.id for city in current_user.cities]
+    user_city_ids = [city.id for city in current_user.cities if city.world_id == world_id]
     if not user_city_ids:
         return []
 
