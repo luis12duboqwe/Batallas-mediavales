@@ -59,11 +59,11 @@ def test_world_scoped_reads_require_durable_membership(client, db_session, user)
             f"{path} leaked unjoined world {foreign_world.id}: "
             f"{response.status_code} {response.text}"
         )
-        assert response.json()["detail"]["code"] == "world_access_denied"
+        assert response.json()["detail"]["error_code"] == "world_access_denied"
 
     oasis_response = client.get(f"/map/oasis/{foreign_oasis.id}", headers=headers)
     assert oasis_response.status_code == 403
-    assert oasis_response.json()["detail"]["code"] == "world_access_denied"
+    assert oasis_response.json()["detail"]["error_code"] == "world_access_denied"
 
 
 def test_joined_world_reads_remain_available(client, db_session, user):
