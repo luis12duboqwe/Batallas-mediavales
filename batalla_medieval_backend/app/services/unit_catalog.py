@@ -1,9 +1,4 @@
-"""Canonical unit, research and training definitions.
-
-The API, research service, training service and frontend availability endpoint all
-consume this module so displayed prices and requirements cannot drift from what
-the server charges.
-"""
+"""Server-side unit availability helpers backed by the versioned balance catalog."""
 
 from __future__ import annotations
 
@@ -13,94 +8,11 @@ from typing import Any, Dict
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import balance
 
-
-UNIT_ORDER = [
-    "basic_infantry",
-    "heavy_infantry",
-    "archer",
-    "fast_cavalry",
-    "heavy_cavalry",
-    "spy",
-    "ram",
-    "catapult",
-    "noble",
-]
-
-UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
-    "basic_infantry": {
-        "training_cost": {"wood": 50.0, "clay": 30.0, "iron": 20.0},
-        "training_time_seconds": 45,
-        "training_requirements": {"barracks": 1},
-        "research_cost": {},
-        "research_requirements": {},
-        "researchable": False,
-    },
-    "heavy_infantry": {
-        "training_cost": {"wood": 70.0, "clay": 60.0, "iron": 50.0},
-        "training_time_seconds": 60,
-        "training_requirements": {"barracks": 3, "smithy": 1},
-        "research_cost": {"wood": 500.0, "clay": 400.0, "iron": 300.0},
-        "research_requirements": {"barracks": 3},
-        "researchable": True,
-    },
-    "archer": {
-        "training_cost": {"wood": 80.0, "clay": 40.0, "iron": 40.0},
-        "training_time_seconds": 50,
-        "training_requirements": {"barracks": 5, "smithy": 3},
-        "research_cost": {"wood": 600.0, "clay": 300.0, "iron": 300.0},
-        "research_requirements": {"barracks": 5},
-        "researchable": True,
-    },
-    "fast_cavalry": {
-        "training_cost": {"wood": 120.0, "clay": 80.0, "iron": 100.0},
-        "training_time_seconds": 70,
-        "training_requirements": {"stable": 1},
-        "research_cost": {"wood": 1000.0, "clay": 800.0, "iron": 600.0},
-        "research_requirements": {"stable": 3},
-        "researchable": True,
-    },
-    "heavy_cavalry": {
-        "training_cost": {"wood": 200.0, "clay": 150.0, "iron": 200.0},
-        "training_time_seconds": 80,
-        "training_requirements": {"stable": 5, "smithy": 5},
-        "research_cost": {"wood": 2000.0, "clay": 1500.0, "iron": 1500.0},
-        "research_requirements": {"stable": 10},
-        "researchable": True,
-    },
-    "spy": {
-        "training_cost": {"wood": 40.0, "clay": 40.0, "iron": 40.0},
-        "training_time_seconds": 30,
-        "training_requirements": {"stable": 1},
-        "research_cost": {"wood": 200.0, "clay": 200.0, "iron": 200.0},
-        "research_requirements": {"stable": 1},
-        "researchable": True,
-    },
-    "ram": {
-        "training_cost": {"wood": 300.0, "clay": 200.0, "iron": 150.0},
-        "training_time_seconds": 90,
-        "training_requirements": {"workshop": 1},
-        "research_cost": {"wood": 1500.0, "clay": 1000.0, "iron": 1000.0},
-        "research_requirements": {"barracks": 10},
-        "researchable": True,
-    },
-    "catapult": {
-        "training_cost": {"wood": 350.0, "clay": 250.0, "iron": 300.0},
-        "training_time_seconds": 120,
-        "training_requirements": {"workshop": 5},
-        "research_cost": {"wood": 2000.0, "clay": 1500.0, "iron": 1500.0},
-        "research_requirements": {"barracks": 15},
-        "researchable": True,
-    },
-    "noble": {
-        "training_cost": {"wood": 1000.0, "clay": 1000.0, "iron": 1000.0},
-        "training_time_seconds": 45,
-        "training_requirements": {"town_hall": 20, "workshop": 10},
-        "research_cost": {"wood": 10000.0, "clay": 10000.0, "iron": 10000.0},
-        "research_requirements": {"town_hall": 20},
-        "researchable": True,
-    },
-}
+# Compatibility aliases: definitions live only in ``balance``.
+UNIT_ORDER = balance.UNIT_ORDER
+UNIT_CATALOG = balance.UNIT_CATALOG
 
 
 def get_unit(unit_type: str) -> Dict[str, Any]:
@@ -119,7 +31,9 @@ def requirements_met(city: models.City, requirements: Dict[str, int]) -> bool:
     return all(levels.get(name, 0) >= level for name, level in requirements.items())
 
 
-def first_missing_requirement(city: models.City, requirements: Dict[str, int]) -> tuple[str, int] | None:
+def first_missing_requirement(
+    city: models.City, requirements: Dict[str, int]
+) -> tuple[str, int] | None:
     levels = _building_levels(city)
     for name, level in requirements.items():
         if levels.get(name, 0) < level:
