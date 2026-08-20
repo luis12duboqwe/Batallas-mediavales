@@ -15,7 +15,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, Tuple
 
-BALANCE_VERSION = "2026.08.20-bm0040.2"
+BALANCE_VERSION = "2026.08.20-bm0040.3"
 
 RESOURCE_FIELDS = ("wood", "clay", "iron")
 
@@ -100,6 +100,14 @@ STARTER_BUILDINGS = (
     {"name": "town_hall", "level": 1},
     {"name": "barracks", "level": 1},
 )
+
+# Tutorial is part of the accepted G2 economic path. Its completion reward is
+# versioned here so the service, API/help and tests cannot silently diverge.
+TUTORIAL_REWARD: Dict[str, float] = {
+    "wood": 250.0,
+    "clay": 250.0,
+    "iron": 250.0,
+}
 
 # ---------------------------------------------------------------------------
 # Units
@@ -469,6 +477,9 @@ def snapshot() -> Dict[str, Any]:
             "founding_cost": deepcopy(CITY_FOUNDING_COST),
             "initial_loyalty": CITY_INITIAL_LOYALTY,
             "starter_buildings": deepcopy(list(STARTER_BUILDINGS)),
+        },
+        "tutorial": {
+            "completion_reward": deepcopy(TUTORIAL_REWARD),
         },
         "combat": {
             "wall_building": WALL_BUILDING_KEY,
