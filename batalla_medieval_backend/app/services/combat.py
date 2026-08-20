@@ -229,12 +229,14 @@ def resolve_battle(
             if stats:
                 total_carry += stats.get("carry", 0) * amount
 
+        loot_modifier = max(float(modifiers.get("loot_modifier", 1.0)), 0.0)
+        effective_carry = total_carry * loot_modifier
         available_wood = defender_city.wood
         available_clay = defender_city.clay
         available_iron = defender_city.iron
         total_resources = available_wood + available_clay + available_iron
         if total_resources > 0:
-            take_ratio = min(1.0, total_carry / total_resources)
+            take_ratio = min(1.0, effective_carry / total_resources)
             loot = {
                 "wood": int(available_wood * take_ratio),
                 "clay": int(available_clay * take_ratio),
