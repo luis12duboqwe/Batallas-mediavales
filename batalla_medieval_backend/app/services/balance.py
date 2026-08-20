@@ -15,7 +15,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, Tuple
 
-BALANCE_VERSION = "2026.08.20-bm0040.3"
+BALANCE_VERSION = "2026.08.20-bm0040.4"
 
 RESOURCE_FIELDS = ("wood", "clay", "iron")
 
@@ -108,6 +108,32 @@ TUTORIAL_REWARD: Dict[str, float] = {
     "clay": 250.0,
     "iron": 250.0,
 }
+
+# The alpha PvE seed/AI values are versioned here because they directly affect
+# tutorial difficulty, loot availability and recovery. BM-0067 may replace
+# these values with the final barbarian/oasis model without creating a second
+# source of truth.
+BARBARIAN_STARTING_RESOURCES: Dict[str, float] = {
+    "wood": 1000.0,
+    "clay": 1000.0,
+    "iron": 1000.0,
+}
+BARBARIAN_POPULATION_MAX = 100
+BARBARIAN_STARTING_BUILDINGS = (
+    ("town_hall", 1),
+    ("barracks", 1),
+    ("wall", 1),
+)
+BARBARIAN_STARTING_TROOPS = (
+    ("basic_infantry", 20),
+    ("archer", 10),
+    ("spy", 2),
+)
+BARBARIAN_AI_BATCH_SIZE = 50
+BARBARIAN_RESOURCE_GROWTH_CHANCE = 0.10
+BARBARIAN_RESOURCE_GROWTH_AMOUNT = 10.0
+BARBARIAN_RECRUIT_CHANCE = 0.05
+BARBARIAN_RECRUIT_UNIT = "basic_infantry"
 
 # ---------------------------------------------------------------------------
 # Units
@@ -480,6 +506,17 @@ def snapshot() -> Dict[str, Any]:
         },
         "tutorial": {
             "completion_reward": deepcopy(TUTORIAL_REWARD),
+        },
+        "pve_alpha": {
+            "barbarian_starting_resources": deepcopy(BARBARIAN_STARTING_RESOURCES),
+            "barbarian_population_max": BARBARIAN_POPULATION_MAX,
+            "barbarian_starting_buildings": deepcopy(list(BARBARIAN_STARTING_BUILDINGS)),
+            "barbarian_starting_troops": deepcopy(list(BARBARIAN_STARTING_TROOPS)),
+            "barbarian_ai_batch_size": BARBARIAN_AI_BATCH_SIZE,
+            "barbarian_resource_growth_chance": BARBARIAN_RESOURCE_GROWTH_CHANCE,
+            "barbarian_resource_growth_amount": BARBARIAN_RESOURCE_GROWTH_AMOUNT,
+            "barbarian_recruit_chance": BARBARIAN_RECRUIT_CHANCE,
+            "barbarian_recruit_unit": BARBARIAN_RECRUIT_UNIT,
         },
         "combat": {
             "wall_building": WALL_BUILDING_KEY,
