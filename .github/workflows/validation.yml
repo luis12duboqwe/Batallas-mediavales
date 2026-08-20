@@ -96,6 +96,7 @@ jobs:
           tests/test_building_completion_concurrency.py
           tests/test_unit_concurrency.py
           tests/test_movement_concurrency.py
+          tests/test_market_concurrency.py
           tests/test_tutorial_concurrency.py
 
   frontend:
