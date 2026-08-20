@@ -1,15 +1,23 @@
-from typing import List
+import logging
+from datetime import timedelta
+from typing import Dict, List
 
 from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from ..utils import utc_now
+from . import anticheat
+from . import event as event_service
 from . import movement as movement_service
 from . import production
 
+logger = logging.getLogger(__name__)
+
 MARKET_BUILDING_NAME = "market"
 MERCHANT_CAPACITY = 1000
+TRANSPORT_BASE_SPEED = 1.0
 
 
 def _get_market_capacity(city: models.City) -> int:
@@ -59,6 +67,94 @@ def _get_available_merchants(db: Session, city: models.City) -> int:
         used_capacity += offer.offer_amount
 
     return max(0, total_capacity - used_capacity)
+
+
+def _normalize_transport_resources(resources: Dict[str, int]) -> Dict[str, int]:
+    normalized: Dict[str, int] = {}
+    for resource, raw_amount in resources.items():
+        if resource not in production.RESOURCE_FIELDS:
+            raise HTTPException(status_code=400, detail=f"Invalid resource type: {resource}")
+        amount = int(raw_amount)
+        if amount < 0:
+            raise HTTPException(status_code=400, detail="Resource amounts cannot be negative")
+        if amount > 0:
+            normalized[resource] = amount
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Transport requires resources")
+    return normalized
+
+
+def _create_transport_uncommitted(
+    db: Session,
+    *,
+    origin_city: models.City,
+    target_city: models.City,
+    resources: Dict[str, int],
+) -> models.Movement:
+    """Create a market transport without charging resources or committing.
+
+    The caller must already hold the relevant city locks and reserve the
+    resources. Keeping this helper commit-free lets an offer exchange persist
+    both directions, the payment and offer consumption in one transaction.
+    """
+
+    normalized = _normalize_transport_resources(resources)
+    if origin_city.world_id != target_city.world_id:
+        raise HTTPException(status_code=400, detail="Target city is not in the same world")
+    if origin_city.id == target_city.id:
+        raise HTTPException(status_code=400, detail="Origin and target city must be different")
+
+    modifiers = event_service.get_active_modifiers(db, world_id=origin_city.world_id)
+    effective_speed = TRANSPORT_BASE_SPEED * modifiers.get("movement_speed", 1.0)
+    world_speed = origin_city.world.speed_modifier if origin_city.world else 1.0
+    speed = max(effective_speed * world_speed, 0.01)
+    distance = movement_service.calculate_distance(origin_city, target_city)
+    arrival_time = utc_now() + timedelta(hours=distance / speed)
+
+    movement = models.Movement(
+        origin_city_id=origin_city.id,
+        target_city_id=target_city.id,
+        movement_type="transport",
+        troops={},
+        resources=normalized,
+        spy_count=0,
+        arrival_time=arrival_time,
+        speed_used=speed,
+        world_id=origin_city.world_id,
+        status="ongoing",
+    )
+    db.add(movement)
+    db.flush()
+    return movement
+
+
+def _audit_transport_after_commit(
+    db: Session,
+    *,
+    movement: models.Movement,
+    origin_city: models.City,
+    target_city: models.City,
+) -> None:
+    """Run monitoring after the economic transaction is already durable."""
+
+    if not origin_city.owner:
+        return
+    try:
+        anticheat.check_action_speed(db, origin_city.owner, "market_transport")
+        anticheat.check_movement_legitimacy(
+            db,
+            origin_city,
+            target_city,
+            "transport",
+            movement.arrival_time,
+            movement.speed_used or TRANSPORT_BASE_SPEED,
+        )
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Failed to record market transport anti-cheat telemetry",
+            extra={"movement_id": movement.id},
+        )
 
 
 def create_offer(
@@ -183,85 +279,113 @@ def get_offers(
 
                 query = query.filter(
                     or_(
-                        models.MarketOffer.is_alliance_only == False,
+                        models.MarketOffer.is_alliance_only == False,  # noqa: E712
                         models.AllianceMember.alliance_id == alliance_id,
                     )
                 )
         else:
-            query = query.filter(models.MarketOffer.is_alliance_only == False)
+            query = query.filter(models.MarketOffer.is_alliance_only == False)  # noqa: E712
     else:
-        query = query.filter(models.MarketOffer.is_alliance_only == False)
+        query = query.filter(models.MarketOffer.is_alliance_only == False)  # noqa: E712
 
     return query.offset(skip).limit(limit).all()
 
 
 def accept_offer(db: Session, buyer_city: models.City, offer_id: int):
-    """Accept an offer once, preventing concurrent buyers from consuming it twice."""
+    """Atomically consume one offer and create both resource transports."""
 
-    offer = (
-        db.query(models.MarketOffer)
-        .filter(models.MarketOffer.id == offer_id)
-        .with_for_update()
-        .first()
-    )
-    if not offer:
-        raise HTTPException(status_code=404, detail="Offer not found")
+    production_gains: Dict[str, float] = {}
+    try:
+        offer = (
+            db.query(models.MarketOffer)
+            .filter(
+                models.MarketOffer.id == offer_id,
+                models.MarketOffer.world_id == buyer_city.world_id,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if not offer:
+            raise HTTPException(status_code=404, detail="Offer not found")
 
-    if offer.city_id == buyer_city.id:
+        seller_city_id = offer.city_id
+        locked_cities = (
+            db.query(models.City)
+            .filter(models.City.id.in_([seller_city_id, buyer_city.id]))
+            .order_by(models.City.id.asc())
+            .with_for_update()
+            .populate_existing()
+            .all()
+        )
+        by_id = {city.id: city for city in locked_cities}
+        seller_city = by_id.get(seller_city_id)
+        locked_buyer = by_id.get(buyer_city.id)
+        if seller_city is None or locked_buyer is None:
+            raise HTTPException(status_code=404, detail="Market city not found")
+        if seller_city.world_id != locked_buyer.world_id:
+            raise HTTPException(status_code=400, detail="Offer is not in the same world")
+        if seller_city.owner_id == locked_buyer.owner_id:
+            raise HTTPException(status_code=400, detail="Cannot accept your own offer")
+
+        locked_buyer, production_gains = production.recalculate_resources(
+            db,
+            locked_buyer,
+            return_gains=True,
+            commit=False,
+        )
+        db.expire(locked_buyer, ["buildings"])
+
+        payment = {offer.request_type: offer.request_amount}
+        if not production.check_cost(locked_buyer, payment):
+            raise HTTPException(status_code=400, detail="Insufficient resources to pay")
+
+        available_capacity = _get_available_merchants(db, locked_buyer)
+        if available_capacity < offer.request_amount:
+            raise HTTPException(status_code=400, detail="Not enough merchant capacity")
+
+        # Seller resources were reserved exactly once by create_offer(). Buyer
+        # payment is reserved exactly once here. The transport helper never pays.
+        production.pay_cost(locked_buyer, payment)
+
+        seller_resources = {offer.offer_type: offer.offer_amount}
+        buyer_resources = payment.copy()
+        db.delete(offer)
+        db.flush()
+
+        seller_movement = _create_transport_uncommitted(
+            db,
+            origin_city=seller_city,
+            target_city=locked_buyer,
+            resources=seller_resources,
+        )
+        buyer_movement = _create_transport_uncommitted(
+            db,
+            origin_city=locked_buyer,
+            target_city=seller_city,
+            resources=buyer_resources,
+        )
+
+        db.commit()
+        db.refresh(seller_movement)
+        db.refresh(buyer_movement)
+    except Exception:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Cannot accept own offer")
+        raise
 
-    buyer_city, production_gains = production.lock_and_recalculate_resources(
-        db, buyer_city
-    )
-    db.expire(buyer_city, ["buildings"])
-
-    if getattr(buyer_city, offer.request_type) < offer.request_amount:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Insufficient resources to pay")
-
-    available_capacity = _get_available_merchants(db, buyer_city)
-    if available_capacity < offer.request_amount:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Not enough merchant capacity")
-
-    setattr(
-        buyer_city,
-        offer.request_type,
-        getattr(buyer_city, offer.request_type) - offer.request_amount,
-    )
-
-    # Delete/flush before movement helpers perform their own commits. This makes
-    # a concurrent second acceptance observe the offer as consumed rather than
-    # dispatching the seller's reserved resources twice. BM-0032 will further
-    # consolidate market dispatch into a single transaction.
-    seller_city = offer.city
-    seller_city_id = offer.city_id
-    offer_type = offer.offer_type
-    offer_amount = offer.offer_amount
-    request_type = offer.request_type
-    request_amount = offer.request_amount
-    db.delete(offer)
-    db.flush()
-
-    movement_service.send_movement(
+    production.record_resource_gains(db, locked_buyer, production_gains)
+    _audit_transport_after_commit(
         db,
+        movement=seller_movement,
         origin_city=seller_city,
-        target_city_id=buyer_city.id,
-        movement_type="transport",
-        resources={offer_type: offer_amount},
+        target_city=locked_buyer,
     )
-
-    movement_service.send_movement(
+    _audit_transport_after_commit(
         db,
-        origin_city=buyer_city,
-        target_city_id=seller_city_id,
-        movement_type="transport",
-        resources={request_type: request_amount},
+        movement=buyer_movement,
+        origin_city=locked_buyer,
+        target_city=seller_city,
     )
-
-    db.commit()
-    production.record_resource_gains(db, buyer_city, production_gains)
+    return seller_movement, buyer_movement
 
 
 def cancel_offer(db: Session, city: models.City, offer_id: int):
@@ -269,7 +393,10 @@ def cancel_offer(db: Session, city: models.City, offer_id: int):
 
     offer = (
         db.query(models.MarketOffer)
-        .filter(models.MarketOffer.id == offer_id)
+        .filter(
+            models.MarketOffer.id == offer_id,
+            models.MarketOffer.world_id == city.world_id,
+        )
         .with_for_update()
         .first()
     )
@@ -291,47 +418,62 @@ def cancel_offer(db: Session, city: models.City, offer_id: int):
 def send_resources(
     db: Session, origin_city: models.City, request: schemas.TransportRequest
 ):
-    """Reserve transport resources while holding the origin-city row lock."""
+    """Reserve resources and create one transport in one transaction."""
 
-    total_amount = request.wood + request.clay + request.iron
-    if total_amount <= 0:
-        raise HTTPException(status_code=400, detail="Must send at least one resource")
-    if request.wood < 0 or request.clay < 0 or request.iron < 0:
-        raise HTTPException(status_code=400, detail="Resource amounts cannot be negative")
+    resources = {
+        "wood": request.wood,
+        "clay": request.clay,
+        "iron": request.iron,
+    }
+    normalized = _normalize_transport_resources(resources)
+    total_amount = sum(normalized.values())
+    production_gains: Dict[str, float] = {}
 
-    origin_city, production_gains = production.lock_and_recalculate_resources(
-        db, origin_city
-    )
-    db.expire(origin_city, ["buildings"])
+    try:
+        target_city = (
+            db.query(models.City)
+            .filter(models.City.id == request.target_city_id)
+            .one_or_none()
+        )
+        if target_city is None:
+            raise HTTPException(status_code=404, detail="Target city not found")
+        if target_city.world_id != origin_city.world_id:
+            raise HTTPException(status_code=400, detail="Target city is not in the same world")
+        if target_city.id == origin_city.id:
+            raise HTTPException(status_code=400, detail="Origin and target city must be different")
 
-    if (
-        origin_city.wood < request.wood
-        or origin_city.clay < request.clay
-        or origin_city.iron < request.iron
-    ):
+        locked_origin, production_gains = production.lock_and_recalculate_resources(
+            db, origin_city
+        )
+        db.expire(locked_origin, ["buildings"])
+
+        if not production.check_cost(locked_origin, normalized):
+            raise HTTPException(status_code=400, detail="Insufficient resources")
+
+        available_capacity = _get_available_merchants(db, locked_origin)
+        if available_capacity < total_amount:
+            raise HTTPException(status_code=400, detail="Not enough merchant capacity")
+
+        # Pay exactly once while the origin row is locked. The movement creator
+        # is deliberately non-economic and commit-free.
+        production.pay_cost(locked_origin, normalized)
+        movement = _create_transport_uncommitted(
+            db,
+            origin_city=locked_origin,
+            target_city=target_city,
+            resources=normalized,
+        )
+        db.commit()
+        db.refresh(movement)
+    except Exception:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Insufficient resources")
+        raise
 
-    available_capacity = _get_available_merchants(db, origin_city)
-    if available_capacity < total_amount:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Not enough merchant capacity")
-
-    origin_city.wood -= request.wood
-    origin_city.clay -= request.clay
-    origin_city.iron -= request.iron
-
-    movement_service.send_movement(
+    production.record_resource_gains(db, locked_origin, production_gains)
+    _audit_transport_after_commit(
         db,
-        origin_city=origin_city,
-        target_city_id=request.target_city_id,
-        movement_type="transport",
-        resources={
-            "wood": request.wood,
-            "clay": request.clay,
-            "iron": request.iron,
-        },
+        movement=movement,
+        origin_city=locked_origin,
+        target_city=target_city,
     )
-
-    db.commit()
-    production.record_resource_gains(db, origin_city, production_gains)
+    return movement
