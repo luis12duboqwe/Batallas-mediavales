@@ -17,6 +17,17 @@ TROOP_VALUES: Dict[str, int] = {
 }
 
 
+def calculate_city_points(city: models.City) -> int:
+    """Return the same score components used by player ranking, scoped to one city."""
+
+    building_points = sum(int(building.level) for building in city.buildings) * 5
+    troop_points = sum(
+        int(troop.quantity) * TROOP_VALUES.get(troop.unit_type, 1)
+        for troop in city.troops
+    )
+    return building_points + troop_points
+
+
 def _calculate_building_points(db: Session, user_id: int, world_id: int) -> int:
     total_levels = (
         db.query(func.coalesce(func.sum(models.Building.level), 0))
