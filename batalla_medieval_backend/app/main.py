@@ -13,6 +13,7 @@ from .routers import (
     building,
     chat,
     city,
+    economy,
     queue,
     event,
     message,
@@ -80,6 +81,7 @@ app.include_router(event.router, prefix="/event", tags=["Event"])
 app.include_router(season.router, prefix="/season", tags=["Season"])
 app.include_router(quest.router, prefix="/quest", tags=["Quest"])
 app.include_router(wiki.router, prefix="/wiki", tags=["Wiki"])
+app.include_router(economy.router)
 app.include_router(public_api.router, prefix="/public-api", tags=["Public API"])
 # ``queue.router`` already owns the /queue prefix. Adding it again produces
 # /queue/queue/* and breaks the frontend contract.
