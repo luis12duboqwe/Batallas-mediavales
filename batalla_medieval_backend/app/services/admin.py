@@ -15,6 +15,62 @@ def log_action(db: Session, user_id: int, action: str, details: Dict) -> models.
     return log_entry
 
 
+def list_logs(db: Session, limit: int = 100) -> list[models.Log]:
+    """Return recent audit/anti-abuse logs for authenticated administrators."""
+
+    return (
+        db.query(models.Log)
+        .order_by(models.Log.timestamp.desc(), models.Log.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def set_user_freeze(
+    db: Session,
+    user_id: int,
+    *,
+    is_frozen: bool,
+    reason: str | None,
+    admin_user: models.User,
+) -> models.User:
+    """Freeze/unfreeze an account and revoke existing sessions when state changes."""
+
+    user = db.query(models.User).filter(models.User.id == user_id).with_for_update().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.id == admin_user.id and is_frozen:
+        raise HTTPException(status_code=400, detail="Administrators cannot freeze themselves")
+
+    normalized_reason = (reason or "").strip() or None
+    if is_frozen and normalized_reason is None:
+        raise HTTPException(status_code=400, detail="Freeze reason is required")
+
+    changed = user.is_frozen != is_frozen
+    user.is_frozen = is_frozen
+    user.freeze_reason = normalized_reason if is_frozen else None
+    if changed:
+        # Both HTTP and Socket.IO access tokens include auth_version. Revoking
+        # it prevents an already-issued token from remaining valid after a
+        # moderation state transition.
+        user.auth_version += 1
+
+    log_action(
+        db,
+        admin_user.id,
+        "set_user_freeze",
+        {
+            "target_user_id": user.id,
+            "is_frozen": is_frozen,
+            "reason": user.freeze_reason,
+            "session_revoked": changed,
+        },
+    )
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def create_alliance(db: Session, payload: schemas.AllianceCreate, leader: models.User) -> models.Alliance:
     alliance = models.Alliance(
         name=payload.name,
