@@ -418,7 +418,12 @@ def cancel_offer(db: Session, city: models.City, offer_id: int):
 def send_resources(
     db: Session, origin_city: models.City, request: schemas.TransportRequest
 ):
-    """Reserve resources and create one transport in one transaction."""
+    """Reserve resources and create one transport in one transaction.
+
+    Both city rows are locked in deterministic id order. Reciprocal transports
+    (A→B and B→A) therefore cannot deadlock while PostgreSQL checks the movement
+    foreign keys during insert.
+    """
 
     resources = {
         "wood": request.wood,
@@ -430,20 +435,32 @@ def send_resources(
     production_gains: Dict[str, float] = {}
 
     try:
-        target_city = (
-            db.query(models.City)
-            .filter(models.City.id == request.target_city_id)
-            .one_or_none()
-        )
-        if target_city is None:
-            raise HTTPException(status_code=404, detail="Target city not found")
-        if target_city.world_id != origin_city.world_id:
-            raise HTTPException(status_code=400, detail="Target city is not in the same world")
-        if target_city.id == origin_city.id:
+        if request.target_city_id == origin_city.id:
             raise HTTPException(status_code=400, detail="Origin and target city must be different")
 
-        locked_origin, production_gains = production.lock_and_recalculate_resources(
-            db, origin_city
+        locked_cities = (
+            db.query(models.City)
+            .filter(models.City.id.in_([origin_city.id, request.target_city_id]))
+            .order_by(models.City.id.asc())
+            .with_for_update()
+            .populate_existing()
+            .all()
+        )
+        by_id = {city.id: city for city in locked_cities}
+        locked_origin = by_id.get(origin_city.id)
+        target_city = by_id.get(request.target_city_id)
+        if locked_origin is None:
+            raise HTTPException(status_code=404, detail="Origin city not found")
+        if target_city is None:
+            raise HTTPException(status_code=404, detail="Target city not found")
+        if target_city.world_id != locked_origin.world_id:
+            raise HTTPException(status_code=400, detail="Target city is not in the same world")
+
+        locked_origin, production_gains = production.recalculate_resources(
+            db,
+            locked_origin,
+            return_gains=True,
+            commit=False,
         )
         db.expire(locked_origin, ["buildings"])
 
@@ -454,8 +471,8 @@ def send_resources(
         if available_capacity < total_amount:
             raise HTTPException(status_code=400, detail="Not enough merchant capacity")
 
-        # Pay exactly once while the origin row is locked. The movement creator
-        # is deliberately non-economic and commit-free.
+        # Pay exactly once while both city rows remain locked. The movement
+        # creator is deliberately non-economic and commit-free.
         production.pay_cost(locked_origin, normalized)
         movement = _create_transport_uncommitted(
             db,
