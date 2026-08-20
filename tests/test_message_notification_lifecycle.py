@@ -57,7 +57,7 @@ def test_message_delivery_read_delete_and_notification_privacy(client, db_sessio
         db_session.query(models.Notification)
         .filter(
             models.Notification.user_id == receiver.id,
-            models.Notification.notification_type == "message_received",
+            models.Notification.type == "message_received",
         )
         .one()
     )
