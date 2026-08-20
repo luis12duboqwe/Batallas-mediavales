@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models, schemas
 from ..database import get_db
-from ..services import world_gen
+from ..services import ranking, world_gen
 from .responses import error_response
 
 router = APIRouter(
@@ -12,12 +12,23 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
+
+def _alliance_name(user: models.User | None, world_id: int) -> str | None:
+    if not user:
+        return None
+    for membership in user.alliances:
+        alliance = membership.alliance
+        if alliance and alliance.world_id == world_id:
+            return alliance.name
+    return None
+
+
 @router.get("/tiles", response_model=schemas.MapResponse)
 def get_map_tiles(
     world_id: int,
     x: int,
     y: int,
-    radius: int = Query(10, le=20), # Limit radius to avoid huge payloads
+    radius: int = Query(10, le=20),  # Limit radius to avoid huge payloads
     db: Session = Depends(get_db),
 ):
     min_x = x - radius
@@ -25,10 +36,20 @@ def get_map_tiles(
     min_y = y - radius
     max_y = y + radius
 
-    # Fetch cities in range
+    owner_alliance = (
+        selectinload(models.City.owner)
+        .selectinload(models.User.alliances)
+        .selectinload(models.AllianceMember.alliance)
+    )
+
+    # Fetch cities in range with everything needed for labels and canonical score.
     cities = (
         db.query(models.City)
-        .options(selectinload(models.City.owner).selectinload(models.User.alliance))
+        .options(
+            owner_alliance,
+            selectinload(models.City.buildings),
+            selectinload(models.City.troops),
+        )
         .filter(
             models.City.world_id == world_id,
             models.City.x >= min_x,
@@ -45,7 +66,12 @@ def get_map_tiles(
     # Fetch oases in range
     oases = (
         db.query(models.Oasis)
-        .options(selectinload(models.Oasis.owner_city).selectinload(models.City.owner).selectinload(models.User.alliance))
+        .options(
+            selectinload(models.Oasis.owner_city)
+            .selectinload(models.City.owner)
+            .selectinload(models.User.alliances)
+            .selectinload(models.AllianceMember.alliance)
+        )
         .filter(
             models.Oasis.world_id == world_id,
             models.Oasis.x >= min_x,
@@ -62,16 +88,16 @@ def get_map_tiles(
         for curr_y in range(min_y, max_y + 1):
             city = city_map.get((curr_x, curr_y))
             oasis = oasis_map.get((curr_x, curr_y))
-            
+
             tile_type = world_gen.get_tile_type(curr_x, curr_y)
-            
+
             city_id = city.id if city else None
             city_name = city.name if city else None
-            points = city.points if city else 0
+            points = ranking.calculate_city_points(city) if city else 0
             owner_id = None
             owner_name = None
             alliance_name = None
-            
+
             oasis_id = None
             resource_type = None
             bonus_percent = None
@@ -81,8 +107,7 @@ def get_map_tiles(
                 if city.owner:
                     owner_id = city.owner.id
                     owner_name = city.owner.username
-                    if city.owner.alliance:
-                        alliance_name = city.owner.alliance.name
+                    alliance_name = _alliance_name(city.owner, world_id)
                 else:
                     owner_name = "Bárbaros"
             elif oasis:
@@ -92,27 +117,29 @@ def get_map_tiles(
                 if oasis.owner_city:
                     is_conquered = True
                     owner_id = oasis.owner_city.owner_id
-                    owner_name = oasis.owner_city.owner.username
-                    if oasis.owner_city.owner.alliance:
-                        alliance_name = oasis.owner_city.owner.alliance.name
+                    if oasis.owner_city.owner:
+                        owner_name = oasis.owner_city.owner.username
+                        alliance_name = _alliance_name(oasis.owner_city.owner, world_id)
                 else:
                     owner_name = "Naturaleza"
 
-            tiles.append(schemas.MapTile(
-                x=curr_x,
-                y=curr_y,
-                type=tile_type,
-                city_id=city_id,
-                city_name=city_name,
-                owner_id=owner_id,
-                owner_name=owner_name,
-                alliance_name=alliance_name,
-                points=points,
-                oasis_id=oasis_id,
-                resource_type=resource_type,
-                bonus_percent=bonus_percent,
-                is_conquered=is_conquered
-            ))
+            tiles.append(
+                schemas.MapTile(
+                    x=curr_x,
+                    y=curr_y,
+                    type=tile_type,
+                    city_id=city_id,
+                    city_name=city_name,
+                    owner_id=owner_id,
+                    owner_name=owner_name,
+                    alliance_name=alliance_name,
+                    points=points,
+                    oasis_id=oasis_id,
+                    resource_type=resource_type,
+                    bonus_percent=bonus_percent,
+                    is_conquered=is_conquered,
+                )
+            )
 
     return schemas.MapResponse(tiles=tiles)
 

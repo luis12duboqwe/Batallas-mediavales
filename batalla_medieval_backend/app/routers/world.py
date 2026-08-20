@@ -63,7 +63,7 @@ def join_world(
     return _join_or_select_world(db, current_user, world_id)
 
 
-@router.get("/active", response_model=dict)
+@router.get("/active", response_model=schemas.ActiveWorldSnapshot)
 def get_active_world(
     db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
 ):

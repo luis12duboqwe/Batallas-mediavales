@@ -8,7 +8,6 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import VerifyEmail from './pages/VerifyEmail';
 import Dashboard from './pages/Dashboard';
-import CityView from './pages/CityView';
 import BuildingsView from './pages/BuildingsView';
 import TroopsView from './pages/TroopsView';
 import MovementsView from './pages/MovementsView';
@@ -16,45 +15,29 @@ import MapView from './pages/MapView';
 import ReportsView from './pages/ReportsView';
 import AllianceView from './pages/AllianceView';
 import MessagesView from './pages/MessagesView';
-import QuestsView from './pages/QuestsView';
 import RankingView from './pages/RankingView';
-import ShopView from './pages/ShopView';
-import WikiView from './pages/WikiView';
 import ProfileView from './pages/ProfileView';
 import AdminPanel from './pages/AdminPanel';
-import BattleSimulator from './pages/BattleSimulator';
 import MarketView from './pages/MarketView';
 import AcademyView from './pages/AcademyView';
-import HeroView from './pages/HeroView';
-import AdventuresView from './pages/AdventuresView';
 import SendMovementView from './pages/SendMovementView';
-import ChatWidget from './components/ChatWidget';
 import TutorialOverlay from './components/TutorialOverlay';
-import VictoryOverlay from './components/VictoryOverlay';
-import NotificationListener from './components/NotificationListener';
 import { useUserStore } from './store/userStore';
 import soundManager from './services/sound';
-
 import { useTranslation } from 'react-i18next';
 
 const sidebarLinks = [
   { to: '/', key: 'nav.city', icon: '🏰' },
   { to: '/buildings', key: 'nav.buildings', icon: '🛠️' },
-  { to: '/troops', key: 'nav.troops', icon: '⚔️' },
-  { to: '/hero', key: 'nav.hero', icon: '🦸' },
-  { to: '/adventures', key: 'nav.adventures', icon: '🏕️' },
   { to: '/academy', key: 'nav.academy', icon: '🎓' },
-  { to: '/market', key: 'nav.market', icon: '⚖️' },
-  { to: '/movements', key: 'nav.movements', icon: '🧭' },
+  { to: '/troops', key: 'nav.troops', icon: '⚔️' },
   { to: '/map', key: 'nav.map', icon: '🗺️' },
+  { to: '/movements', key: 'nav.movements', icon: '🧭' },
   { to: '/reports', key: 'nav.reports', icon: '📜' },
-  { to: '/quests', key: 'nav.quests', icon: '📜' },
+  { to: '/market', key: 'nav.market', icon: '⚖️' },
   { to: '/ranking', key: 'nav.ranking', icon: '🏆' },
   { to: '/alliance', key: 'nav.alliance', icon: '🤝' },
-  { to: '/shop', key: 'nav.shop', icon: '💎' },
-  { to: '/wiki', key: 'nav.wiki', icon: '❓' },
   { to: '/messages', key: 'nav.messages', icon: '✉️' },
-  { to: '/simulator', key: 'nav.simulator', icon: '🎯' },
 ];
 
 const Layout = ({ children }) => {
@@ -62,7 +45,6 @@ const Layout = ({ children }) => {
   const location = useLocation();
   return (
     <div className="min-h-screen bg-gradient-to-br from-midnight via-gray-950 to-black text-gray-100">
-      <VictoryOverlay />
       <TutorialOverlay />
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(252,211,77,0.12),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(248,180,0,0.08),transparent_30%)]" />
       <Navbar />
@@ -95,8 +77,6 @@ const Layout = ({ children }) => {
           <div className="relative animate-fade-in">{children}</div>
         </main>
       </div>
-      <ChatWidget />
-      <NotificationListener />
     </div>
   );
 };
@@ -106,6 +86,20 @@ const ProtectedRoute = ({ children }) => {
   if (!isAuthenticated()) return <Navigate to="/login" replace />;
   return children;
 };
+
+const AdminRoute = ({ children }) => {
+  const { user, isAuthenticated } = useUserStore();
+  if (!isAuthenticated()) return <Navigate to="/login" replace />;
+  if (!user) return null;
+  if (!user.is_admin) return <Navigate to="/" replace />;
+  return children;
+};
+
+const GameRoute = ({ children }) => (
+  <ProtectedRoute>
+    <Layout>{children}</Layout>
+  </ProtectedRoute>
+);
 
 const App = () => {
   const { token, refreshCity } = useUserStore();
@@ -140,206 +134,31 @@ const App = () => {
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/verify-email" element={<VerifyEmail />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <Dashboard />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/profile"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <ProfileView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/buildings"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <BuildingsView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/troops"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <TroopsView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/hero"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <HeroView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/adventures"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <AdventuresView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/academy"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <AcademyView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/market"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <MarketView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/movements"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <MovementsView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/map"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <MapView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/reports"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <ReportsView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/quests"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <QuestsView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/ranking"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <RankingView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/shop"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <ShopView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/wiki"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <WikiView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/simulator"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <BattleSimulator />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/send-movement/:targetCityId"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <SendMovementView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/alliance"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <AllianceView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/messages"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <MessagesView />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
+
+      <Route path="/" element={<GameRoute><Dashboard /></GameRoute>} />
+      <Route path="/profile" element={<GameRoute><ProfileView /></GameRoute>} />
+      <Route path="/buildings" element={<GameRoute><BuildingsView /></GameRoute>} />
+      <Route path="/academy" element={<GameRoute><AcademyView /></GameRoute>} />
+      <Route path="/troops" element={<GameRoute><TroopsView /></GameRoute>} />
+      <Route path="/market" element={<GameRoute><MarketView /></GameRoute>} />
+      <Route path="/movements" element={<GameRoute><MovementsView /></GameRoute>} />
+      <Route path="/map" element={<GameRoute><MapView /></GameRoute>} />
+      <Route path="/reports" element={<GameRoute><ReportsView /></GameRoute>} />
+      <Route path="/ranking" element={<GameRoute><RankingView /></GameRoute>} />
+      <Route path="/alliance" element={<GameRoute><AllianceView /></GameRoute>} />
+      <Route path="/messages" element={<GameRoute><MessagesView /></GameRoute>} />
+      <Route path="/send-movement/:targetCityId" element={<GameRoute><SendMovementView /></GameRoute>} />
+
       <Route
         path="/admin"
         element={
-          <ProtectedRoute>
-            <Layout>
-              <AdminPanel />
-            </Layout>
-          </ProtectedRoute>
+          <AdminRoute>
+            <Layout><AdminPanel /></Layout>
+          </AdminRoute>
         }
       />
+
+      <Route path="*" element={<Navigate to={token ? '/' : '/login'} replace />} />
     </Routes>
   );
 };

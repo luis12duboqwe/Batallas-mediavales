@@ -73,7 +73,7 @@ from .premium import (
     PremiumStatusRead,
     PremiumUseAction,
 )
-from .world import PlayerWorldRead, WorldCreate, WorldRead, WorldSelect
+from .world import ActiveWorldSnapshot, PlayerWorldRead, WorldCreate, WorldRead, WorldSelect
 from .wiki import (
     WIKI_CATEGORIES,
     WikiArticleCreate,
@@ -169,6 +169,7 @@ __all__ = [
     "WorldRead",
     "WorldSelect",
     "PlayerWorldRead",
+    "ActiveWorldSnapshot",
     "MapTile",
     "WikiArticleCreate",
     "WikiArticleRead",

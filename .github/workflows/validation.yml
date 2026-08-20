@@ -34,7 +34,7 @@ jobs:
           python -m pip install -r batalla_medieval_backend/requirements.txt
 
       - name: Compile backend
-        run: python -m compileall -q batalla_medieval_backend/app tests
+        run: python -m compileall -q batalla_medieval_backend/app tests scripts
 
       - name: Validate migrations and canonical seed
         env:
@@ -96,6 +96,7 @@ jobs:
           tests/test_building_completion_concurrency.py
           tests/test_unit_concurrency.py
           tests/test_movement_concurrency.py
+          tests/test_tutorial_concurrency.py
 
   frontend:
     name: Frontend
@@ -122,6 +123,75 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+  browser-e2e:
+    name: Browser E2E
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: test
+      DATABASE_URL: sqlite:////tmp/batalla-medieval-g2-e2e.db
+      SECRET_KEY: test-only-secret-key-for-browser-e2e-validation
+      CORS_ORIGINS: http://127.0.0.1:4173
+      FRONTEND_URL: http://127.0.0.1:4173
+      PYTHONPATH: batalla_medieval_backend
+      VITE_API_URL: http://127.0.0.1:8000
+      E2E_BASE_URL: http://127.0.0.1:4173
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: batalla_medieval_backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r batalla_medieval_backend/requirements.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: batalla_medieval_frontend/package-lock.json
+
+      - name: Install frontend and pinned browser test tooling
+        working-directory: batalla_medieval_frontend
+        run: |
+          npm ci
+          npm install --no-save --package-lock=false @playwright/test@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Prepare E2E database
+        run: |
+          alembic -c batalla_medieval_backend/alembic.ini upgrade head
+          python -m app.seed
+          python scripts/prepare_g2_e2e.py
+
+      - name: Start backend and frontend
+        run: |
+          python -m uvicorn app.main:app --app-dir batalla_medieval_backend --host 127.0.0.1 --port 8000 >/tmp/bm-backend.log 2>&1 &
+          echo $! >/tmp/bm-backend.pid
+          (cd batalla_medieval_frontend && npm run build && npm run preview -- --host 127.0.0.1 --port 4173 >/tmp/bm-frontend.log 2>&1) &
+          echo $! >/tmp/bm-frontend.pid
+          curl --fail --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:8000/health
+          curl --fail --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:4173/login
+
+      - name: Run accepted G2 browser journey
+        working-directory: batalla_medieval_frontend
+        run: node e2e/g2-alpha.mjs
+
+      - name: Show service logs
+        if: always()
+        run: |
+          echo '--- backend ---'
+          cat /tmp/bm-backend.log || true
+          echo '--- frontend ---'
+          cat /tmp/bm-frontend.log || true
 
   dependency-audit:
     name: Dependency audit
@@ -162,6 +232,7 @@ jobs:
       - backend
       - postgres-concurrency
       - frontend
+      - browser-e2e
       - dependency-audit
     steps:
       - name: Checkout repository

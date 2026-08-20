@@ -1,9 +1,14 @@
 import { create } from 'zustand';
 import { api } from '../api/axiosClient';
 
+const readStoredToken = () => {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem('bm_token');
+};
+
 export const useUserStore = create((set, get) => ({
   user: null,
-  token: localStorage.getItem('bm_token'),
+  token: readStoredToken(),
   cities: [],
   loading: false,
   error: null,
@@ -12,7 +17,7 @@ export const useUserStore = create((set, get) => ({
     try {
       const { data } = await api.login(credentials);
       const accessToken = data.access_token;
-      localStorage.setItem('bm_token', accessToken);
+      window.localStorage.setItem('bm_token', accessToken);
       const profileResp = await api.getProfile();
       set({ token: accessToken, user: profileResp.data, loading: false });
       return { token: accessToken, user: profileResp.data };
@@ -32,27 +37,48 @@ export const useUserStore = create((set, get) => ({
     }
   },
   logout() {
-    localStorage.removeItem('bm_token');
-    set({ user: null, token: null, cities: [] });
+    window.localStorage.removeItem('bm_token');
+    set({ user: null, token: null, cities: [], error: null });
+  },
+  hydrateSession() {
+    const storedToken = readStoredToken();
+    if (storedToken && get().token !== storedToken) {
+      set({ token: storedToken });
+    }
+    return storedToken;
   },
   setCities(cities) {
     set({ cities });
   },
   async refreshCity() {
-    const { data } = await api.getCity();
-    set({ user: data.user, cities: data.cities });
-    return data;
+    const token = get().token || get().hydrateSession();
+    if (!token) return null;
+    try {
+      const { data } = await api.getCity();
+      set({ user: data.user, cities: data.cities });
+      return data;
+    } catch (err) {
+      if (err.response?.status === 401) {
+        get().logout();
+      }
+      throw err;
+    }
   },
   async loadUser() {
+    const token = get().token || get().hydrateSession();
+    if (!token) return null;
     try {
       const { data } = await api.getProfile();
       set({ user: data });
       return data;
     } catch (err) {
-      console.error(err);
+      if (err.response?.status === 401) {
+        get().logout();
+      }
+      throw err;
     }
   },
   isAuthenticated() {
-    return Boolean(get().token);
+    return Boolean(get().token || readStoredToken());
   },
 }));

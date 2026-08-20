@@ -1,30 +1,57 @@
 import { create } from 'zustand';
 import { api } from '../api/axiosClient';
 
+const snapshotToState = (data) => ({
+  step: data.step,
+  totalSteps: data.total_steps ?? 7,
+  isActive: !data.completed,
+  completed: Boolean(data.completed),
+  rewardClaimed: Boolean(data.reward_claimed),
+  reward: data.reward ?? null,
+  nextAction: data.next_action ?? '',
+});
+
 export const useTutorialStore = create((set, get) => ({
   step: 0,
+  totalSteps: 7,
   isActive: false,
-  
+  completed: false,
+  rewardClaimed: false,
+  reward: null,
+  nextAction: 'Únete a un mundo para recibir tu capital.',
+  loading: false,
+
   fetchStatus: async () => {
+    if (get().loading) return null;
+    set({ loading: true });
     try {
-      const { data } = await api.getTutorialStatus();
-      set({ step: data.step, isActive: data.step < 7 });
+      const statusResponse = await api.getTutorialStatus();
+      let snapshot = statusResponse.data;
+
+      // GET /tutorial/status is deliberately read-only. Claim the final reward
+      // once only after the server has independently derived completion.
+      if (snapshot.completed && !snapshot.reward_claimed) {
+        const claimResponse = await api.advanceTutorial();
+        snapshot = claimResponse.data;
+      }
+
+      set({ ...snapshotToState(snapshot), loading: false });
+      return snapshot;
     } catch (error) {
-      console.error('Failed to fetch tutorial status', error);
+      set({ loading: false });
+      throw error;
     }
   },
 
-  advance: async (targetStep) => {
-    const currentStep = get().step;
-    if (targetStep <= currentStep) return;
-
+  advance: async () => {
+    set({ loading: true });
     try {
-      await api.advanceTutorial(targetStep);
-      set({ step: targetStep, isActive: targetStep < 7 });
+      const { data } = await api.advanceTutorial();
+      set({ ...snapshotToState(data), loading: false });
+      return data;
     } catch (error) {
-      console.error('Failed to advance tutorial', error);
+      set({ loading: false });
+      throw error;
     }
   },
-  
-  reset: () => set({ step: 0, isActive: true }),
 }));
