@@ -3,13 +3,11 @@ from typing import Dict, Tuple
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import combat, production, world_gen
+from . import balance, combat, production, world_gen
 
-FOUNDING_COST = {"wood": 800.0, "clay": 800.0, "iron": 800.0}
-STARTER_BUILDINGS = [
-    {"name": "town_hall", "level": 1},
-    {"name": "barracks", "level": 1},
-]
+# Compatibility aliases. Expansion balance lives only in ``balance``.
+FOUNDING_COST = balance.CITY_FOUNDING_COST
+STARTER_BUILDINGS = balance.STARTER_BUILDINGS
 
 
 def _validate_troops_available(city: models.City, troops_sent: Dict[str, int]):
@@ -77,13 +75,7 @@ def resolve_conquest(
     target_city: models.City,
     troops_sent: Dict[str, int],
 ) -> Tuple[bool, bool]:
-    """Resolve an instant conquest attempt against a barbarian city only.
-
-    The target city row is locked before the ownership rule is checked again, so
-    two concurrent players cannot both conquer the same neutral city. Combat is
-    delegated to the canonical battle engine instead of maintaining a second
-    combat implementation.
-    """
+    """Resolve an instant conquest attempt against a barbarian city only."""
 
     try:
         attacker_city, target_city = _lock_conquest_cities(
@@ -163,7 +155,7 @@ def found_city(
         y=y,
         owner_id=owner.id,
         world_id=origin_city.world_id,
-        loyalty=100.0,
+        loyalty=balance.CITY_INITIAL_LOYALTY,
         tile_type=tile_type,
     )
     db.add(new_city)
