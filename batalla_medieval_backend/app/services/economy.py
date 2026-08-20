@@ -1,152 +1,91 @@
-"""
-Economic balance utilities for buildings, troops, storage and population.
+"""Compatibility helpers over the canonical versioned balance catalog.
 
-This module centralizes the economic formulas so that other services
-(building, troop, movement, etc.) can reuse the same values.
+Historically this module carried a second set of Spanish-named prices and
+formulas that disagreed with the live building/training services. BM-0040 keeps
+these helper entry points for callers, but all values now come from
+``app.services.balance``.
 """
+
 from __future__ import annotations
 
 from typing import Dict, Mapping
 
-# ------------------------------
-# Base definitions
-# ------------------------------
+from . import balance
 
-# Base construction cost for every building (level 1).
-BASE_BUILDING_COSTS: Dict[str, Dict[str, float]] = {
-    "Casa Central": {"wood": 260.0, "clay": 200.0, "iron": 150.0},
-    "Aserradero": {"wood": 130.0, "clay": 70.0, "iron": 45.0},
-    "Cantera de Ladrillo": {"wood": 110.0, "clay": 160.0, "iron": 55.0},
-    "Mina Profunda": {"wood": 95.0, "clay": 110.0, "iron": 210.0},
-    "Hacienda": {"wood": 190.0, "clay": 130.0, "iron": 100.0},
-    "Gran Depósito": {"wood": 175.0, "clay": 240.0, "iron": 120.0},
-    "Barracas": {"wood": 200.0, "clay": 150.0, "iron": 180.0},
-    "Establos Imperiales": {"wood": 280.0, "clay": 230.0, "iron": 260.0},
-    "Forja Bélica": {"wood": 320.0, "clay": 250.0, "iron": 280.0},
-    "Muralla de Guardia": {"wood": 250.0, "clay": 300.0, "iron": 220.0},
-    "Plaza Comercial": {"wood": 180.0, "clay": 180.0, "iron": 150.0},
-    "Comandancia Militar": {"wood": 380.0, "clay": 320.0, "iron": 320.0},
-}
-
-# Base recruitment cost and population usage for each troop type.
+BALANCE_VERSION = balance.BALANCE_VERSION
+BASE_BUILDING_COSTS = balance.BUILDING_COSTS
 BASE_TROOP_COSTS: Dict[str, Dict[str, float]] = {
-    "Lancero Común": {"wood": 65.0, "clay": 40.0, "iron": 15.0, "population": 1.0},
-    "Soldado de Acero": {"wood": 95.0, "clay": 75.0, "iron": 45.0, "population": 1.0},
-    "Arquero Real": {"wood": 85.0, "clay": 50.0, "iron": 55.0, "population": 1.0},
-    "Jinete Explorador": {"wood": 150.0, "clay": 100.0, "iron": 85.0, "population": 2.0},
-    "Caballero Imperial": {"wood": 240.0, "clay": 200.0, "iron": 230.0, "population": 3.0},
-    "Infiltrador": {"wood": 70.0, "clay": 70.0, "iron": 70.0, "population": 1.0},
-    "Quebramuros": {"wood": 360.0, "clay": 280.0, "iron": 250.0, "population": 3.0},
-    "Tormenta de Piedra": {"wood": 380.0, "clay": 320.0, "iron": 360.0, "population": 4.0},
+    unit_type: definition["training_cost"]
+    for unit_type, definition in balance.UNIT_CATALOG.items()
 }
-
-# Base training times in seconds when the producing building is level 1.
 BASE_TRAINING_TIMES: Dict[str, float] = {
-    "Lancero Común": 45.0,
-    "Soldado de Acero": 60.0,
-    "Arquero Real": 60.0,
-    "Jinete Explorador": 85.0,
-    "Caballero Imperial": 120.0,
-    "Infiltrador": 50.0,
-    "Quebramuros": 150.0,
-    "Tormenta de Piedra": 170.0,
+    unit_type: float(definition["training_time_seconds"])
+    for unit_type, definition in balance.UNIT_CATALOG.items()
 }
-
-# ------------------------------
-# Economic formulas
-# ------------------------------
+STORAGE_BASE_CAPACITY = balance.STORAGE_BASE_CAPACITY
+STORAGE_PER_WAREHOUSE_LEVEL = balance.STORAGE_PER_WAREHOUSE_LEVEL
 
 
 def get_building_cost(building_type: str, level: int) -> Dict[str, float]:
-    """
-    Calculate the resource cost to build or upgrade a building to a given level.
+    """Return the same upgrade quote used by the live building queue."""
 
-    Formula: cost = base_cost * (1.26 ** (level - 1))
-    """
-    if level < 1:
-        raise ValueError("Building level must be >= 1")
-
-    base_cost = BASE_BUILDING_COSTS.get(building_type)
-    if not base_cost:
-        raise KeyError(f"Unknown building type: {building_type}")
-
-    multiplier = 1.26 ** (level - 1)
-    return {resource: value * multiplier for resource, value in base_cost.items()}
+    return balance.get_building_cost(building_type, level)
 
 
 def get_troop_cost(troop_type: str, amount: int = 1) -> Dict[str, float]:
-    """Calculate the total cost for training a number of troops."""
+    """Return the same training cost used by the live troop queue."""
 
     if amount < 1:
         raise ValueError("Amount of troops must be >= 1")
-
-    base_cost = BASE_TROOP_COSTS.get(troop_type)
-    if not base_cost:
+    definition = balance.UNIT_CATALOG.get(troop_type)
+    if definition is None:
         raise KeyError(f"Unknown troop type: {troop_type}")
-
-    return {resource: value * amount for resource, value in base_cost.items()}
-
-
-def get_training_time(troop_type: str, building_level: int) -> float:
-    """Calculate training time in seconds at a given building level."""
-
-    if building_level < 1:
-        raise ValueError("Building level must be >= 1")
-
-    base_time = BASE_TRAINING_TIMES.get(troop_type)
-    if base_time is None:
-        raise KeyError(f"Unknown troop type: {troop_type}")
-
-    return base_time * (1.18 ** (building_level - 1))
-
-
-# ------------------------------
-# Storage and population helpers
-# ------------------------------
-
-# Storage uses the same internal building key as the live game service:
-# ``warehouse``. A city has base capacity even before constructing one.
-STORAGE_BASE_CAPACITY = 5000.0
-STORAGE_PER_WAREHOUSE_LEVEL = 2000.0
-POPULATION_BASE = 50.0
-POPULATION_GROWTH = 1.22
-
-
-def get_storage_capacity(warehouse_level: int) -> float:
-    """Return total resource capacity for a completed warehouse level."""
-
-    level = max(int(warehouse_level), 0)
-    return STORAGE_BASE_CAPACITY + STORAGE_PER_WAREHOUSE_LEVEL * level
-
-
-def enforce_storage_limits(resources: Mapping[str, float], storage_level: int) -> Dict[str, float]:
-    """Clamp resource dictionary to the canonical warehouse capacity."""
-
-    capacity = get_storage_capacity(storage_level)
     return {
-        resource: min(amount, capacity)
-        for resource, amount in resources.items()
+        resource: float(value) * amount
+        for resource, value in definition["training_cost"].items()
     }
 
 
-def get_population_capacity(hacienda_level: int) -> float:
-    """Maximum population supported by the Hacienda level."""
-    if hacienda_level < 1:
-        return 0.0
-    return POPULATION_BASE * (POPULATION_GROWTH ** (hacienda_level - 1))
+def get_training_time(troop_type: str, building_level: int = 1) -> float:
+    """Return canonical per-unit training seconds.
+
+    The accepted live queue does not scale training time by building level.
+    ``building_level`` remains only for backwards call compatibility.
+    """
+
+    if building_level < 1:
+        raise ValueError("Building level must be >= 1")
+    definition = balance.UNIT_CATALOG.get(troop_type)
+    if definition is None:
+        raise KeyError(f"Unknown troop type: {troop_type}")
+    return float(definition["training_time_seconds"])
+
+
+def get_storage_capacity(warehouse_level: int) -> float:
+    return balance.get_storage_capacity(warehouse_level)
+
+
+def enforce_storage_limits(
+    resources: Mapping[str, float], storage_level: int
+) -> Dict[str, float]:
+    capacity = get_storage_capacity(storage_level)
+    return {resource: min(amount, capacity) for resource, amount in resources.items()}
 
 
 def calculate_population_used(troop_quantities: Mapping[str, int]) -> float:
-    """Total population consumed by the provided troop quantities."""
-    population = 0.0
-    for troop_type, quantity in troop_quantities.items():
-        troop_cost = BASE_TROOP_COSTS.get(troop_type)
-        if troop_cost:
-            population += troop_cost.get("population", 0) * quantity
-    return population
+    """Match the current live population model: one slot per troop."""
+
+    return float(
+        sum(
+            max(int(quantity), 0)
+            for troop_type, quantity in troop_quantities.items()
+            if troop_type in balance.UNIT_CATALOG
+        )
+    )
 
 
 __all__ = [
+    "BALANCE_VERSION",
     "BASE_BUILDING_COSTS",
     "BASE_TROOP_COSTS",
     "BASE_TRAINING_TIMES",
@@ -155,7 +94,6 @@ __all__ = [
     "calculate_population_used",
     "enforce_storage_limits",
     "get_building_cost",
-    "get_population_capacity",
     "get_storage_capacity",
     "get_training_time",
     "get_troop_cost",
