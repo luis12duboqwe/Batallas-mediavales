@@ -71,7 +71,7 @@ def research_unit(db: Session, city: models.City, unit_type: str):
 def queue_training(
     db: Session, city: models.City, unit_type: str, quantity: int
 ) -> models.TroopQueue:
-    """Quote, pay and queue troop training atomically."""
+    """Quote, reserve population, pay and queue troop training atomically."""
 
     if quantity <= 0:
         raise ValueError("Quantity must be positive")
@@ -96,6 +96,10 @@ def queue_training(
     except Exception:
         db.rollback()
         raise
+
+    if not unit_catalog.has_population_capacity(db, city, unit_type, quantity):
+        db.rollback()
+        raise ValueError("Not enough population capacity")
 
     total_cost = {
         resource: float(cost) * quantity
