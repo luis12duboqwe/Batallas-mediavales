@@ -143,7 +143,9 @@ export const api = {
   },
   getMovements: ({ worldId }) => axiosClient.get('/movement/', { params: { world_id: worldId } }),
   getReports: ({ worldId }) => axiosClient.get('/report/', { params: { world_id: worldId } }),
-  getAlliance: () => axiosClient.get('/alliance'),
+  getAlliance: (worldId) => axiosClient.get('/alliance', {
+    params: worldId ? { world_id: worldId } : {},
+  }),
   getMessages: () => axiosClient.get('/message/inbox'),
   getInbox: () => axiosClient.get('/message/inbox'),
   getSent: () => axiosClient.get('/message/sent'),
