@@ -1,28 +1,37 @@
 import pytest
 
-from app.services import economy
+from app.services import balance, economy
 
 
-def test_building_and_troop_costs_and_population():
-    cost = economy.get_building_cost("Casa Central", 2)
-    assert cost["wood"] > economy.BASE_BUILDING_COSTS["Casa Central"]["wood"]
+def test_building_and_troop_costs_use_canonical_keys_and_values():
+    level_two = economy.get_building_cost("town_hall", 2)
+    assert level_two == balance.get_building_cost("town_hall", 2)
+    assert level_two["wood"] == pytest.approx(
+        balance.BUILDING_COSTS["town_hall"]["wood"] * balance.BUILDING_COST_GROWTH
+    )
 
-    troop_cost = economy.get_troop_cost("Lancero Común", 3)
-    assert troop_cost["wood"] == economy.BASE_TROOP_COSTS["Lancero Común"]["wood"] * 3
+    troop_cost = economy.get_troop_cost("basic_infantry", 3)
+    assert troop_cost == {
+        resource: amount * 3
+        for resource, amount in balance.UNIT_CATALOG["basic_infantry"]["training_cost"].items()
+    }
 
     with pytest.raises(ValueError):
-        economy.get_troop_cost("Lancero Común", 0)
+        economy.get_troop_cost("basic_infantry", 0)
 
-    population = economy.calculate_population_used({"Lancero Común": 10})
-    assert population == economy.BASE_TROOP_COSTS["Lancero Común"]["population"] * 10
+    assert economy.calculate_population_used({"basic_infantry": 10}) == 10.0
 
 
-def test_storage_and_training_time():
+def test_storage_and_training_time_match_live_rules():
     capacity = economy.get_storage_capacity(2)
-    assert capacity > economy.STORAGE_BASE_CAPACITY
+    assert capacity == (
+        balance.STORAGE_BASE_CAPACITY
+        + 2 * balance.STORAGE_PER_WAREHOUSE_LEVEL
+    )
 
     enforced = economy.enforce_storage_limits({"wood": capacity * 2}, 2)
     assert enforced["wood"] == capacity
 
-    training_time = economy.get_training_time("Lancero Común", 2)
-    assert training_time > economy.BASE_TRAINING_TIMES["Lancero Común"]
+    base_time = balance.UNIT_CATALOG["basic_infantry"]["training_time_seconds"]
+    assert economy.get_training_time("basic_infantry", 1) == base_time
+    assert economy.get_training_time("basic_infantry", 20) == base_time
