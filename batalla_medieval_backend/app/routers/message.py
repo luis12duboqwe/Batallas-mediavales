@@ -10,6 +10,29 @@ from ..services import premium as premium_service
 router = APIRouter(tags=["message"])
 
 
+def _players_share_world(db: Session, first_user_id: int, second_user_id: int) -> bool:
+    """Return whether both users have durable membership in at least one world."""
+
+    first_world_ids = [
+        world_id
+        for (world_id,) in db.query(models.PlayerWorld.world_id)
+        .filter(models.PlayerWorld.user_id == first_user_id)
+        .all()
+    ]
+    if not first_world_ids:
+        return False
+
+    return (
+        db.query(models.PlayerWorld.id)
+        .filter(
+            models.PlayerWorld.user_id == second_user_id,
+            models.PlayerWorld.world_id.in_(first_world_ids),
+        )
+        .first()
+        is not None
+    )
+
+
 @router.post("/send", response_model=schemas.MessageRead)
 def send_message(
     payload: schemas.MessageCreate,
@@ -19,6 +42,15 @@ def send_message(
     receiver = db.query(models.User).filter(models.User.id == payload.receiver_id).first()
     if not receiver:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receiver not found")
+
+    if receiver.id == current_user.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot message yourself")
+
+    if not _players_share_world(db, current_user.id, receiver.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Players do not share a world",
+        )
 
     receiver_status = premium_service.get_or_create_status(db, receiver)
     inbox_limit = premium_service.get_message_limit(receiver_status)
