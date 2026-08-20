@@ -140,7 +140,8 @@ export const useCityStore = create((set, get) => ({
     return data;
   },
   async loadAlliance() {
-    const { data } = await api.getAlliance();
+    const city = get().currentCity;
+    const { data } = await api.getAlliance(city?.world_id);
     set({ alliance: data });
     return data;
   },
