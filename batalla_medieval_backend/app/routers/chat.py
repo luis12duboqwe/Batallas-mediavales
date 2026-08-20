@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
@@ -15,9 +14,45 @@ router = APIRouter(tags=["chat"])
 ALLOWED_CHANNELS = {"global", "alliance", "world", "private"}
 
 
-def _get_alliance_id(db: Session, user_id: int) -> Optional[int]:
-    membership = db.query(models.AllianceMember).filter(models.AllianceMember.user_id == user_id).first()
+def _get_active_world_id(db: Session, user: models.User) -> Optional[int]:
+    """Return the selected world only when durable membership still exists."""
+
+    if user.world_id is None:
+        return None
+    membership = (
+        db.query(models.PlayerWorld.id)
+        .filter(
+            models.PlayerWorld.user_id == user.id,
+            models.PlayerWorld.world_id == user.world_id,
+        )
+        .first()
+    )
+    return user.world_id if membership else None
+
+
+def _get_alliance_id(db: Session, user_id: int, world_id: int) -> Optional[int]:
+    membership = (
+        db.query(models.AllianceMember)
+        .join(models.Alliance, models.Alliance.id == models.AllianceMember.alliance_id)
+        .filter(
+            models.AllianceMember.user_id == user_id,
+            models.Alliance.world_id == world_id,
+        )
+        .first()
+    )
     return membership.alliance_id if membership else None
+
+
+def _user_in_world(db: Session, user_id: int, world_id: int) -> bool:
+    return (
+        db.query(models.PlayerWorld.id)
+        .filter(
+            models.PlayerWorld.user_id == user_id,
+            models.PlayerWorld.world_id == world_id,
+        )
+        .first()
+        is not None
+    )
 
 
 @router.websocket("/{channel}")
@@ -37,18 +72,18 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    world_id = current_user.world_id
-    alliance_id = _get_alliance_id(db, current_user.id)
+    world_id = _get_active_world_id(db, current_user)
+    if world_id is None:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    alliance_id = _get_alliance_id(db, current_user.id, world_id)
     receiver_id: Optional[int] = None
 
-    if channel == "alliance":
-        if not alliance_id:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-    if channel == "world":
-        if not world_id:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
+    if channel == "alliance" and not alliance_id:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     if channel == "private":
         receiver = websocket.query_params.get("receiver_id")
         if not receiver:
@@ -62,20 +97,23 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
         if receiver_id == current_user.id:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
-        exists = db.query(models.User.id).filter(models.User.id == receiver_id).first()
-        if not exists:
+        if not _user_in_world(db, receiver_id, world_id):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
     await websocket.accept()
-    chat_manager.register_connection(
-        websocket,
-        channel=channel,
-        user_id=current_user.id,
-        world_id=world_id,
-        alliance_id=alliance_id,
-        receiver_id=receiver_id,
-    )
+    try:
+        chat_manager.register_connection(
+            websocket,
+            channel=channel,
+            user_id=current_user.id,
+            world_id=world_id,
+            alliance_id=alliance_id,
+            receiver_id=receiver_id,
+        )
+    except ValueError:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
 
     try:
         while True:
@@ -93,7 +131,7 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
 
             chat_message = models.ChatMessage(
                 user_id=current_user.id,
-                world_id=world_id if channel in {"world", "global"} else None,
+                world_id=world_id,
                 alliance_id=alliance_id if channel == "alliance" else None,
                 channel=channel,
                 receiver_id=receiver_id if channel == "private" else None,
@@ -120,7 +158,7 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
                 channel=channel,
                 message=payload,
                 sender_id=current_user.id,
-                world_id=chat_message.world_id,
+                world_id=world_id,
                 alliance_id=chat_message.alliance_id,
                 receiver_id=receiver_id,
             )
@@ -139,22 +177,26 @@ def get_chat_history(
     if channel not in ALLOWED_CHANNELS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid channel")
 
+    world_id = _get_active_world_id(db, current_user)
+    if world_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Active world not joined")
+
     limit = max(1, min(limit, 100))
+    query = db.query(models.ChatMessage).filter(
+        models.ChatMessage.channel == channel,
+        models.ChatMessage.world_id == world_id,
+    )
 
-    query = db.query(models.ChatMessage).filter(models.ChatMessage.channel == channel)
-
-    if channel == "world":
-        if not current_user.world_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="World not set")
-        query = query.filter(models.ChatMessage.world_id == current_user.world_id)
-    elif channel == "alliance":
-        alliance_id = _get_alliance_id(db, current_user.id)
+    if channel == "alliance":
+        alliance_id = _get_alliance_id(db, current_user.id, world_id)
         if not alliance_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not in an alliance")
         query = query.filter(models.ChatMessage.alliance_id == alliance_id)
     elif channel == "private":
         if not user_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id required")
+        if not _user_in_world(db, user_id, world_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Players do not share active world")
         query = query.filter(
             ((models.ChatMessage.user_id == current_user.id) & (models.ChatMessage.receiver_id == user_id))
             | ((models.ChatMessage.user_id == user_id) & (models.ChatMessage.receiver_id == current_user.id))
@@ -171,11 +213,20 @@ def private_history(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    world_id = _get_active_world_id(db, current_user)
+    if world_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Active world not joined")
+    if not _user_in_world(db, user_id, world_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Players do not share active world")
+
     limit = max(1, min(limit, 100))
-    query = db.query(models.ChatMessage).filter(models.ChatMessage.channel == "private")
-    query = query.filter(
-        ((models.ChatMessage.user_id == current_user.id) & (models.ChatMessage.receiver_id == user_id))
-        | ((models.ChatMessage.user_id == user_id) & (models.ChatMessage.receiver_id == current_user.id))
+    query = db.query(models.ChatMessage).filter(
+        models.ChatMessage.channel == "private",
+        models.ChatMessage.world_id == world_id,
+        (
+            ((models.ChatMessage.user_id == current_user.id) & (models.ChatMessage.receiver_id == user_id))
+            | ((models.ChatMessage.user_id == user_id) & (models.ChatMessage.receiver_id == current_user.id))
+        ),
     )
     messages = query.order_by(models.ChatMessage.timestamp.desc()).limit(limit).all()
     return list(reversed(messages))
