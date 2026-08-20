@@ -177,11 +177,46 @@ def create_city(
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
 
+    world = (
+        db.query(models.World)
+        .filter(
+            models.World.id == payload["world_id"],
+            models.World.is_active.is_(True),
+        )
+        .first()
+    )
+    if not world:
+        raise HTTPException(status_code=404, detail="World not available")
+
+    membership = (
+        db.query(models.PlayerWorld)
+        .filter(
+            models.PlayerWorld.user_id == owner.id,
+            models.PlayerWorld.world_id == world.id,
+        )
+        .first()
+    )
+    if not membership:
+        raise HTTPException(status_code=400, detail="Owner has not joined this world")
+
+    occupied = (
+        db.query(models.City)
+        .filter(
+            models.City.world_id == world.id,
+            models.City.x == payload.get("x", 0),
+            models.City.y == payload.get("y", 0),
+        )
+        .first()
+    )
+    if occupied:
+        raise HTTPException(status_code=409, detail="Coordinates already occupied in this world")
+
     city = models.City(
         name=payload["name"],
         x=payload.get("x", 0),
         y=payload.get("y", 0),
         owner_id=owner.id,
+        world_id=world.id,
         wood=payload.get("wood", 500.0),
         clay=payload.get("clay", 500.0),
         iron=payload.get("iron", 500.0),
@@ -191,7 +226,12 @@ def create_city(
     db.commit()
     db.refresh(city)
     production.recalculate_resources(db, city)
-    log_action(db, admin_user.id, "create_city", {"city_id": city.id, "owner_id": owner.id})
+    log_action(
+        db,
+        admin_user.id,
+        "create_city",
+        {"city_id": city.id, "owner_id": owner.id, "world_id": world.id},
+    )
     db.commit()
     db.refresh(city)
     return city
@@ -201,6 +241,19 @@ def teleport_city(db: Session, city_id: int, x: int, y: int, admin_user: models.
     city = db.query(models.City).filter(models.City.id == city_id).first()
     if not city:
         raise HTTPException(status_code=404, detail="City not found")
+
+    occupied = (
+        db.query(models.City)
+        .filter(
+            models.City.world_id == city.world_id,
+            models.City.x == x,
+            models.City.y == y,
+            models.City.id != city.id,
+        )
+        .first()
+    )
+    if occupied:
+        raise HTTPException(status_code=409, detail="Coordinates already occupied in this world")
 
     city.x = x
     city.y = y
