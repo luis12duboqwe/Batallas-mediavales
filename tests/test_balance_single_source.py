@@ -11,6 +11,7 @@ from app.services import (
     movement,
     production,
     troops,
+    tutorial,
     unit_catalog,
 )
 
@@ -23,6 +24,7 @@ def test_live_services_reference_canonical_balance_objects():
     assert unit_catalog.UNIT_ORDER is balance.UNIT_ORDER
     assert movement.UNIT_SPEED is balance.UNIT_SPEED
     assert movement.RESOURCE_FIELDS is balance.RESOURCE_FIELDS
+    assert tutorial.TUTORIAL_REWARD is balance.TUTORIAL_REWARD
 
     assert building.REFUND_FACTOR == balance.QUEUE_REFUND_FACTOR
     assert troops.REFUND_FACTOR == balance.QUEUE_REFUND_FACTOR
@@ -81,6 +83,10 @@ def test_balance_snapshot_is_mounted_and_versioned(client):
     assert payload["market"]["merchant_capacity_per_level"] == (
         market.MERCHANT_CAPACITY
     )
+    assert payload["tutorial"]["completion_reward"] == balance.TUTORIAL_REWARD
+    assert payload["pve_alpha"]["barbarian_starting_resources"] == (
+        balance.BARBARIAN_STARTING_RESOURCES
+    )
 
 
 def test_public_balance_views_use_same_version(client):
@@ -102,6 +108,7 @@ def test_builtin_help_is_generated_from_current_balance():
     building_article = wiki._build_building_article()
     economy_article = wiki._build_economy_article()
     combat_article = wiki._build_combat_article()
+    espionage_article = wiki._build_espionage_article()
     conquest_article = wiki._build_conquest_article()
     beginner_article = wiki._build_beginner_article()
 
@@ -111,6 +118,7 @@ def test_builtin_help_is_generated_from_current_balance():
             building_article,
             economy_article,
             combat_article,
+            espionage_article,
             conquest_article,
             beginner_article,
         ]
@@ -123,4 +131,6 @@ def test_builtin_help_is_generated_from_current_balance():
     assert "Cantera" not in beginner_article
     assert "Mina Profunda" not in beginner_article
     assert "conquista PvP está deshabilitada" in conquest_article
-    assert "carga" in combat_article.lower()
+    assert "loot_modifier" in combat_article
+    assert "≥5" not in espionage_article
+    assert "recursos, tropas y niveles de edificios" in espionage_article
