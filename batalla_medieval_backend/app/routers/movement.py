@@ -59,6 +59,16 @@ def create_movement(
                 {"city_id": payload.target_city_id},
             )
 
+        if (
+            payload.movement_type in HOSTILE_PLAYER_MOVEMENT_TYPES
+            and target_city.owner_id == current_user.id
+        ):
+            raise error_response(
+                400,
+                "invalid_hostile_target",
+                "A player cannot attack or spy on their own cities",
+            )
+
         is_hostile_pvp = (
             payload.movement_type in HOSTILE_PLAYER_MOVEMENT_TYPES
             and target_city.owner is not None
