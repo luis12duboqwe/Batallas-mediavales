@@ -220,4 +220,11 @@ export const api = {
   advanceTutorial: (step) => axiosClient.post('/tutorial/advance', { step }),
 };
 
+// AllianceView predates the grouped `api` facade and still calls these three
+// helpers on the axios instance. Keep a small compatibility surface until that
+// page is refactored, while sharing the same implementation and auth pipeline.
+axiosClient.acceptInvitation = api.acceptInvitation;
+axiosClient.searchPlayers = api.searchPlayers;
+axiosClient.invitePlayer = api.invitePlayer;
+
 export default axiosClient;
