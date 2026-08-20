@@ -1,47 +1,15 @@
 from datetime import datetime
-from typing import Dict, Tuple
+from typing import Dict
 
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..utils import utc_now
+from . import balance
 
-DEFAULT_MODIFIERS: Dict[str, float] = {
-    "production_speed": 1.0,
-    "troop_training_speed": 1.0,
-    "movement_speed": 1.0,
-    "spy_modifier": 1.0,
-    "loot_modifier": 1.0,
-}
-
-
-EVENT_TEMPLATES: Dict[str, Tuple[str, str, Dict[str, float]]] = {
-    "DOUBLE_RESOURCES": (
-        "Doble de Recursos",
-        "Los recursos producidos se duplican mientras dura el evento.",
-        {"production_speed": 2.0},
-    ),
-    "STORM_EVENT": (
-        "Tormenta",
-        "Fuertes tormentas ralentizan todos los movimientos.",
-        {"movement_speed": 0.5},
-    ),
-    "WAR_CRY": (
-        "Grito de Guerra",
-        "El entrenamiento de tropas es más rápido.",
-        {"troop_training_speed": 0.8},
-    ),
-    "DARK_MOON": (
-        "Luna Oscura",
-        "Los espías son más efectivos, aumentando sus probabilidades de éxito.",
-        {"spy_modifier": 1.2},
-    ),
-    "GLOBAL_TRIBUTE": (
-        "Tributo Global",
-        "Las victorias otorgan botín adicional.",
-        {"loot_modifier": 1.2},
-    ),
-}
+# Compatibility aliases. Event balance data lives only in ``balance``.
+DEFAULT_MODIFIERS = balance.EVENT_DEFAULT_MODIFIERS
+EVENT_TEMPLATES = balance.EVENT_TEMPLATES
 
 
 def _merge_modifiers(custom: Dict[str, float] | None) -> Dict[str, float]:
