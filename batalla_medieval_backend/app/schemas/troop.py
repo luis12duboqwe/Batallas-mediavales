@@ -33,5 +33,9 @@ class UnitAvailability(BaseModel):
     researched: bool
     training_requirements_met: bool
     research_requirements_met: bool
+    population_cost: int
+    population_available: int
+    population_capacity_met: bool
+    upkeep_per_hour: float
     can_train: bool
     can_research: bool
