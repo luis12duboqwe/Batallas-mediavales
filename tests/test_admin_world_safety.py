@@ -55,10 +55,16 @@ def test_admin_city_creation_requires_owner_world_membership_and_free_coordinate
     created = client.post("/admin/city/create", headers=_headers(admin), json=payload)
     assert created.status_code == 200, created.text
     body = created.json()
-    assert body["owner_id"] == owner.id
     assert body["world_id"] == world.id
     assert body["x"] == 33
     assert body["y"] == 34
+
+    # owner_id is intentionally not part of the public CityRead contract.
+    # Verify the administrative invariant from persistence instead of widening
+    # the response schema and leaking extra ownership metadata unnecessarily.
+    persisted = db_session.query(models.City).filter_by(id=body["id"]).one()
+    assert persisted.owner_id == owner.id
+    assert persisted.world_id == world.id
 
     duplicate = client.post(
         "/admin/city/create",
