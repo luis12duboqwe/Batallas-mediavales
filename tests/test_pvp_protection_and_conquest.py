@@ -114,8 +114,10 @@ def test_barbarian_city_can_still_be_conquered(db_session, city, monkeypatch):
     db_session.commit()
 
     # Keep the canonical combat engine, but make its luck and loyalty roll deterministic.
+    # Loyalty recovers continuously, so use the maximum roll rather than an exact
+    # 25-point boundary that can become 25.000x before combat resolves.
     monkeypatch.setattr(combat, "_luck", lambda: 0.0)
-    monkeypatch.setattr(combat.random, "randint", lambda low, high: 25)
+    monkeypatch.setattr(combat.random, "randint", lambda low, high: 35)
 
     victory, conquered = conquest_service.resolve_conquest(
         db_session,
