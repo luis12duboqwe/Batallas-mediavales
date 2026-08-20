@@ -4,10 +4,14 @@ from typing import Any, DefaultDict, Dict, Iterable, Optional, Set, Tuple
 
 from fastapi import WebSocket
 
+from ..utils import utc_now
+
 
 class ChatManager:
     def __init__(self) -> None:
-        self.global_connections: Set[WebSocket] = set()
+        # "global" means global within one game world. Worlds are independent
+        # gameplay partitions and must never share chat recipients.
+        self.global_connections: DefaultDict[int, Set[WebSocket]] = defaultdict(set)
         self.world_connections: DefaultDict[int, Set[WebSocket]] = defaultdict(set)
         self.alliance_connections: DefaultDict[int, Set[WebSocket]] = defaultdict(set)
         self.private_connections: DefaultDict[Tuple[int, int], Set[WebSocket]] = defaultdict(set)
@@ -29,8 +33,8 @@ class ChatManager:
         alliance_id: Optional[int] = None,
         receiver_id: Optional[int] = None,
     ) -> None:
-        if channel == "global":
-            self.global_connections.add(websocket)
+        if channel == "global" and world_id is not None:
+            self.global_connections[world_id].add(websocket)
         elif channel == "world" and world_id is not None:
             self.world_connections[world_id].add(websocket)
         elif channel == "alliance" and alliance_id is not None:
@@ -38,6 +42,9 @@ class ChatManager:
         elif channel == "private" and receiver_id is not None:
             key = self._private_key(user_id, receiver_id)
             self.private_connections[key].add(websocket)
+        else:
+            raise ValueError("Chat connection is missing required scope metadata")
+
         self.connection_meta[websocket] = {
             "channel": channel,
             "user_id": user_id,
@@ -52,8 +59,8 @@ class ChatManager:
             return
 
         channel = meta.get("channel")
-        if channel == "global":
-            self.global_connections.discard(websocket)
+        if channel == "global" and meta.get("world_id") is not None:
+            self.global_connections[meta["world_id"]].discard(websocket)
         elif channel == "world" and meta.get("world_id") is not None:
             self.world_connections[meta["world_id"]].discard(websocket)
         elif channel == "alliance" and meta.get("alliance_id") is not None:
@@ -88,8 +95,8 @@ class ChatManager:
         receiver_id: Optional[int] = None,
     ) -> None:
         connections: Iterable[WebSocket]
-        if channel == "global":
-            connections = list(self.global_connections)
+        if channel == "global" and world_id is not None:
+            connections = list(self.global_connections.get(world_id, set()))
         elif channel == "world" and world_id is not None:
             connections = list(self.world_connections.get(world_id, set()))
         elif channel == "alliance" and alliance_id is not None:
