@@ -30,6 +30,7 @@ class TroopUpdate(BaseModel):
 class AdminCityCreate(BaseModel):
     name: str
     owner_id: int
+    world_id: int
     x: int = 0
     y: int = 0
     wood: float = 500.0
