@@ -15,9 +15,27 @@ STARTER_BUILDINGS = [
 
 def _validate_troops_available(city: models.City, troops_sent: Dict[str, int]):
     for unit, amount in troops_sent.items():
+        if amount <= 0:
+            raise ValueError("Conquest troop amounts must be positive")
         troop = next((t for t in city.troops if t.unit_type == unit), None)
         if not troop or troop.quantity < amount:
             raise ValueError(f"Not enough {unit} in the city")
+
+
+def _validate_conquest_target(
+    attacker_city: models.City,
+    target_city: models.City,
+) -> None:
+    """Enforce the canonical v1 rule: only neutral/barbarian cities are conquerable."""
+
+    if attacker_city.owner_id is None:
+        raise ValueError("Attacker city must belong to a player")
+    if attacker_city.id == target_city.id:
+        raise ValueError("A city cannot conquer itself")
+    if attacker_city.world_id != target_city.world_id:
+        raise ValueError("Cross-world conquest is not allowed")
+    if target_city.owner_id is not None:
+        raise ValueError("Player cities cannot be conquered")
 
 
 def _apply_losses(city: models.City, losses: Dict[str, int]):
@@ -37,9 +55,19 @@ def resolve_conquest(
     target_city: models.City,
     troops_sent: Dict[str, int],
 ) -> Tuple[bool, bool]:
+    """Resolve conquest only against an unowned barbarian city.
+
+    PvP combat remains available through the movement/combat pipeline, but
+    ownership transfer of a player city is forbidden by product rule PD-005.
+    Target validation happens before any production, troop or loyalty mutation
+    so a rejected PvP/cross-world request has no gameplay side effects.
+    """
+
+    _validate_conquest_target(attacker_city, target_city)
+    _validate_troops_available(attacker_city, troops_sent)
+
     production.recalculate_resources(db, attacker_city)
     production.recalculate_resources(db, target_city)
-    _validate_troops_available(attacker_city, troops_sent)
 
     defender_troops = {
         troop.unit_type: troop.quantity for troop in target_city.troops
@@ -73,6 +101,7 @@ def resolve_conquest(
             0.0, target_city.loyalty - LOYALTY_DROP_PER_SUCCESS
         )
         if target_city.loyalty <= 0:
+            # _validate_conquest_target guarantees owner_id is still null here.
             target_city.owner_id = attacker_city.owner_id
             target_city.loyalty = 100.0
             conquered = True
