@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import castleSilhouette from '../assets/intro/castle-silhouette.svg';
 
 const DURATION = 2500;
@@ -8,7 +7,6 @@ const IntroAnimation = ({ onComplete }) => {
   const canvasRef = useRef(null);
   const frameRef = useRef(null);
   const finishedRef = useRef(false);
-  const navigate = useNavigate();
   const [showTitle, setShowTitle] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
 
@@ -19,10 +17,11 @@ const IntroAnimation = ({ onComplete }) => {
     setShowTitle(true);
     setFadeOut(true);
     setTimeout(() => {
+      // The intro is presentation only. Authentication and route guards own
+      // navigation, so reloads never force an authenticated player to /login.
       onComplete?.();
-      navigate('/login', { replace: true });
     }, 450);
-  }, [navigate, onComplete]);
+  }, [onComplete]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
