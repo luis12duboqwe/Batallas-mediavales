@@ -11,13 +11,14 @@ from sqlalchemy.orm import Session, selectinload
 from .. import models
 from ..utils import utc_now
 from . import achievement as achievement_service
+from . import balance
 from . import event as event_service
 from . import premium as premium_service
 from . import production, quest as quest_service, ranking, research as research_service
 from . import unit_catalog
 
 logger = logging.getLogger(__name__)
-REFUND_FACTOR = 0.8
+REFUND_FACTOR = balance.QUEUE_REFUND_FACTOR
 
 # Compatibility views for older callers. They are generated from one source of
 # truth instead of carrying separate balance tables in this module.
@@ -235,8 +236,6 @@ def process_troop_queues(db: Session) -> List[dict]:
         )
         db.delete(queue_entry)
 
-    # Delete the authoritative queue rows before quest/achievement helpers can
-    # release transaction locks through their own commits.
     db.commit()
 
     for info in internal_info:
@@ -260,7 +259,7 @@ def process_troop_queues(db: Session) -> List[dict]:
 
 
 def cancel_troop_queue(db: Session, queue_id: int, user_id: int) -> bool:
-    """Cancel future training and refund 80% of the exact recorded payment."""
+    """Cancel future training and refund the canonical queue refund factor."""
 
     queue_entry = (
         db.query(models.TroopQueue)
