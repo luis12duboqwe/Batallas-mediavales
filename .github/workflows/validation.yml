@@ -137,6 +137,7 @@ jobs:
       FRONTEND_URL: http://127.0.0.1:4173
       PYTHONPATH: batalla_medieval_backend
       VITE_API_URL: http://127.0.0.1:8000
+      VITE_SOCKET_URL: http://127.0.0.1:8000
       E2E_BASE_URL: http://127.0.0.1:4173
     steps:
       - name: Checkout repository
@@ -176,14 +177,14 @@ jobs:
 
       - name: Start backend and frontend
         run: |
-          python -m uvicorn app.main:app --app-dir batalla_medieval_backend --host 127.0.0.1 --port 8000 >/tmp/bm-backend.log 2>&1 &
+          python -m uvicorn app.main:socket_app --app-dir batalla_medieval_backend --host 127.0.0.1 --port 8000 >/tmp/bm-backend.log 2>&1 &
           echo $! >/tmp/bm-backend.pid
           (cd batalla_medieval_frontend && npm run build && npm run preview -- --host 127.0.0.1 --port 4173 >/tmp/bm-frontend.log 2>&1) &
           echo $! >/tmp/bm-frontend.pid
           curl --fail --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:8000/health
           curl --fail --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:4173/login
 
-      - name: Run accepted G2 browser journey
+      - name: Run accepted browser journey and realtime check
         working-directory: batalla_medieval_frontend
         run: node e2e/g2-alpha.mjs
 
