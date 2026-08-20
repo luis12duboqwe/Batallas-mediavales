@@ -38,6 +38,7 @@ La autoridad numérica del gameplay live es `batalla_medieval_backend/app/servic
 9. El mantenimiento queda explícitamente en `0.0/h` en esta versión porque el recurso oro se incorpora en BM-0060; no se simula un cobro inexistente.
 10. La IA bárbara recluta usando el mismo coste de `basic_infantry` que el jugador y respeta la capacidad real de almacén.
 11. El seed canónico y la IA PvE consumen los mismos valores versionados en vez de mantener otra economía.
+12. El simulador de prototipo no estaba ruteado y dependía de endpoints `/simulate/*` inexistentes; se retiraron la página, servicio y componentes exclusivos para no conservar una segunda fuente rota de tropas/reglas.
 
 ## Contrato para API/UI
 
@@ -71,6 +72,8 @@ Las rutas públicas de edificios/tropas comparten esa misma versión. El fronten
   - reclutamiento descuenta exactamente el coste canónico.
 - Contrato OpenAPI
   - `/economy/balance_preview` registrado.
+- Frontend
+  - no queda un simulador ruteado o un servicio `/simulate/*` huérfano.
 - Gates existentes
   - Backend, PostgreSQL concurrency, Frontend, Browser E2E, dependency audit y Container images.
 
@@ -81,7 +84,7 @@ Las rutas públicas de edificios/tropas comparten esa misma versión. El fronten
 
 ## Simulador
 
-No existe un simulador live habilitado en el corte actual del producto. Por lo tanto, para BM-0040 se considera **N/A** como consumidor existente. Cualquier simulador que vuelva a habilitarse deberá consumir `balance.py`/el snapshot versionado y no podrá introducir tablas propias.
+No existe un simulador live habilitado en el corte actual del producto. Los archivos de prototipo que apuntaban a endpoints inexistentes fueron retirados en BM-0040 para no mantener una implementación alternativa rota. Si el simulador vuelve a formar parte del producto, deberá consumir `balance.py`/el snapshot versionado y no podrá introducir tablas propias.
 
 ## Qué queda fuera de BM-0040
 
