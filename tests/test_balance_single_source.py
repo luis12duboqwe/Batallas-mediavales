@@ -2,7 +2,17 @@ import pytest
 
 from app import models
 from app.routers import wiki
-from app.services import balance, building, combat, economy, production, troops, unit_catalog
+from app.services import (
+    balance,
+    building,
+    combat,
+    economy,
+    market,
+    movement,
+    production,
+    troops,
+    unit_catalog,
+)
 
 
 def test_live_services_reference_canonical_balance_objects():
@@ -11,8 +21,14 @@ def test_live_services_reference_canonical_balance_objects():
     assert production.PRODUCTION_RATES is balance.PRODUCTION_RATES_PER_HOUR
     assert unit_catalog.UNIT_CATALOG is balance.UNIT_CATALOG
     assert unit_catalog.UNIT_ORDER is balance.UNIT_ORDER
+    assert movement.UNIT_SPEED is balance.UNIT_SPEED
+    assert movement.RESOURCE_FIELDS is balance.RESOURCE_FIELDS
+
     assert building.REFUND_FACTOR == balance.QUEUE_REFUND_FACTOR
     assert troops.REFUND_FACTOR == balance.QUEUE_REFUND_FACTOR
+    assert market.MARKET_BUILDING_NAME == balance.MARKET_BUILDING_KEY
+    assert market.MERCHANT_CAPACITY == balance.MERCHANT_CAPACITY_PER_LEVEL
+    assert market.TRANSPORT_BASE_SPEED == balance.TRANSPORT_BASE_SPEED
     assert combat.WALL_NAME == balance.WALL_BUILDING_KEY == "wall"
 
     for unit_type in balance.UNIT_ORDER:
@@ -58,6 +74,12 @@ def test_balance_snapshot_is_mounted_and_versioned(client):
     )
     assert payload["units"]["catalog"]["archer"]["training_cost"] == (
         balance.UNIT_CATALOG["archer"]["training_cost"]
+    )
+    assert payload["units"]["catalog"]["spy"]["movement_speed"] == (
+        movement.UNIT_SPEED["spy"]
+    )
+    assert payload["market"]["merchant_capacity_per_level"] == (
+        market.MERCHANT_CAPACITY
     )
 
 
