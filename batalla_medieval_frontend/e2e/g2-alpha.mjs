@@ -6,12 +6,17 @@ const USERNAME = 'g2_browser';
 const PASSWORD = 'G2-Browser-Test-2026!';
 
 const failures = [];
+let realtimeConnected = false;
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 
 page.on('console', (message) => {
+  const text = message.text();
+  if (text.includes('Socket connected')) {
+    realtimeConnected = true;
+  }
   if (message.type() === 'error') {
-    failures.push(`console.error: ${message.text()}`);
+    failures.push(`console.error: ${text}`);
   }
 });
 page.on('pageerror', (error) => {
@@ -64,6 +69,11 @@ async function durableSnapshot() {
 
 try {
   await login();
+  await page.waitForTimeout(1000);
+  if (!realtimeConnected) {
+    failures.push('Authenticated Socket.IO connection was not established after login');
+  }
+
   const initialSnapshot = await durableSnapshot();
   if (!initialSnapshot.worldId || initialSnapshot.cityIds.length === 0) {
     failures.push(`Authenticated fixture has no durable world/city progress: ${JSON.stringify(initialSnapshot)}`);
@@ -117,7 +127,7 @@ try {
   if (failures.length > 0) {
     throw new Error(failures.join('\n'));
   }
-  console.log('G2 browser smoke passed: re-login and reload are stable, no console errors or HTTP 4xx/5xx');
+  console.log('Browser smoke passed: durable session and authenticated realtime are stable, no console errors or HTTP 4xx/5xx');
 } finally {
   await browser.close();
 }
