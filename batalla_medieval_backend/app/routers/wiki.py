@@ -130,20 +130,25 @@ def _build_combat_article() -> str:
             f"5. La suerte del ataque está limitada entre `{balance.LUCK_MIN:+.0%}` y `{balance.LUCK_MAX:+.0%}`.",
             "6. Las bajas se obtienen comparando ataque efectivo y defensa ponderada.",
             "7. Arietes y catapultas supervivientes pueden reducir niveles de edificios.",
-            "8. El botín está limitado por la capacidad de carga de las tropas supervivientes; no existe un porcentaje fijo alternativo.",
+            "8. El botín está limitado por la capacidad de carga efectiva de las tropas supervivientes; los eventos pueden modificar esa capacidad mediante `loot_modifier`.",
             "9. La conquista de ciudades pertenecientes a otro jugador está deshabilitada en esta versión.",
         ]
     )
 
 
 def _build_espionage_article() -> str:
+    reveal_line = (
+        "- Un espionaje exitoso revela recursos, tropas y niveles de edificios."
+        if balance.SPY_REVEALS_BUILDINGS_ON_SUCCESS
+        else "- Los edificios no se revelan en esta versión."
+    )
     return "\n".join(
         [
             "# Mecánicas de espionaje",
-            "- Probabilidad de éxito: `espias_atacantes / (espias_defensores + 1)`.",
-            "- Los eventos afectan con el modificador `spy_modifier` (por defecto 1.0).",
-            "- Si falla la misión hay 10% de probabilidad de que el atacante aparezca como 'Desconocido'.",
-            "- Con ≥5 espías exitosos también se listan niveles de edificios además de recursos y tropas.",
+            f"- Probabilidad base de éxito: `espias_atacantes / (espias_defensores + {balance.SPY_DEFENDER_OFFSET:g})`.",
+            f"- Los eventos aplican `spy_modifier` (base {balance.EVENT_DEFAULT_MODIFIERS['spy_modifier']:g}).",
+            f"- Si falla la misión hay {balance.SPY_UNKNOWN_ATTACKER_CHANCE * 100:.0f}% de probabilidad de que el atacante aparezca como 'Desconocido'.",
+            reveal_line,
             "- Los informes se guardan para atacante y defensor y activan notificaciones.",
         ]
     )
@@ -175,7 +180,7 @@ def _build_economy_article() -> str:
             f"- Coste de edificios: `coste_base * ({balance.BUILDING_COST_GROWTH} ** (nivel - 1))`.",
             "- Coste y tiempo de tropas provienen del catálogo de unidades y escalan linealmente con la cantidad.",
             f"- Capacidad de almacén: `{balance.STORAGE_BASE_CAPACITY:g} + {balance.STORAGE_PER_WAREHOUSE_LEVEL:g} * nivel_warehouse`.",
-            f"- Recuperación de lealtad: `{balance.LOYALTY_RECOVERY_PER_HOUR:g}` puntos por hora hasta 100.",
+            f"- Recuperación de lealtad: `{balance.LOYALTY_RECOVERY_PER_HOUR:g}` puntos por hora hasta {balance.LOYALTY_MAX:g}.",
         ]
     )
 
