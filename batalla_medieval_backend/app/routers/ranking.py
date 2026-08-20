@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session
 from .. import schemas
 from ..database import get_db
 from ..services import ranking as ranking_service
+from .world_access import require_world_access
 
-router = APIRouter(tags=["ranking"])
+router = APIRouter(tags=["ranking"], dependencies=[Depends(require_world_access)])
 
 
 @router.get("/players", response_model=list[schemas.PlayerRanking])
@@ -22,6 +23,6 @@ def list_alliance_ranking(world_id: int, db: Session = Depends(get_db)):
 def search_players(
     world_id: int,
     query: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     return ranking_service.search_players(db, world_id, query)
