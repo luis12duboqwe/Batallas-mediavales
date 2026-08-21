@@ -1,4 +1,9 @@
 {
+  "brand": {
+    "name": "Medieval Battle",
+    "tagline": "Real-time strategy",
+    "home_label": "Go to city"
+  },
   "nav": {
     "city": "City",
     "buildings": "Buildings",
@@ -17,7 +22,10 @@
     "academy": "Academy",
     "admin": "Admin",
     "profile": "Profile",
-    "logout": "Logout"
+    "logout": "Logout",
+    "navigation": "Navigation",
+    "mobile_navigation": "Mobile navigation",
+    "top_navigation": "Main navigation"
   },
   "common": {
     "loading": "Loading...",
@@ -30,6 +38,20 @@
     "welcome": "Welcome, {{name}}",
     "resources": "Resources",
     "production": "Production per hour"
+  },
+  "profile": {
+    "title": "User Profile",
+    "username": "Username",
+    "id": "ID",
+    "rubies": "Rubies",
+    "email": "Email",
+    "new_password": "New password (leave blank to keep current password)",
+    "language": "Language",
+    "email_notifications": "Receive email notifications",
+    "saving": "Saving...",
+    "save_changes": "Save Changes",
+    "updated": "Profile updated successfully",
+    "update_error": "Error updating profile"
   },
   "basic_infantry": "Spearman",
   "heavy_infantry": "Swordsman",
