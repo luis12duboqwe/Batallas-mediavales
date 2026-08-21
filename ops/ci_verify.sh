@@ -74,7 +74,7 @@ docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec
   psql -U batalla -d batalla_ci -v ON_ERROR_STOP=1 -c \
   "CREATE TABLE recovery_probe (id integer primary key, marker text not null); INSERT INTO recovery_probe VALUES (1, 'before-backup');"
 
-COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" ops/backup_postgres.sh "$ENV_FILE"
+COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" bash ops/backup_postgres.sh "$ENV_FILE"
 BACKUP_FILE="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'batalla_ci-*.dump' | sort | tail -n1)"
 test -n "$BACKUP_FILE"
 test -s "$BACKUP_FILE"
@@ -85,7 +85,7 @@ docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec
   "UPDATE recovery_probe SET marker='after-backup' WHERE id=1;"
 
 COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" RESTORE_START_SERVICES=0 \
-  ops/restore_postgres.sh "$ENV_FILE" "$BACKUP_FILE" "RESTORE:batalla_ci"
+  bash ops/restore_postgres.sh "$ENV_FILE" "$BACKUP_FILE" "RESTORE:batalla_ci"
 RESTORED_MARKER="$(docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
   psql -U batalla -d batalla_ci -Atqc "SELECT marker FROM recovery_probe WHERE id=1;")"
 if [[ "$RESTORED_MARKER" != "before-backup" ]]; then
