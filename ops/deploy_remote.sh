@@ -81,7 +81,7 @@ rollback() {
     chmod 600 "$CURRENT_ENV"
     if [[ -n "$rollback_backup" && -f "$rollback_backup" ]]; then
       echo "Restoring pre-deploy database snapshot and previous application release" >&2
-      ops/restore_postgres.sh "$CURRENT_ENV" "$rollback_backup" "RESTORE:${POSTGRES_DB}" || true
+      bash ops/restore_postgres.sh "$CURRENT_ENV" "$rollback_backup" "RESTORE:${POSTGRES_DB}" || true
     else
       echo "No database snapshot was created; restoring previous application images only" >&2
       docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" pull backend worker frontend || true
@@ -104,7 +104,7 @@ docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" up -d database
 has_schema="$(docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" exec -T database \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "SELECT to_regclass('public.users') IS NOT NULL;" 2>/dev/null || true)"
 if [[ "$has_schema" == "t" ]]; then
-  ops/backup_postgres.sh "$CURRENT_ENV"
+  bash ops/backup_postgres.sh "$CURRENT_ENV"
   rollback_backup="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${POSTGRES_DB}-*.dump" -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
   if [[ -z "$rollback_backup" ]]; then
     echo "Backup completed but rollback snapshot could not be located" >&2
