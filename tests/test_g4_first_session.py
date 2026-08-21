@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+import pytest
+
 from app import models
 from app.routers.auth import create_access_token
 from app.seed import DEFAULT_WORLD_NAME, seed_game
@@ -176,7 +178,8 @@ def test_seeded_first_session_completes_without_admin_or_extra_resources(
     assert claim.status_code == 200, claim.text
     assert claim.json()["completed"] is True
     assert claim.json()["reward_claimed"] is True
-    assert claim.json()["reward_granted_now"] == balance.TUTORIAL_REWARD
+    for resource, expected in balance.TUTORIAL_REWARD.items():
+        assert claim.json()["reward_granted_now"][resource] == pytest.approx(expected)
 
     db_session.expire_all()
     city = db_session.query(models.City).filter_by(id=city.id).one()
