@@ -11,6 +11,16 @@ coverage/
 .env
 .env.*
 !.env.example
+.release.env
+.release.env.*
+.release-sha
+.env.base
+
+# Deployment state and backup artifacts
+.ops-state/
+backups/
+*.dump
+*.dump.sha256
 
 # Python caches and test output
 __pycache__/
