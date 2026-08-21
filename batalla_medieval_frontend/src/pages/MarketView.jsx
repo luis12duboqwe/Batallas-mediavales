@@ -1,76 +1,89 @@
-import { useState, useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/axiosClient';
 import { useCityStore } from '../store/cityStore';
-import { useUserStore } from '../store/userStore';
+
+const RESOURCE_OPTIONS = [
+  { value: 'wood', label: 'Madera' },
+  { value: 'clay', label: 'Barro' },
+  { value: 'iron', label: 'Hierro' },
+];
+
+const resourceLabel = (value) => (
+  RESOURCE_OPTIONS.find((option) => option.value === value)?.label || value
+);
 
 const MarketView = () => {
-  const { t } = useTranslation();
-  const { currentCity, fetchCityStatus } = useCityStore();
-  const { user } = useUserStore();
-  const [activeTab, setActiveTab] = useState('send'); // send, offers, my_offers, npc
+  const { currentCity, loadCity } = useCityStore();
+  const [activeTab, setActiveTab] = useState('send');
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [messageKind, setMessageKind] = useState('status');
   const [filterAlliance, setFilterAlliance] = useState(false);
 
-  // Send Resources Form
   const [transport, setTransport] = useState({ target_city_id: '', wood: 0, clay: 0, iron: 0 });
-
-  // Create Offer Form
   const [newOffer, setNewOffer] = useState({ offer_type: 'wood', offer_amount: 1000, request_type: 'clay', request_amount: 1000 });
-
-  // NPC Trade Form
   const [npcTrade, setNpcTrade] = useState({ offer_type: 'wood', request_type: 'clay', amount: 1000 });
+
+  const showSuccess = (text) => {
+    setMessageKind('status');
+    setMessage(text);
+  };
+
+  const showError = (error, fallback) => {
+    setMessageKind('error');
+    setMessage(error.response?.data?.detail || fallback);
+  };
+
+  const fetchOffers = useCallback(async () => {
+    if (!currentCity) return;
+    try {
+      const response = await api.getOffers(currentCity.world_id, filterAlliance);
+      setOffers(response.data);
+    } catch (error) {
+      showError(error, 'No se pudieron cargar las ofertas.');
+    }
+  }, [currentCity, filterAlliance]);
 
   useEffect(() => {
     if (activeTab === 'offers' || activeTab === 'my_offers') {
       fetchOffers();
     }
-  }, [activeTab, currentCity, filterAlliance]);
+  }, [activeTab, fetchOffers]);
 
-  const fetchOffers = async () => {
-    if (!currentCity) return;
-    setLoading(true);
-    try {
-      const res = await api.getOffers(currentCity.world_id, filterAlliance);
-      setOffers(res.data);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
+  const refreshAfterMutation = async ({ refreshOffers = false } = {}) => {
+    await loadCity();
+    if (refreshOffers) await fetchOffers();
   };
 
-  const handleSendResources = async (e) => {
-    e.preventDefault();
+  const handleSendResources = async (event) => {
+    event.preventDefault();
     if (!currentCity) return;
     setLoading(true);
     setMessage('');
     try {
       await api.sendResources(currentCity.id, currentCity.world_id, transport);
-      setMessage('Recursos enviados correctamente');
       setTransport({ target_city_id: '', wood: 0, clay: 0, iron: 0 });
-      fetchCityStatus(currentCity.id, currentCity.world_id);
+      await refreshAfterMutation();
+      showSuccess('Recursos enviados correctamente.');
     } catch (error) {
-      setMessage(error.response?.data?.detail || 'Error al enviar recursos');
+      showError(error, 'Error al enviar recursos.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateOffer = async (e) => {
-    e.preventDefault();
+  const handleCreateOffer = async (event) => {
+    event.preventDefault();
     if (!currentCity) return;
     setLoading(true);
     setMessage('');
     try {
       await api.createOffer(currentCity.id, currentCity.world_id, newOffer);
-      setMessage('Oferta creada correctamente');
-      fetchOffers();
-      fetchCityStatus(currentCity.id, currentCity.world_id);
+      await refreshAfterMutation({ refreshOffers: true });
+      showSuccess('Oferta creada correctamente.');
     } catch (error) {
-      setMessage(error.response?.data?.detail || 'Error al crear oferta');
+      showError(error, 'Error al crear oferta.');
     } finally {
       setLoading(false);
     }
@@ -82,11 +95,10 @@ const MarketView = () => {
     setMessage('');
     try {
       await api.acceptOffer(offerId, currentCity.id, currentCity.world_id);
-      setMessage('Oferta aceptada');
-      fetchOffers();
-      fetchCityStatus(currentCity.id, currentCity.world_id);
+      await refreshAfterMutation({ refreshOffers: true });
+      showSuccess('Oferta aceptada.');
     } catch (error) {
-      setMessage(error.response?.data?.detail || 'Error al aceptar oferta');
+      showError(error, 'Error al aceptar oferta.');
     } finally {
       setLoading(false);
     }
@@ -98,206 +110,234 @@ const MarketView = () => {
     setMessage('');
     try {
       await api.cancelOffer(offerId, currentCity.id, currentCity.world_id);
-      setMessage('Oferta cancelada');
-      fetchOffers();
-      fetchCityStatus(currentCity.id, currentCity.world_id);
+      await refreshAfterMutation({ refreshOffers: true });
+      showSuccess('Oferta cancelada.');
     } catch (error) {
-      setMessage(error.response?.data?.detail || 'Error al cancelar oferta');
+      showError(error, 'Error al cancelar oferta.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleNpcTrade = async (e) => {
-    e.preventDefault();
+  const handleNpcTrade = async (event) => {
+    event.preventDefault();
     if (!currentCity) return;
     setLoading(true);
     setMessage('');
     try {
-      await api.npcTrade(currentCity.id, currentCity.world_id, npcTrade.offer_type, npcTrade.request_type, npcTrade.amount);
-      setMessage('Intercambio NPC realizado (1:1)');
-      fetchCityStatus(currentCity.id, currentCity.world_id);
+      await api.npcTrade(
+        currentCity.id,
+        currentCity.world_id,
+        npcTrade.offer_type,
+        npcTrade.request_type,
+        npcTrade.amount,
+      );
+      await refreshAfterMutation();
+      showSuccess('Intercambio NPC realizado (1:1).');
     } catch (error) {
-      setMessage(error.response?.data?.detail || 'Error en intercambio NPC');
+      showError(error, 'Error en intercambio NPC.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (!currentCity) return <div>Cargando ciudad...</div>;
+  if (!currentCity) return <div role="status">Cargando ciudad...</div>;
+
+  const otherOffers = offers.filter((offer) => offer.city_id !== currentCity.id);
+  const myOffers = offers.filter((offer) => offer.city_id === currentCity.id);
+  const tabs = [
+    ['send', 'Enviar Recursos'],
+    ['offers', 'Mercado'],
+    ['my_offers', 'Mis Ofertas'],
+    ['npc', 'Comerciante NPC'],
+  ];
 
   return (
-    <div className="p-6 max-w-4xl mx-auto pb-20">
-      <h1 className="text-3xl font-bold text-amber-500 mb-6">Mercado</h1>
+    <div className="p-3 sm:p-6 max-w-4xl mx-auto pb-24 md:pb-20">
+      <h1 className="text-2xl sm:text-3xl font-bold text-amber-500 mb-6">Mercado</h1>
 
-      <div className="tabs tabs-boxed bg-black/40 mb-6">
-        <a className={`tab ${activeTab === 'send' ? 'tab-active bg-amber-700' : ''}`} onClick={() => setActiveTab('send')}>Enviar Recursos</a>
-        <a className={`tab ${activeTab === 'offers' ? 'tab-active bg-amber-700' : ''}`} onClick={() => setActiveTab('offers')}>Mercado</a>
-        <a className={`tab ${activeTab === 'my_offers' ? 'tab-active bg-amber-700' : ''}`} onClick={() => setActiveTab('my_offers')}>Mis Ofertas</a>
-        <a className={`tab ${activeTab === 'npc' ? 'tab-active bg-amber-700' : ''}`} onClick={() => setActiveTab('npc')}>Comerciante NPC</a>
+      <div className="flex gap-1 overflow-x-auto rounded-lg bg-black/40 p-1 mb-6" role="tablist" aria-label="Secciones del mercado">
+        {tabs.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === id}
+            className={`tab shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400 ${activeTab === id ? 'tab-active bg-amber-700' : ''}`}
+            onClick={() => setActiveTab(id)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {message && (
-        <div className={`alert mb-4 ${message.includes('Error') ? 'alert-error' : 'alert-success'}`}>
+        <div
+          role={messageKind === 'error' ? 'alert' : 'status'}
+          aria-live="polite"
+          className={`alert mb-4 ${messageKind === 'error' ? 'alert-error' : 'alert-success'}`}
+        >
           {message}
         </div>
       )}
 
       {activeTab === 'send' && (
-        <div className="card bg-black/40 border border-amber-900/30 p-6">
-          <h2 className="text-xl font-bold text-amber-100 mb-4">Enviar Recursos</h2>
+        <section className="card bg-black/40 border border-amber-900/30 p-4 sm:p-6" aria-labelledby="market-send-heading">
+          <h2 id="market-send-heading" className="text-xl font-bold text-amber-100 mb-4">Enviar Recursos</h2>
           <form onSubmit={handleSendResources} className="space-y-4">
             <div>
-              <label className="label">ID Ciudad Destino</label>
+              <label htmlFor="market-target-city" className="label">ID Ciudad Destino</label>
               <input
+                id="market-target-city"
                 type="number"
-                className="input input-bordered w-full bg-black/50"
+                min="1"
+                inputMode="numeric"
+                className="input input-bordered w-full bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                 value={transport.target_city_id}
-                onChange={(e) => setTransport({ ...transport, target_city_id: parseInt(e.target.value) || '' })}
+                onChange={(event) => setTransport({ ...transport, target_city_id: parseInt(event.target.value, 10) || '' })}
                 required
               />
             </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="label text-amber-200">Madera</label>
-                <input
-                  type="number"
-                  className="input input-bordered w-full bg-black/50"
-                  value={transport.wood}
-                  onChange={(e) => setTransport({ ...transport, wood: parseInt(e.target.value) || 0 })}
-                />
-              </div>
-              <div>
-                <label className="label text-amber-200">Barro</label>
-                <input
-                  type="number"
-                  className="input input-bordered w-full bg-black/50"
-                  value={transport.clay}
-                  onChange={(e) => setTransport({ ...transport, clay: parseInt(e.target.value) || 0 })}
-                />
-              </div>
-              <div>
-                <label className="label text-amber-200">Hierro</label>
-                <input
-                  type="number"
-                  className="input input-bordered w-full bg-black/50"
-                  value={transport.iron}
-                  onChange={(e) => setTransport({ ...transport, iron: parseInt(e.target.value) || 0 })}
-                />
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {RESOURCE_OPTIONS.map((resource) => (
+                <div key={resource.value}>
+                  <label htmlFor={`market-send-${resource.value}`} className="label text-amber-200">{resource.label}</label>
+                  <input
+                    id={`market-send-${resource.value}`}
+                    type="number"
+                    min="0"
+                    inputMode="numeric"
+                    className="input input-bordered w-full bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
+                    value={transport[resource.value]}
+                    onChange={(event) => setTransport({
+                      ...transport,
+                      [resource.value]: Math.max(parseInt(event.target.value, 10) || 0, 0),
+                    })}
+                  />
+                </div>
+              ))}
             </div>
-            <button type="submit" className="btn btn-primary w-full mt-4" disabled={loading}>
+            <button type="submit" className="btn btn-primary w-full mt-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-200" disabled={loading}>
               {loading ? 'Enviando...' : 'Enviar Comerciantes'}
             </button>
           </form>
-        </div>
+        </section>
       )}
 
       {activeTab === 'offers' && (
-        <div className="space-y-4">
-          <div className="card bg-black/40 border border-amber-900/30 p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-amber-100">Ofertas Disponibles</h2>
-              <label className="label cursor-pointer gap-2">
-                <span className="label-text text-amber-200">Solo Alianza</span>
-                <input 
-                  type="checkbox" 
-                  className="checkbox checkbox-primary"
-                  checked={filterAlliance}
-                  onChange={(e) => setFilterAlliance(e.target.checked)}
-                />
-              </label>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="table w-full">
-                <thead>
-                  <tr>
-                    <th>Ofrece</th>
-                    <th>Pide</th>
-                    <th>Ratio</th>
-                    <th>Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {offers.filter(o => o.city_id !== currentCity.id).map(offer => (
-                    <tr key={offer.id}>
-                      <td className="text-green-400">{offer.offer_amount} {offer.offer_type}</td>
-                      <td className="text-red-400">{offer.request_amount} {offer.request_type}</td>
-                      <td>{(offer.offer_amount / offer.request_amount).toFixed(2)}</td>
-                      <td>
-                        <button 
-                          className="btn btn-sm btn-success"
-                          onClick={() => handleAcceptOffer(offer.id)}
-                          disabled={loading}
-                        >
-                          Aceptar
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {offers.filter(o => o.city_id !== currentCity.id).length === 0 && (
-                    <tr><td colSpan="4" className="text-center text-gray-500">No hay ofertas disponibles</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+        <section className="card bg-black/40 border border-amber-900/30 p-4 sm:p-6" aria-labelledby="market-offers-heading">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
+            <h2 id="market-offers-heading" className="text-xl font-bold text-amber-100">Ofertas Disponibles</h2>
+            <label className="label cursor-pointer justify-start gap-2">
+              <input
+                type="checkbox"
+                className="checkbox checkbox-primary"
+                checked={filterAlliance}
+                onChange={(event) => setFilterAlliance(event.target.checked)}
+              />
+              <span className="label-text text-amber-200">Solo Alianza</span>
+            </label>
           </div>
-        </div>
+          <div className="overflow-x-auto">
+            <table className="table w-full">
+              <thead>
+                <tr>
+                  <th>Ofrece</th>
+                  <th>Pide</th>
+                  <th>Ratio</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {otherOffers.map((offer) => (
+                  <tr key={offer.id}>
+                    <td className="text-green-400">{offer.offer_amount} {resourceLabel(offer.offer_type)}</td>
+                    <td className="text-red-400">{offer.request_amount} {resourceLabel(offer.request_type)}</td>
+                    <td>{offer.request_amount > 0 ? (offer.offer_amount / offer.request_amount).toFixed(2) : '—'}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-success focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
+                        onClick={() => handleAcceptOffer(offer.id)}
+                        disabled={loading}
+                      >
+                        Aceptar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {otherOffers.length === 0 && (
+                  <tr><td colSpan="4" className="text-center text-gray-400">No hay ofertas disponibles</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
 
       {activeTab === 'my_offers' && (
         <div className="space-y-6">
-          <div className="card bg-black/40 border border-amber-900/30 p-6">
-            <h2 className="text-xl font-bold text-amber-100 mb-4">Crear Oferta</h2>
+          <section className="card bg-black/40 border border-amber-900/30 p-4 sm:p-6" aria-labelledby="market-create-heading">
+            <h2 id="market-create-heading" className="text-xl font-bold text-amber-100 mb-4">Crear Oferta</h2>
             <form onSubmit={handleCreateOffer} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-              <div>
-                <label className="label">Ofrezco</label>
-                <div className="flex gap-2">
+              <fieldset>
+                <legend className="label">Ofrezco</legend>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <label htmlFor="market-offer-amount" className="sr-only">Cantidad ofrecida</label>
                   <input
+                    id="market-offer-amount"
                     type="number"
-                    className="input input-bordered w-full bg-black/50"
+                    min="1"
+                    inputMode="numeric"
+                    className="input input-bordered w-full bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                     value={newOffer.offer_amount}
-                    onChange={(e) => setNewOffer({ ...newOffer, offer_amount: parseInt(e.target.value) || 0 })}
+                    onChange={(event) => setNewOffer({ ...newOffer, offer_amount: Math.max(parseInt(event.target.value, 10) || 0, 0) })}
+                    required
                   />
+                  <label htmlFor="market-offer-resource" className="sr-only">Recurso ofrecido</label>
                   <select
-                    className="select select-bordered bg-black/50"
+                    id="market-offer-resource"
+                    className="select select-bordered bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                     value={newOffer.offer_type}
-                    onChange={(e) => setNewOffer({ ...newOffer, offer_type: e.target.value })}
+                    onChange={(event) => setNewOffer({ ...newOffer, offer_type: event.target.value })}
                   >
-                    <option value="wood">Madera</option>
-                    <option value="clay">Barro</option>
-                    <option value="iron">Hierro</option>
+                    {RESOURCE_OPTIONS.map((resource) => <option key={resource.value} value={resource.value}>{resource.label}</option>)}
                   </select>
                 </div>
-              </div>
-              <div>
-                <label className="label">Pido</label>
-                <div className="flex gap-2">
+              </fieldset>
+              <fieldset>
+                <legend className="label">Pido</legend>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <label htmlFor="market-request-amount" className="sr-only">Cantidad solicitada</label>
                   <input
+                    id="market-request-amount"
                     type="number"
-                    className="input input-bordered w-full bg-black/50"
+                    min="1"
+                    inputMode="numeric"
+                    className="input input-bordered w-full bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                     value={newOffer.request_amount}
-                    onChange={(e) => setNewOffer({ ...newOffer, request_amount: parseInt(e.target.value) || 0 })}
+                    onChange={(event) => setNewOffer({ ...newOffer, request_amount: Math.max(parseInt(event.target.value, 10) || 0, 0) })}
+                    required
                   />
+                  <label htmlFor="market-request-resource" className="sr-only">Recurso solicitado</label>
                   <select
-                    className="select select-bordered bg-black/50"
+                    id="market-request-resource"
+                    className="select select-bordered bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                     value={newOffer.request_type}
-                    onChange={(e) => setNewOffer({ ...newOffer, request_type: e.target.value })}
+                    onChange={(event) => setNewOffer({ ...newOffer, request_type: event.target.value })}
                   >
-                    <option value="wood">Madera</option>
-                    <option value="clay">Barro</option>
-                    <option value="iron">Hierro</option>
+                    {RESOURCE_OPTIONS.map((resource) => <option key={resource.value} value={resource.value}>{resource.label}</option>)}
                   </select>
                 </div>
-              </div>
-              <button type="submit" className="btn btn-primary w-full md:col-span-2" disabled={loading}>
+              </fieldset>
+              <button type="submit" className="btn btn-primary w-full md:col-span-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-200" disabled={loading}>
                 Crear Oferta
               </button>
             </form>
-          </div>
+          </section>
 
-          <div className="card bg-black/40 border border-amber-900/30 p-6">
-            <h2 className="text-xl font-bold text-amber-100 mb-4">Mis Ofertas Activas</h2>
+          <section className="card bg-black/40 border border-amber-900/30 p-4 sm:p-6" aria-labelledby="market-mine-heading">
+            <h2 id="market-mine-heading" className="text-xl font-bold text-amber-100 mb-4">Mis Ofertas Activas</h2>
             <div className="overflow-x-auto">
               <table className="table w-full">
                 <thead>
@@ -308,13 +348,14 @@ const MarketView = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {offers.filter(o => o.city_id === currentCity.id).map(offer => (
+                  {myOffers.map((offer) => (
                     <tr key={offer.id}>
-                      <td className="text-green-400">{offer.offer_amount} {offer.offer_type}</td>
-                      <td className="text-red-400">{offer.request_amount} {offer.request_type}</td>
+                      <td className="text-green-400">{offer.offer_amount} {resourceLabel(offer.offer_type)}</td>
+                      <td className="text-red-400">{offer.request_amount} {resourceLabel(offer.request_type)}</td>
                       <td>
-                        <button 
-                          className="btn btn-sm btn-error"
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                           onClick={() => handleCancelOffer(offer.id)}
                           disabled={loading}
                         >
@@ -323,66 +364,73 @@ const MarketView = () => {
                       </td>
                     </tr>
                   ))}
-                  {offers.filter(o => o.city_id === currentCity.id).length === 0 && (
-                    <tr><td colSpan="3" className="text-center text-gray-500">No tienes ofertas activas</td></tr>
+                  {myOffers.length === 0 && (
+                    <tr><td colSpan="3" className="text-center text-gray-400">No tienes ofertas activas</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
-          </div>
+          </section>
         </div>
       )}
 
       {activeTab === 'npc' && (
-        <div className="card bg-black/40 border border-amber-900/30 p-6">
-          <h2 className="text-xl font-bold text-amber-100 mb-4">Comerciante NPC (Ratio 1:1)</h2>
-          <p className="text-gray-400 mb-4 text-sm">Intercambia recursos instantáneamente con el comerciante del juego.</p>
+        <section className="card bg-black/40 border border-amber-900/30 p-4 sm:p-6" aria-labelledby="market-npc-heading">
+          <h2 id="market-npc-heading" className="text-xl font-bold text-amber-100 mb-4">Comerciante NPC (Ratio 1:1)</h2>
+          <p className="text-gray-300 mb-4 text-sm">Intercambia recursos instantáneamente con el comerciante del juego.</p>
           <form onSubmit={handleNpcTrade} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-            <div>
-              <label className="label">Dar</label>
-              <div className="flex gap-2">
+            <fieldset>
+              <legend className="label">Dar</legend>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <label htmlFor="market-npc-amount" className="sr-only">Cantidad para intercambiar</label>
                 <input
+                  id="market-npc-amount"
                   type="number"
-                  className="input input-bordered w-full bg-black/50"
+                  min="1"
+                  inputMode="numeric"
+                  className="input input-bordered w-full bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                   value={npcTrade.amount}
-                  onChange={(e) => setNpcTrade({ ...npcTrade, amount: parseInt(e.target.value) || 0 })}
+                  onChange={(event) => setNpcTrade({ ...npcTrade, amount: Math.max(parseInt(event.target.value, 10) || 0, 0) })}
+                  required
                 />
+                <label htmlFor="market-npc-offer-resource" className="sr-only">Recurso entregado</label>
                 <select
-                  className="select select-bordered bg-black/50"
+                  id="market-npc-offer-resource"
+                  className="select select-bordered bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                   value={npcTrade.offer_type}
-                  onChange={(e) => setNpcTrade({ ...npcTrade, offer_type: e.target.value })}
+                  onChange={(event) => setNpcTrade({ ...npcTrade, offer_type: event.target.value })}
                 >
-                  <option value="wood">Madera</option>
-                  <option value="clay">Barro</option>
-                  <option value="iron">Hierro</option>
+                  {RESOURCE_OPTIONS.map((resource) => <option key={resource.value} value={resource.value}>{resource.label}</option>)}
                 </select>
               </div>
-            </div>
-            <div>
-              <label className="label">Recibir</label>
-              <div className="flex gap-2">
+            </fieldset>
+            <fieldset>
+              <legend className="label">Recibir</legend>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <label htmlFor="market-npc-receive-amount" className="sr-only">Cantidad recibida</label>
                 <input
+                  id="market-npc-receive-amount"
                   type="number"
                   className="input input-bordered w-full bg-black/50"
                   value={npcTrade.amount}
                   disabled
                 />
+                <label htmlFor="market-npc-request-resource" className="sr-only">Recurso recibido</label>
                 <select
-                  className="select select-bordered bg-black/50"
+                  id="market-npc-request-resource"
+                  className="select select-bordered bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                   value={npcTrade.request_type}
-                  onChange={(e) => setNpcTrade({ ...npcTrade, request_type: e.target.value })}
+                  onChange={(event) => setNpcTrade({ ...npcTrade, request_type: event.target.value })}
                 >
-                  <option value="wood">Madera</option>
-                  <option value="clay">Barro</option>
-                  <option value="iron">Hierro</option>
+                  {RESOURCE_OPTIONS.map((resource) => <option key={resource.value} value={resource.value}>{resource.label}</option>)}
                 </select>
               </div>
-            </div>
-            <button type="submit" className="btn btn-warning w-full md:col-span-2" disabled={loading}>
-              Intercambiar (Coste: 0 Oro)
+            </fieldset>
+            <button type="submit" className="btn btn-warning w-full md:col-span-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-900" disabled={loading}>
+              Intercambiar
             </button>
           </form>
-        </div>
+        </section>
       )}
     </div>
   );
