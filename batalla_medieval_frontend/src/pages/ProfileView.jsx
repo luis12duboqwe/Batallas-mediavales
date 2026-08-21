@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useUserStore } from '../store/userStore';
 import { api } from '../api/axiosClient';
-import ThemeSelector from '../components/ThemeSelector';
 
 const ProfileView = () => {
   const { t, i18n } = useTranslation();
@@ -72,7 +71,7 @@ const ProfileView = () => {
   if (!user) return <div role="status">{t('common.loading')}</div>;
 
   return (
-    <div className="max-w-2xl mx-auto mt-4 sm:mt-10 pb-20">
+    <div className="max-w-2xl mx-auto mt-4 sm:mt-10 pb-32 md:pb-20">
       <div className="card bg-black/40 border border-amber-900/30 p-4 sm:p-8">
         <h1 className="text-2xl sm:text-3xl font-bold text-amber-100 mb-6">{t('profile.title')}</h1>
 
@@ -144,12 +143,6 @@ const ProfileView = () => {
             />
             <label htmlFor="profile-email-notifications" className="text-gray-300">{t('profile.email_notifications')}</label>
           </div>
-
-          <div className="divider border-gray-800"></div>
-
-          <ThemeSelector />
-
-          <div className="divider border-gray-800"></div>
 
           <button
             type="submit"
