@@ -24,9 +24,15 @@ if [[ ! -f "$BASE_ENV" ]]; then
   exit 2
 fi
 
+STATE_DIR=".ops-state"
+RELEASES_DIR="$STATE_DIR/releases"
+DEPLOYMENTS_DIR="$STATE_DIR/deployments"
 NEXT_ENV=".release.env.next"
 CURRENT_ENV=".release.env"
 PREVIOUS_ENV=".release.env.previous"
+mkdir -p "$RELEASES_DIR" "$DEPLOYMENTS_DIR"
+chmod 700 "$STATE_DIR" "$RELEASES_DIR" "$DEPLOYMENTS_DIR"
+
 cp "$BASE_ENV" "$NEXT_ENV"
 {
   echo
@@ -49,11 +55,19 @@ for key in ('POSTGRES_USER', 'POSTGRES_DB', 'BACKUP_DIR', 'PUBLIC_BASE_URL'):
 PY
 )"
 
+previous_release_sha=""
 had_previous=0
 if [[ -f "$CURRENT_ENV" ]]; then
   cp "$CURRENT_ENV" "$PREVIOUS_ENV"
   chmod 600 "$PREVIOUS_ENV"
   had_previous=1
+  if [[ -f .release-sha ]]; then
+    previous_release_sha="$(tr -d '[:space:]' < .release-sha)"
+  fi
+  if [[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]; then
+    cp "$CURRENT_ENV" "$RELEASES_DIR/${previous_release_sha}.env"
+    chmod 600 "$RELEASES_DIR/${previous_release_sha}.env"
+  fi
 fi
 mv "$NEXT_ENV" "$CURRENT_ENV"
 
@@ -72,6 +86,10 @@ rollback() {
       echo "No database snapshot was created; restoring previous application images only" >&2
       docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" pull backend worker frontend || true
       docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx || true
+    fi
+    if [[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]; then
+      echo "$previous_release_sha" > .release-sha
+      chmod 600 .release-sha
     fi
   else
     echo "No previous release exists; leaving services for diagnosis" >&2
@@ -106,6 +124,21 @@ echo "Running post-deploy smoke against ${PUBLIC_BASE_URL}"
 python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-ms 750
 
 trap - ERR
+cp "$CURRENT_ENV" "$RELEASES_DIR/${RELEASE_SHA}.env"
+chmod 600 "$RELEASES_DIR/${RELEASE_SHA}.env"
+python3 - "$DEPLOYMENTS_DIR/${RELEASE_SHA}.json" "$RELEASE_SHA" "$previous_release_sha" "$rollback_backup" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+payload = {
+    "release_sha": sys.argv[2],
+    "previous_release_sha": sys.argv[3] or None,
+    "rollback_backup": sys.argv[4] or None,
+}
+path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+path.chmod(0o600)
+PY
 rm -f "$PREVIOUS_ENV"
 echo "$RELEASE_SHA" > .release-sha
 chmod 600 .release-sha
