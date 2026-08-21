@@ -41,6 +41,33 @@
     "sfx_on": "Efectos activados",
     "sfx_off": "Efectos desactivados"
   },
+  "resources": {
+    "summary": "Recursos de la ciudad",
+    "wood": "Madera",
+    "clay": "Ladrillo",
+    "iron": "Hierro",
+    "population": "Población",
+    "wood_tip": "Producción base de madera de la ciudad",
+    "clay_tip": "Producción base de ladrillo de la ciudad",
+    "iron_tip": "Producción base de hierro de la ciudad",
+    "population_tip": "Población utilizada y capacidad máxima para unidades"
+  },
+  "tutorial": {
+    "title": "Tutorial de inicio",
+    "progress": "Paso {{current}} de {{total}}",
+    "checking": "Comprobando progreso…",
+    "server_authoritative": "El servidor avanza este tutorial únicamente cuando confirma la acción.",
+    "steps": {
+      "0": "Únete a un mundo para recibir tu capital.",
+      "1": "Construye un cuartel de nivel 1.",
+      "2": "Entrena al menos una unidad de infantería básica.",
+      "3": "Abre el mapa y localiza una aldea bárbara.",
+      "4": "Envía un ataque contra una aldea bárbara.",
+      "5": "Espera a que el servidor resuelva el ataque y genere el informe.",
+      "6": "Espera el retorno de tus tropas; si fueron derrotadas por completo, el tutorial se cerrará automáticamente.",
+      "7": "Tutorial completado."
+    }
+  },
   "dashboard": {
     "welcome": "Bienvenido, {{name}}",
     "resources": "Recursos",
