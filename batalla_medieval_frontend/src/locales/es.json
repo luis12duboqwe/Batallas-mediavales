@@ -1,4 +1,9 @@
 {
+  "brand": {
+    "name": "Batalla Medieval",
+    "tagline": "Estrategia en tiempo real",
+    "home_label": "Ir a la ciudad"
+  },
   "nav": {
     "city": "Ciudad",
     "buildings": "Edificios",
@@ -17,7 +22,10 @@
     "academy": "Academia",
     "admin": "Admin",
     "profile": "Perfil",
-    "logout": "Cerrar Sesión"
+    "logout": "Cerrar Sesión",
+    "navigation": "Navegación",
+    "mobile_navigation": "Navegación móvil",
+    "top_navigation": "Navegación principal"
   },
   "common": {
     "loading": "Cargando...",
@@ -30,6 +38,20 @@
     "welcome": "Bienvenido, {{name}}",
     "resources": "Recursos",
     "production": "Producción por hora"
+  },
+  "profile": {
+    "title": "Perfil de Usuario",
+    "username": "Usuario",
+    "id": "ID",
+    "rubies": "Rubíes",
+    "email": "Email",
+    "new_password": "Nueva Contraseña (dejar en blanco para no cambiar)",
+    "language": "Idioma",
+    "email_notifications": "Recibir notificaciones por email",
+    "saving": "Guardando...",
+    "save_changes": "Guardar Cambios",
+    "updated": "Perfil actualizado correctamente",
+    "update_error": "Error al actualizar perfil"
   },
   "basic_infantry": "Lancero Común",
   "heavy_infantry": "Soldado de Acero",
