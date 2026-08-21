@@ -30,7 +30,7 @@ const TutorialOverlay = () => {
 
   return (
     <aside
-      className="fixed bottom-24 md:bottom-4 left-4 right-4 md:left-auto md:right-4 z-40 md:w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-amber-600/60 bg-gray-950/95 p-4 shadow-2xl backdrop-blur"
+      className="pointer-events-none fixed bottom-24 md:bottom-4 left-4 right-4 md:left-auto md:right-4 z-40 md:w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-amber-600/60 bg-gray-950/95 p-4 shadow-2xl backdrop-blur"
       aria-live="polite"
       aria-label={t('tutorial.title')}
       data-testid="tutorial-panel"
