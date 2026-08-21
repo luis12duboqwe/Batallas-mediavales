@@ -5,7 +5,7 @@ import soundManager from '../services/sound';
 export const useCityStore = create((set, get) => ({
   currentCity: null,
   resources: { wood: 0, clay: 0, iron: 0, population: 0, populationMax: 0 },
-  storageLimit: 5000,
+  storageLimit: 0,
   buildings: [],
   productionRates: { wood: 0, clay: 0, iron: 0 },
   queues: { buildings: [], troops: [] },
@@ -16,9 +16,9 @@ export const useCityStore = create((set, get) => ({
   async loadCity() {
     const { data } = await api.getCity();
     set({
-      currentCity: { id: data.city_id, ...data.city }, // Ensure ID is available
+      currentCity: { id: data.city_id, ...data.city },
       resources: data.resources,
-      storageLimit: data.storage_limit || 5000,
+      storageLimit: data.storage_limit ?? 0,
       buildings: data.buildings,
       productionRates: data.production,
       queues: data.queues || { buildings: [], troops: [] },
@@ -27,11 +27,12 @@ export const useCityStore = create((set, get) => ({
   },
   tickResources(elapsedSeconds = 1) {
     const { resources, productionRates, storageLimit } = get();
-    // Simple client-side prediction
     const updated = { ...resources };
     ['wood', 'clay', 'iron'].forEach(res => {
-        const produced = (productionRates[res] / 3600) * elapsedSeconds;
-        updated[res] = Math.min(updated[res] + produced, storageLimit);
+      const produced = (productionRates[res] / 3600) * elapsedSeconds;
+      updated[res] = storageLimit > 0
+        ? Math.min(updated[res] + produced, storageLimit)
+        : updated[res] + produced;
     });
     set({ resources: updated });
   },
@@ -44,7 +45,6 @@ export const useCityStore = create((set, get) => ({
       worldId: city.world_id,
     });
     set((state) => ({
-      // backend returns queue entry; we keep optimistic queue listing
       queues: {
         ...state.queues,
         buildings: [...(state.queues.buildings || []), data],
@@ -87,21 +87,22 @@ export const useCityStore = create((set, get) => ({
       },
     }));
   },
-  async sendMovement({ targetCityId, targetOasisId, movementType, troops, targetBuilding = null }) {
+  async sendMovement({ targetCityId, targetOasisId, movementType, troops, spyCount = 0, targetBuilding = null }) {
     const city = get().currentCity;
     if (!city) return null;
     const payload = {
       origin_city_id: city.id,
       movement_type: movementType,
-      troops: troops,
+      troops,
+      spy_count: spyCount,
       target_building: targetBuilding,
       world_id: city.world_id,
     };
 
     if (targetOasisId) {
-        payload.target_oasis_id = targetOasisId;
+      payload.target_oasis_id = targetOasisId;
     } else {
-        payload.target_city_id = targetCityId;
+      payload.target_city_id = targetCityId;
     }
 
     const { data } = await api.sendMovement(payload);
