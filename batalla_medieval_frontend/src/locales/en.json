@@ -34,6 +34,13 @@
     "cancel": "Cancel",
     "confirm": "Confirm"
   },
+  "sound": {
+    "controls": "Sound controls",
+    "music_on": "Music on",
+    "music_off": "Music off",
+    "sfx_on": "Sound effects on",
+    "sfx_off": "Sound effects off"
+  },
   "dashboard": {
     "welcome": "Welcome, {{name}}",
     "resources": "Resources",
@@ -48,6 +55,7 @@
     "new_password": "New password (leave blank to keep current password)",
     "language": "Language",
     "email_notifications": "Receive email notifications",
+    "visual_theme": "Visual theme",
     "saving": "Saving...",
     "save_changes": "Save Changes",
     "updated": "Profile updated successfully",
