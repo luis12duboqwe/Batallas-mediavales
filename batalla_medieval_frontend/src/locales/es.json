@@ -34,6 +34,13 @@
     "cancel": "Cancelar",
     "confirm": "Confirmar"
   },
+  "sound": {
+    "controls": "Controles de sonido",
+    "music_on": "Música activada",
+    "music_off": "Música desactivada",
+    "sfx_on": "Efectos activados",
+    "sfx_off": "Efectos desactivados"
+  },
   "dashboard": {
     "welcome": "Bienvenido, {{name}}",
     "resources": "Recursos",
@@ -48,6 +55,7 @@
     "new_password": "Nueva Contraseña (dejar en blanco para no cambiar)",
     "language": "Idioma",
     "email_notifications": "Recibir notificaciones por email",
+    "visual_theme": "Tema visual",
     "saving": "Guardando...",
     "save_changes": "Guardar Cambios",
     "updated": "Perfil actualizado correctamente",
