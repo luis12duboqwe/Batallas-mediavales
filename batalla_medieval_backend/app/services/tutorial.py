@@ -1,7 +1,8 @@
-"""Server-authoritative tutorial progression for the G2 vertical slice."""
+"""Server-authoritative tutorial progression for the G2/G4 first session."""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -19,7 +20,7 @@ STEP_LABELS = {
     3: "Abre el mapa y localiza una aldea bárbara.",
     4: "Envía un ataque contra una aldea bárbara.",
     5: "Espera a que el worker resuelva el ataque y genere el informe.",
-    6: "Espera el retorno de tus tropas a la capital.",
+    6: "Espera el retorno de tus tropas; si fueron derrotadas por completo, el tutorial se cerrará automáticamente.",
     7: "Tutorial completado.",
 }
 
@@ -38,6 +39,35 @@ def _has_barbarian(db: Session, world_id: int) -> bool:
         .first()
         is not None
     )
+
+
+def _battle_requires_return(report: models.Report) -> bool:
+    """Return whether the persisted battle result should create a return march.
+
+    ``movement._resolve_attack_core`` creates a return when at least one
+    attacker survives or when there is loot to carry home. If the attacker is
+    wiped out and earns no loot, no return movement exists by design. Tutorial
+    progress must therefore treat that resolved defeat as terminal instead of
+    waiting forever for a report that can never be generated.
+
+    Malformed/legacy reports fail closed (``True``) so a bad payload never
+    grants tutorial completion by accident.
+    """
+
+    try:
+        payload = json.loads(report.content or "{}")
+        attacker = payload.get("attacker") or {}
+        initial = attacker.get("initial") or {}
+        losses = attacker.get("losses") or {}
+        survivors = any(
+            max(int(amount or 0) - int(losses.get(unit, 0) or 0), 0) > 0
+            for unit, amount in initial.items()
+        )
+        loot = payload.get("loot") or {}
+        has_loot = any(float(loot.get(resource, 0) or 0) > 0 for resource in balance.RESOURCE_FIELDS)
+        return survivors or has_loot
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return True
 
 
 def _derive_step(db: Session, user: models.User, city: models.City | None) -> int:
@@ -98,12 +128,14 @@ def _derive_step(db: Session, user: models.User, city: models.City | None) -> in
     step = 5
 
     battle_report = (
-        db.query(models.Report.id)
+        db.query(models.Report)
         .filter(
             models.Report.city_id == city.id,
             models.Report.world_id == city.world_id,
             models.Report.report_type == "battle",
+            models.Report.attacker_city_id == city.id,
         )
+        .order_by(models.Report.id.desc())
         .first()
     )
     if not battle_report:
@@ -119,7 +151,7 @@ def _derive_step(db: Session, user: models.User, city: models.City | None) -> in
         )
         .first()
     )
-    if return_report:
+    if return_report or not _battle_requires_return(battle_report):
         step = FINAL_STEP
     return step
 
@@ -163,12 +195,7 @@ def _response(
 
 
 def get_progress(db: Session, user: models.User) -> dict[str, Any]:
-    """Return current tutorial state without acquiring write locks or committing.
-
-    The browser polls this endpoint. Keeping it strictly read-only prevents a
-    harmless status refresh from competing with city/profile reads in SQLite
-    development and keeps GET semantics safe in every environment.
-    """
+    """Return current tutorial state without acquiring write locks or committing."""
 
     fresh_user = db.query(models.User).filter(models.User.id == user.id).one()
     city = _active_city(db, fresh_user)
@@ -181,11 +208,7 @@ def get_progress(db: Session, user: models.User) -> dict[str, Any]:
 
 
 def sync_progress(db: Session, user: models.User) -> dict[str, Any]:
-    """Persist verified progress and claim the final reward exactly once.
-
-    This write path is intentionally POST-only. Concurrent final claims are
-    serialized by the user row lock and the reward flag.
-    """
+    """Persist verified progress and claim the final reward exactly once."""
 
     locked_user = (
         db.query(models.User)

@@ -8,6 +8,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services import admin as admin_service
+from ..services import onboarding_metrics
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -49,10 +50,38 @@ class UserFreezeUpdate(BaseModel):
     reason: str | None = None
 
 
+class OnboardingMetricsRead(BaseModel):
+    window_hours: int
+    total_players: int
+    joined_world: int
+    tutorial_completed: int
+    active_in_window: int
+    inactive_incomplete: int
+    join_rate: float
+    completion_rate: float
+    tutorial_step_counts: Dict[str, int]
+    reached_step_counts: Dict[str, int]
+    inactive_incomplete_by_step: Dict[str, int]
+
+
 def require_admin(current_user: models.User = Depends(get_current_user)):
     if not getattr(current_user, "is_admin", False):
         raise HTTPException(status_code=403, detail="Admin privileges required")
     return current_user
+
+
+@router.get("/metrics/onboarding", response_model=OnboardingMetricsRead)
+def onboarding_product_metrics(
+    window_hours: int = Query(default=24, ge=1, le=720),
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(require_admin),
+):
+    """Return aggregate onboarding metrics without player identifiers or PII."""
+
+    return onboarding_metrics.get_onboarding_metrics(
+        db,
+        window_hours=window_hours,
+    )
 
 
 @router.get("/logs", response_model=List[schemas.LogRead])
@@ -87,7 +116,7 @@ def modify_city_resources(
     db: Session = Depends(get_db),
     current_admin: models.User = Depends(require_admin),
 ):
-    updates = payload.dict(exclude_unset=True)
+    updates = payload.model_dump(exclude_unset=True)
     return admin_service.update_city_resources(db, city_id, updates, current_admin)
 
 
@@ -118,7 +147,7 @@ def create_city(
     db: Session = Depends(get_db),
     current_admin: models.User = Depends(require_admin),
 ):
-    return admin_service.create_city(db, payload.dict(), current_admin)
+    return admin_service.create_city(db, payload.model_dump(), current_admin)
 
 
 @router.patch("/city/{city_id}/coordinates", response_model=schemas.CityRead)

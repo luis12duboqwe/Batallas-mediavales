@@ -184,9 +184,11 @@ jobs:
           curl --fail --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:8000/health
           curl --fail --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:4173/login
 
-      - name: Run accepted browser journey and realtime check
+      - name: Run accepted browser journeys
         working-directory: batalla_medieval_frontend
-        run: node e2e/g2-alpha.mjs
+        run: |
+          node e2e/g2-alpha.mjs
+          node e2e/g4-ux.mjs
 
       - name: Show service logs
         if: always()

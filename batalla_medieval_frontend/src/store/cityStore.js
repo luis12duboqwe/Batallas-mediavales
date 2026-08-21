@@ -2,10 +2,26 @@ import { create } from 'zustand';
 import { api } from '../api/axiosClient';
 import soundManager from '../services/sound';
 
+const movementCategory = (movement, ownedCityIds) => {
+  const direction = ownedCityIds.has(movement.origin_city_id) ? 'out' : 'in';
+  switch (movement.movement_type) {
+    case 'attack':
+    case 'spy':
+    case 'reinforce':
+    case 'transport':
+      return `${movement.movement_type}_${direction}`;
+    case 'return':
+      return 'return';
+    default:
+      return movement.movement_type || 'other';
+  }
+};
+
 export const useCityStore = create((set, get) => ({
   currentCity: null,
+  cities: [],
   resources: { wood: 0, clay: 0, iron: 0, population: 0, populationMax: 0 },
-  storageLimit: 5000,
+  storageLimit: 0,
   buildings: [],
   productionRates: { wood: 0, clay: 0, iron: 0 },
   queues: { buildings: [], troops: [] },
@@ -16,9 +32,10 @@ export const useCityStore = create((set, get) => ({
   async loadCity() {
     const { data } = await api.getCity();
     set({
-      currentCity: { id: data.city_id, ...data.city }, // Ensure ID is available
+      currentCity: data.city ? { ...data.city } : null,
+      cities: data.cities || [],
       resources: data.resources,
-      storageLimit: data.storage_limit || 5000,
+      storageLimit: data.storage_limit ?? 0,
       buildings: data.buildings,
       productionRates: data.production,
       queues: data.queues || { buildings: [], troops: [] },
@@ -27,11 +44,12 @@ export const useCityStore = create((set, get) => ({
   },
   tickResources(elapsedSeconds = 1) {
     const { resources, productionRates, storageLimit } = get();
-    // Simple client-side prediction
     const updated = { ...resources };
     ['wood', 'clay', 'iron'].forEach(res => {
-        const produced = (productionRates[res] / 3600) * elapsedSeconds;
-        updated[res] = Math.min(updated[res] + produced, storageLimit);
+      const produced = (productionRates[res] / 3600) * elapsedSeconds;
+      updated[res] = storageLimit > 0
+        ? Math.min(updated[res] + produced, storageLimit)
+        : updated[res] + produced;
     });
     set({ resources: updated });
   },
@@ -43,23 +61,12 @@ export const useCityStore = create((set, get) => ({
       buildingType,
       worldId: city.world_id,
     });
-    set((state) => ({
-      // backend returns queue entry; we keep optimistic queue listing
-      queues: {
-        ...state.queues,
-        buildings: [...(state.queues.buildings || []), data],
-      },
-    }));
+    await get().loadCity();
     return data;
   },
   async cancelBuilding(queueId) {
     await api.cancelBuildingQueue(queueId);
-    set((state) => ({
-      queues: {
-        ...state.queues,
-        buildings: state.queues.buildings.filter((q) => q.id !== queueId),
-      },
-    }));
+    await get().loadCity();
   },
   async train({ troopType, amount }) {
     const city = get().currentCity;
@@ -70,41 +77,33 @@ export const useCityStore = create((set, get) => ({
       amount,
       worldId: city.world_id,
     });
-    set((state) => ({
-      queues: {
-        ...state.queues,
-        troops: [...(state.queues.troops || []), data],
-      },
-    }));
+    await get().loadCity();
     return data;
   },
   async cancelTroop(queueId) {
     await api.cancelTroopQueue(queueId);
-    set((state) => ({
-      queues: {
-        ...state.queues,
-        troops: state.queues.troops.filter((q) => q.id !== queueId),
-      },
-    }));
+    await get().loadCity();
   },
-  async sendMovement({ targetCityId, targetOasisId, movementType, troops, targetBuilding = null }) {
+  async sendMovement({ targetCityId, targetOasisId, movementType, troops, spyCount = 0, targetBuilding = null }) {
     const city = get().currentCity;
     if (!city) return null;
     const payload = {
       origin_city_id: city.id,
       movement_type: movementType,
-      troops: troops,
+      troops,
+      spy_count: spyCount,
       target_building: targetBuilding,
       world_id: city.world_id,
     };
 
     if (targetOasisId) {
-        payload.target_oasis_id = targetOasisId;
+      payload.target_oasis_id = targetOasisId;
     } else {
-        payload.target_city_id = targetCityId;
+      payload.target_city_id = targetCityId;
     }
 
     const { data } = await api.sendMovement(payload);
+    await get().loadCity();
     return data;
   },
   setMovements(movements) {
@@ -119,9 +118,11 @@ export const useCityStore = create((set, get) => ({
     );
     const { data } = await api.getMovements({ worldId: city.world_id });
     const rawList = Array.isArray(data) ? data : data.movements || [];
+    const ownedCityIds = new Set((get().cities || []).map((ownedCity) => ownedCity.id));
     const movementList = rawList.map((movement) => ({
-      category: movement.category || (movement.movement_type === 'attack' ? 'attack_out' : movement.movement_type),
       ...movement,
+      direction: ownedCityIds.has(movement.origin_city_id) ? 'out' : 'in',
+      category: movementCategory(movement, ownedCityIds),
     }));
     set({ movements: movementList });
     const hasNewAttackIncoming = movementList.some(
@@ -130,7 +131,7 @@ export const useCityStore = create((set, get) => ({
     if (hasNewAttackIncoming) {
       soundManager.playSFX('attack_incoming');
     }
-    return data;
+    return { movements: movementList };
   },
   async loadReports() {
     const city = get().currentCity;

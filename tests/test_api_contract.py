@@ -61,6 +61,7 @@ MVP_HTTP_CONTRACT = {
     ("GET", "/queue/status"),
     ("GET", "/protection/status"),
     ("GET", "/economy/balance_preview"),
+    ("GET", "/admin/metrics/onboarding"),
     ("GET", "/admin/logs"),
     ("PATCH", "/admin/user/{user_id}/freeze"),
     ("PATCH", "/admin/city/{city_id}/resources"),

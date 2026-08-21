@@ -40,6 +40,29 @@ const sidebarLinks = [
   { to: '/messages', key: 'nav.messages', icon: '✉️' },
 ];
 
+const NavLink = ({ link, active, mobile = false, t }) => (
+  <Link
+    to={link.to}
+    aria-current={active ? 'page' : undefined}
+    className={
+      mobile
+        ? `min-w-[76px] flex flex-col items-center justify-center gap-1 px-2 py-2 text-xs border-t-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400 ${
+            active
+              ? 'border-yellow-500 bg-yellow-500/10 text-yellow-200'
+              : 'border-transparent text-gray-300 hover:text-yellow-200 hover:bg-gray-800/70'
+          }`
+        : `flex items-center gap-3 px-3 py-2 rounded-lg transition duration-150 border border-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400 ${
+            active
+              ? 'bg-yellow-500/10 text-yellow-200 border-yellow-700 shadow-[0_0_0_1px_rgba(234,179,8,0.3)]'
+              : 'text-gray-300 hover:text-yellow-200 hover:bg-gray-800/60'
+          }`
+    }
+  >
+    <span className={mobile ? 'text-base' : 'text-lg'} aria-hidden>{link.icon}</span>
+    <span className="font-medium whitespace-nowrap">{t(link.key)}</span>
+  </Link>
+);
+
 const Layout = ({ children }) => {
   const { t } = useTranslation();
   const location = useLocation();
@@ -51,32 +74,40 @@ const Layout = ({ children }) => {
       <ResourceBar />
       <div className="flex">
         <aside className="w-64 bg-gray-950/75 border-r border-yellow-800/30 p-4 hidden md:block backdrop-blur-lg">
-          <div className="mb-4 text-xs uppercase tracking-[0.2em] text-gray-500">Navegación</div>
-          <nav className="space-y-1">
-            {sidebarLinks.map((link) => {
-              const active = location.pathname === link.to;
-              return (
-                <Link
-                  key={link.to}
-                  to={link.to}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-lg transition duration-150 border border-transparent ${
-                    active
-                      ? 'bg-yellow-500/10 text-yellow-200 border-yellow-700 shadow-[0_0_0_1px_rgba(234,179,8,0.3)]'
-                      : 'text-gray-300 hover:text-yellow-200 hover:bg-gray-800/60'
-                  }`}
-                >
-                  <span className="text-lg" aria-hidden>{link.icon}</span>
-                  <span className="font-medium">{t(link.key)}</span>
-                </Link>
-              );
-            })}
+          <div className="mb-4 text-xs uppercase tracking-[0.2em] text-gray-500">{t('nav.navigation')}</div>
+          <nav className="space-y-1" aria-label={t('nav.navigation')}>
+            {sidebarLinks.map((link) => (
+              <NavLink
+                key={link.to}
+                link={link}
+                active={location.pathname === link.to}
+                t={t}
+              />
+            ))}
           </nav>
         </aside>
-        <main className="flex-1 p-4 md:p-8 space-y-6 relative overflow-hidden">
+        <main className="flex-1 p-4 pb-24 md:p-8 md:pb-8 space-y-6 relative overflow-hidden">
           <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_20%,rgba(255,215,128,0.03),transparent_35%)]" />
           <div className="relative animate-fade-in">{children}</div>
         </main>
       </div>
+      <nav
+        className="md:hidden fixed inset-x-0 bottom-0 z-50 border-t border-yellow-800/40 bg-gray-950/95 backdrop-blur-xl shadow-[0_-8px_30px_rgba(0,0,0,0.45)]"
+        aria-label={t('nav.mobile_navigation')}
+        data-testid="mobile-navigation"
+      >
+        <div className="flex overflow-x-auto overscroll-x-contain">
+          {sidebarLinks.map((link) => (
+            <NavLink
+              key={link.to}
+              link={link}
+              active={location.pathname === link.to}
+              mobile
+              t={t}
+            />
+          ))}
+        </div>
+      </nav>
     </div>
   );
 };
@@ -102,7 +133,8 @@ const GameRoute = ({ children }) => (
 );
 
 const App = () => {
-  const { token, refreshCity } = useUserStore();
+  const { user, token, refreshCity } = useUserStore();
+  const { i18n } = useTranslation();
   const location = useLocation();
 
   useEffect(() => {
@@ -110,6 +142,12 @@ const App = () => {
       refreshCity().catch(() => {});
     }
   }, [token, refreshCity]);
+
+  useEffect(() => {
+    if (user?.language && i18n.resolvedLanguage !== user.language) {
+      i18n.changeLanguage(user.language);
+    }
+  }, [user?.language, i18n]);
 
   useEffect(() => {
     const handleClick = (event) => {

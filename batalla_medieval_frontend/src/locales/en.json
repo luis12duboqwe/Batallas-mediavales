@@ -1,4 +1,9 @@
 {
+  "brand": {
+    "name": "Medieval Battle",
+    "tagline": "Real-time strategy",
+    "home_label": "Go to city"
+  },
   "nav": {
     "city": "City",
     "buildings": "Buildings",
@@ -17,7 +22,10 @@
     "academy": "Academy",
     "admin": "Admin",
     "profile": "Profile",
-    "logout": "Logout"
+    "logout": "Logout",
+    "navigation": "Navigation",
+    "mobile_navigation": "Mobile navigation",
+    "top_navigation": "Main navigation"
   },
   "common": {
     "loading": "Loading...",
@@ -26,11 +34,70 @@
     "cancel": "Cancel",
     "confirm": "Confirm"
   },
+  "sound": {
+    "controls": "Sound controls",
+    "music_on": "Music on",
+    "music_off": "Music off",
+    "sfx_on": "Sound effects on",
+    "sfx_off": "Sound effects off"
+  },
+  "resources": {
+    "summary": "City resources",
+    "wood": "Wood",
+    "clay": "Clay",
+    "iron": "Iron",
+    "population": "Population",
+    "wood_tip": "City base wood production",
+    "clay_tip": "City base clay production",
+    "iron_tip": "City base iron production",
+    "population_tip": "Population used and maximum capacity for units"
+  },
+  "tutorial": {
+    "title": "Getting started tutorial",
+    "progress": "Step {{current}} of {{total}}",
+    "checking": "Checking progress…",
+    "server_authoritative": "The server advances this tutorial only after it confirms the action.",
+    "steps": {
+      "0": "Join a world to receive your capital.",
+      "1": "Build a level 1 barracks.",
+      "2": "Train at least one basic infantry unit.",
+      "3": "Open the map and locate a barbarian village.",
+      "4": "Send an attack against a barbarian village.",
+      "5": "Wait for the server to resolve the attack and generate the report.",
+      "6": "Wait for your troops to return; if they were completely defeated, the tutorial will close automatically.",
+      "7": "Tutorial completed."
+    }
+  },
   "dashboard": {
     "welcome": "Welcome, {{name}}",
     "resources": "Resources",
     "production": "Production per hour"
   },
+  "profile": {
+    "title": "User Profile",
+    "username": "Username",
+    "id": "ID",
+    "rubies": "Rubies",
+    "email": "Email",
+    "new_password": "New password (leave blank to keep current password)",
+    "language": "Language",
+    "email_notifications": "Receive email notifications",
+    "visual_theme": "Visual theme",
+    "saving": "Saving...",
+    "save_changes": "Save Changes",
+    "updated": "Profile updated successfully",
+    "update_error": "Error updating profile"
+  },
+  "town_hall": "Town Hall",
+  "barracks": "Barracks",
+  "stable": "Imperial Stables",
+  "wall": "Guard Wall",
+  "market": "Trading Square",
+  "farm": "Farmstead",
+  "warehouse": "Grand Warehouse",
+  "smithy": "War Smithy",
+  "workshop": "Siege Workshop",
+  "world_wonder": "World Wonder",
   "basic_infantry": "Spearman",
   "heavy_infantry": "Swordsman",
   "archer": "Archer",

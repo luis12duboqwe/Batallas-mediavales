@@ -1,4 +1,9 @@
 {
+  "brand": {
+    "name": "Batalla Medieval",
+    "tagline": "Estrategia en tiempo real",
+    "home_label": "Ir a la ciudad"
+  },
   "nav": {
     "city": "Ciudad",
     "buildings": "Edificios",
@@ -17,7 +22,10 @@
     "academy": "Academia",
     "admin": "Admin",
     "profile": "Perfil",
-    "logout": "Cerrar Sesión"
+    "logout": "Cerrar Sesión",
+    "navigation": "Navegación",
+    "mobile_navigation": "Navegación móvil",
+    "top_navigation": "Navegación principal"
   },
   "common": {
     "loading": "Cargando...",
@@ -26,11 +34,70 @@
     "cancel": "Cancelar",
     "confirm": "Confirmar"
   },
+  "sound": {
+    "controls": "Controles de sonido",
+    "music_on": "Música activada",
+    "music_off": "Música desactivada",
+    "sfx_on": "Efectos activados",
+    "sfx_off": "Efectos desactivados"
+  },
+  "resources": {
+    "summary": "Recursos de la ciudad",
+    "wood": "Madera",
+    "clay": "Barro",
+    "iron": "Hierro",
+    "population": "Población",
+    "wood_tip": "Producción base de madera de la ciudad",
+    "clay_tip": "Producción base de barro de la ciudad",
+    "iron_tip": "Producción base de hierro de la ciudad",
+    "population_tip": "Población utilizada y capacidad máxima para unidades"
+  },
+  "tutorial": {
+    "title": "Tutorial de inicio",
+    "progress": "Paso {{current}} de {{total}}",
+    "checking": "Comprobando progreso…",
+    "server_authoritative": "El servidor avanza este tutorial únicamente cuando confirma la acción.",
+    "steps": {
+      "0": "Únete a un mundo para recibir tu capital.",
+      "1": "Construye un cuartel de nivel 1.",
+      "2": "Entrena al menos una unidad de infantería básica.",
+      "3": "Abre el mapa y localiza una aldea bárbara.",
+      "4": "Envía un ataque contra una aldea bárbara.",
+      "5": "Espera a que el servidor resuelva el ataque y genere el informe.",
+      "6": "Espera el retorno de tus tropas; si fueron derrotadas por completo, el tutorial se cerrará automáticamente.",
+      "7": "Tutorial completado."
+    }
+  },
   "dashboard": {
     "welcome": "Bienvenido, {{name}}",
     "resources": "Recursos",
     "production": "Producción por hora"
   },
+  "profile": {
+    "title": "Perfil de Usuario",
+    "username": "Usuario",
+    "id": "ID",
+    "rubies": "Rubíes",
+    "email": "Email",
+    "new_password": "Nueva Contraseña (dejar en blanco para no cambiar)",
+    "language": "Idioma",
+    "email_notifications": "Recibir notificaciones por email",
+    "visual_theme": "Tema visual",
+    "saving": "Guardando...",
+    "save_changes": "Guardar Cambios",
+    "updated": "Perfil actualizado correctamente",
+    "update_error": "Error al actualizar perfil"
+  },
+  "town_hall": "Casa Central",
+  "barracks": "Barracas",
+  "stable": "Establos Imperiales",
+  "wall": "Muralla de Guardia",
+  "market": "Plaza Comercial",
+  "farm": "Hacienda",
+  "warehouse": "Gran Depósito",
+  "smithy": "Forja Bélica",
+  "workshop": "Taller de Asedio",
+  "world_wonder": "Maravilla del Mundo",
   "basic_infantry": "Lancero Común",
   "heavy_infantry": "Soldado de Acero",
   "archer": "Arquero Real",
