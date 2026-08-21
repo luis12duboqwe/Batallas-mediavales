@@ -61,18 +61,24 @@ python3 -m compileall -q ops
 docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config -q
 
 docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d database
-for _ in $(seq 1 30); do
+postgres_ready=0
+for _ in $(seq 1 60); do
   if docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
-    pg_isready -U batalla -d batalla_ci >/dev/null 2>&1; then
+    pg_isready -h 127.0.0.1 -U batalla -d batalla_ci >/dev/null 2>&1; then
+    postgres_ready=1
     break
   fi
   sleep 1
 done
-docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
-  pg_isready -U batalla -d batalla_ci
+if [[ "$postgres_ready" -ne 1 ]]; then
+  echo "PostgreSQL did not become ready within the recovery gate window" >&2
+  docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps >&2 || true
+  docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" logs database >&2 || true
+  exit 1
+fi
 
 docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
-  psql -U batalla -d batalla_ci -v ON_ERROR_STOP=1 -c \
+  psql -h 127.0.0.1 -U batalla -d batalla_ci -v ON_ERROR_STOP=1 -c \
   "CREATE TABLE recovery_probe (id integer primary key, marker text not null); INSERT INTO recovery_probe VALUES (1, 'before-backup');"
 
 COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" bash ops/backup_postgres.sh "$ENV_FILE"
@@ -82,13 +88,13 @@ test -s "$BACKUP_FILE"
 test -s "${BACKUP_FILE}.sha256"
 
 docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
-  psql -U batalla -d batalla_ci -v ON_ERROR_STOP=1 -c \
+  psql -h 127.0.0.1 -U batalla -d batalla_ci -v ON_ERROR_STOP=1 -c \
   "UPDATE recovery_probe SET marker='after-backup' WHERE id=1;"
 
 COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" RESTORE_START_SERVICES=0 \
   bash ops/restore_postgres.sh "$ENV_FILE" "$BACKUP_FILE" "RESTORE:batalla_ci"
 RESTORED_MARKER="$(docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
-  psql -U batalla -d batalla_ci -Atqc "SELECT marker FROM recovery_probe WHERE id=1;")"
+  psql -h 127.0.0.1 -U batalla -d batalla_ci -Atqc "SELECT marker FROM recovery_probe WHERE id=1;")"
 if [[ "$RESTORED_MARKER" != "before-backup" ]]; then
   echo "Backup/restore round trip failed: got marker '$RESTORED_MARKER'" >&2
   exit 1
@@ -126,16 +132,23 @@ ThreadingHTTPServer(("127.0.0.1", 18765), Handler).serve_forever()
 PY
 SMOKE_PID=$!
 
+smoke_ready=0
 for _ in $(seq 1 20); do
   if python3 - <<'PY' >/dev/null 2>&1
 import urllib.request
 urllib.request.urlopen('http://127.0.0.1:18765/health', timeout=1).read()
 PY
   then
+    smoke_ready=1
     break
   fi
   sleep 0.25
 done
+if [[ "$smoke_ready" -ne 1 ]]; then
+  echo "Local smoke fixture did not become ready" >&2
+  cat /tmp/bm-g5-smoke-server.log >&2 || true
+  exit 1
+fi
 
 python3 ops/smoke_http.py --base-url http://127.0.0.1:18765 --allow-http --requests 10 --max-p95-ms 750
 python3 ops/load_smoke.py --base-url http://127.0.0.1:18765 --allow-http --duration-seconds 2 --concurrency 4 --max-p95-ms 750 --max-error-rate 0
