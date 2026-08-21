@@ -1,0 +1,72 @@
+name: Staging Health
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+
+jobs:
+  smoke:
+    name: Staging smoke and latency budget
+    if: ${{ vars.STAGING_BASE_URL != '' }}
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Smoke staging
+        run: >-
+          python3 ops/smoke_http.py
+          --base-url "$STAGING_BASE_URL"
+          --requests 20
+          --max-p95-ms 750
+
+      - name: Bounded staging load probe
+        run: >-
+          python3 ops/load_smoke.py
+          --base-url "$STAGING_BASE_URL"
+          --duration-seconds 10
+          --concurrency 6
+          --max-p95-ms 750
+          --max-error-rate 0.005
+
+      - name: Notify optional alert webhook
+        if: ${{ failure() }}
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ -z "$ALERT_WEBHOOK_URL" ]]; then
+            echo "ALERT_WEBHOOK_URL is not configured; GitHub Actions failure remains the alert signal."
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          payload = json.dumps({
+              "text": f"Batalla Medieval staging health failed: {os.environ['RUN_URL']}"
+          }).encode()
+          request = urllib.request.Request(
+              os.environ["ALERT_WEBHOOK_URL"],
+              data=payload,
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=10) as response:
+              if not 200 <= response.status < 300:
+                  raise SystemExit(f"alert webhook returned HTTP {response.status}")
+          PY

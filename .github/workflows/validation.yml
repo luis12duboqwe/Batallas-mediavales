@@ -34,7 +34,7 @@ jobs:
           python -m pip install -r batalla_medieval_backend/requirements.txt
 
       - name: Compile backend
-        run: python -m compileall -q batalla_medieval_backend/app tests scripts
+        run: python -m compileall -q batalla_medieval_backend/app tests scripts ops
 
       - name: Validate migrations and canonical seed
         env:
@@ -199,7 +199,7 @@ jobs:
           cat /tmp/bm-frontend.log || true
 
   dependency-audit:
-    name: Dependency audit
+    name: Dependency and security audit
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -212,8 +212,11 @@ jobs:
 
       - name: Audit Python dependencies
         run: |
-          python -m pip install --upgrade pip pip-audit
+          python -m pip install --upgrade pip pip-audit bandit==1.9.4
           pip-audit -r batalla_medieval_backend/requirements.txt --progress-spinner=off
+
+      - name: Static security analysis
+        run: bandit -q -r batalla_medieval_backend/app -lll -iii
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -230,6 +233,21 @@ jobs:
         working-directory: batalla_medieval_frontend
         run: npm audit --audit-level=high
 
+  g5-operations:
+    name: G5 operations recovery
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Verify deployment, backup, restore and load probes
+        run: bash ops/ci_verify.sh
+
   images:
     name: Container images
     runs-on: ubuntu-latest
@@ -239,6 +257,7 @@ jobs:
       - frontend
       - browser-e2e
       - dependency-audit
+      - g5-operations
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
