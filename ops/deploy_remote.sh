@@ -50,10 +50,19 @@ from pathlib import Path
 sys.path.insert(0, 'ops')
 from preflight import read_env
 values = read_env(Path(sys.argv[1]))
-for key in ('POSTGRES_USER', 'POSTGRES_DB', 'BACKUP_DIR', 'PUBLIC_BASE_URL'):
-    print(f'{key}={shlex.quote(values[key])}')
+for key in (
+    'POSTGRES_USER', 'POSTGRES_DB', 'BACKUP_DIR', 'PUBLIC_BASE_URL',
+    'LOAD_DURATION_SECONDS', 'LOAD_CONCURRENCY', 'MAX_P95_MS', 'MAX_ERROR_RATE'
+):
+    value = values.get(key, '')
+    print(f'{key}={shlex.quote(value)}')
 PY
 )"
+
+LOAD_DURATION_SECONDS="${LOAD_DURATION_SECONDS:-15}"
+LOAD_CONCURRENCY="${LOAD_CONCURRENCY:-8}"
+MAX_P95_MS="${MAX_P95_MS:-750}"
+MAX_ERROR_RATE="${MAX_ERROR_RATE:-0.005}"
 
 previous_release_sha=""
 had_previous=0
@@ -121,7 +130,18 @@ echo "Applying migrations and starting release ${RELEASE_SHA}"
 docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" up -d --remove-orphans
 
 echo "Running post-deploy smoke against ${PUBLIC_BASE_URL}"
-python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-ms 750
+python3 ops/smoke_http.py \
+  --base-url "$PUBLIC_BASE_URL" \
+  --requests 20 \
+  --max-p95-ms "$MAX_P95_MS"
+
+echo "Running bounded post-deploy load probe"
+python3 ops/load_smoke.py \
+  --base-url "$PUBLIC_BASE_URL" \
+  --duration-seconds "$LOAD_DURATION_SECONDS" \
+  --concurrency "$LOAD_CONCURRENCY" \
+  --max-p95-ms "$MAX_P95_MS" \
+  --max-error-rate "$MAX_ERROR_RATE"
 
 trap - ERR
 cp "$CURRENT_ENV" "$RELEASES_DIR/${RELEASE_SHA}.env"
