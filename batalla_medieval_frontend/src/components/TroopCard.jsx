@@ -1,14 +1,18 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { formatNumber } from '../utils/format';
 import Timer from './Timer';
 
 const TroopCard = ({ troop, onTrain }) => {
+  const { t } = useTranslation();
   const [amount, setAmount] = useState(1);
   const [submitting, setSubmitting] = useState(false);
 
   const researched = Boolean(troop.researched);
   const requirementsMet = Boolean(troop.training_requirements_met);
   const canSubmit = researched && requirementsMet && Number(amount) > 0 && !submitting;
+  const displayName = t(troop.unit_type);
+  const inputId = `train-${troop.unit_type}-amount`;
 
   const handleTrain = async () => {
     if (!canSubmit) return;
@@ -21,34 +25,38 @@ const TroopCard = ({ troop, onTrain }) => {
   };
 
   const requirementText = Object.entries(troop.training_requirements || {})
-    .map(([name, level]) => `${name} Nv. ${level}`)
+    .map(([name, level]) => `${t(name)} Nv. ${level}`)
     .join(', ');
 
   return (
-    <div className="card p-5 flex flex-col gap-4 relative overflow-hidden group transition hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(0,0,0,0.45)]">
+    <article className="card p-5 flex flex-col gap-4 relative overflow-hidden group transition hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(0,0,0,0.45)]">
       <div className="absolute inset-0 bg-gradient-to-br from-amber-400/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition" />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-lg bg-gray-800/80 border border-yellow-800/40 flex items-center justify-center text-xl">⚔️</div>
-          <div>
-            <h3 className="text-lg leading-none">{troop.unit_type}</h3>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="h-11 w-11 shrink-0 rounded-lg bg-gray-800/80 border border-yellow-800/40 flex items-center justify-center text-xl" aria-hidden>⚔️</div>
+          <div className="min-w-0">
+            <h3 className="text-lg leading-none break-words">{displayName}</h3>
             <p className="text-xs text-gray-400">Entrena unidades</p>
           </div>
         </div>
         {troop.trainingEnds && <Timer endTime={troop.trainingEnds} />}
       </div>
 
-      <div className="text-sm text-gray-400 flex items-center justify-between gap-3 flex-wrap">
-        <span className="tooltip" data-tip="Coste por unidad">
-          🪵 {formatNumber(troop.training_cost?.wood || 0)} | 🧱 {formatNumber(troop.training_cost?.clay || 0)} | ⛓️ {formatNumber(troop.training_cost?.iron || 0)}
+      <div className="text-sm text-gray-300 flex items-center justify-between gap-3 flex-wrap">
+        <span>
+          🪵 {formatNumber(troop.training_cost?.wood ?? 0)} · 🧱 {formatNumber(troop.training_cost?.clay ?? 0)} · ⛓️ {formatNumber(troop.training_cost?.iron ?? 0)}
         </span>
         <span className="text-yellow-200 text-xs">
           Tiempo/unidad: {troop.training_time_seconds}s
         </span>
       </div>
 
+      <div className="text-xs text-gray-300">
+        Población: {troop.population_cost} por unidad · Disponible: {troop.population_available}
+      </div>
+
       {!researched && (
-        <div className="text-red-400 text-sm font-bold text-center border border-red-400/30 rounded p-2 bg-red-400/10">
+        <div className="text-red-300 text-sm font-bold text-center border border-red-400/30 rounded p-2 bg-red-400/10">
           🔒 Requiere investigación
         </div>
       )}
@@ -57,21 +65,32 @@ const TroopCard = ({ troop, onTrain }) => {
           Requisitos: {requirementText || 'No disponibles'}
         </div>
       )}
+      {researched && requirementsMet && !troop.population_capacity_met && (
+        <div className="text-amber-300 text-xs border border-amber-500/30 rounded p-2 bg-amber-500/10">
+          No hay población disponible para entrenar esta unidad.
+        </div>
+      )}
 
-      <div className="flex items-center gap-2">
-        <input
-          type="number"
-          min="1"
-          step="1"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          disabled={!researched || !requirementsMet || submitting}
-          className="input w-24"
-        />
+      <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+        <div className="flex-1">
+          <label htmlFor={inputId} className="block text-xs text-gray-300 mb-1">Cantidad de {displayName}</label>
+          <input
+            id={inputId}
+            type="number"
+            min="1"
+            step="1"
+            inputMode="numeric"
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+            disabled={!researched || !requirementsMet || submitting}
+            className="input w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
+          />
+        </div>
         <button
+          type="button"
           onClick={handleTrain}
           disabled={!canSubmit}
-          className={`btn-primary recruit-btn-${troop.unit_type} disabled:opacity-50 disabled:cursor-not-allowed`}
+          className={`btn-primary recruit-btn-${troop.unit_type} sm:min-w-28 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-200 disabled:opacity-50 disabled:cursor-not-allowed`}
         >
           {submitting ? 'Enviando…' : 'Entrenar'}
         </button>
@@ -83,7 +102,7 @@ const TroopCard = ({ troop, onTrain }) => {
           {requirementText || 'Sin requisitos de edificio'}
         </span>
       </div>
-    </div>
+    </article>
   );
 };
 
