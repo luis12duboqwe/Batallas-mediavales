@@ -2,8 +2,24 @@ import { create } from 'zustand';
 import { api } from '../api/axiosClient';
 import soundManager from '../services/sound';
 
+const movementCategory = (movement, ownedCityIds) => {
+  const direction = ownedCityIds.has(movement.origin_city_id) ? 'out' : 'in';
+  switch (movement.movement_type) {
+    case 'attack':
+    case 'spy':
+    case 'reinforce':
+    case 'transport':
+      return `${movement.movement_type}_${direction}`;
+    case 'return':
+      return 'return';
+    default:
+      return movement.movement_type || 'other';
+  }
+};
+
 export const useCityStore = create((set, get) => ({
   currentCity: null,
+  cities: [],
   resources: { wood: 0, clay: 0, iron: 0, population: 0, populationMax: 0 },
   storageLimit: 0,
   buildings: [],
@@ -16,7 +32,8 @@ export const useCityStore = create((set, get) => ({
   async loadCity() {
     const { data } = await api.getCity();
     set({
-      currentCity: { id: data.city_id, ...data.city },
+      currentCity: data.city ? { ...data.city } : null,
+      cities: data.cities || [],
       resources: data.resources,
       storageLimit: data.storage_limit ?? 0,
       buildings: data.buildings,
@@ -101,9 +118,11 @@ export const useCityStore = create((set, get) => ({
     );
     const { data } = await api.getMovements({ worldId: city.world_id });
     const rawList = Array.isArray(data) ? data : data.movements || [];
+    const ownedCityIds = new Set((get().cities || []).map((ownedCity) => ownedCity.id));
     const movementList = rawList.map((movement) => ({
-      category: movement.category || (movement.movement_type === 'attack' ? 'attack_out' : movement.movement_type),
       ...movement,
+      direction: ownedCityIds.has(movement.origin_city_id) ? 'out' : 'in',
+      category: movementCategory(movement, ownedCityIds),
     }));
     set({ movements: movementList });
     const hasNewAttackIncoming = movementList.some(
@@ -112,7 +131,7 @@ export const useCityStore = create((set, get) => ({
     if (hasNewAttackIncoming) {
       soundManager.playSFX('attack_incoming');
     }
-    return data;
+    return { movements: movementList };
   },
   async loadReports() {
     const city = get().currentCity;
