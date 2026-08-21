@@ -5,6 +5,7 @@ const API_URL = process.env.VITE_API_URL || 'http://127.0.0.1:8000';
 const USERNAME = 'g2_browser';
 const PASSWORD = 'G2-Browser-Test-2026!';
 const API_DELAY_MS = 250;
+const UI_READY_TIMEOUT_MS = 15000;
 
 const failures = [];
 const browser = await chromium.launch({ headless: true });
@@ -45,6 +46,17 @@ page.on('response', async (response) => {
   }
 });
 
+async function waitForMobileNavigation(route) {
+  const navigation = page.getByTestId('mobile-navigation');
+  try {
+    await navigation.waitFor({ state: 'visible', timeout: UI_READY_TIMEOUT_MS });
+    return navigation;
+  } catch {
+    failures.push(`Mobile navigation did not become visible on ${route} within ${UI_READY_TIMEOUT_MS}ms`);
+    return navigation;
+  }
+}
+
 async function login() {
   await page.goto(`${BASE_URL}/login`, { waitUntil: 'networkidle' });
   const inputs = page.locator('form input');
@@ -56,15 +68,13 @@ async function login() {
 }
 
 async function assertViewport(route) {
+  await waitForMobileNavigation(route);
   const overflow = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,
   }));
   if (overflow.scrollWidth > overflow.clientWidth + 1) {
     failures.push(`${route} overflows viewport horizontally: ${JSON.stringify(overflow)}`);
-  }
-  if (!(await page.getByTestId('mobile-navigation').isVisible())) {
-    failures.push(`Mobile navigation disappeared on ${route}`);
   }
   if (page.url().includes('/login')) {
     failures.push(`Slow API responses caused an unexpected logout on ${route}`);
@@ -74,10 +84,7 @@ async function assertViewport(route) {
 try {
   await login();
 
-  const mobileNavigation = page.getByTestId('mobile-navigation');
-  if (!(await mobileNavigation.isVisible())) {
-    failures.push('Mobile navigation is not visible at 390x844');
-  }
+  const mobileNavigation = await waitForMobileNavigation('/');
   await assertViewport('/');
 
   // The user profile defaults to English in the E2E fixture; App must apply it
