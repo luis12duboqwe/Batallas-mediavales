@@ -55,6 +55,11 @@ def validate_https_url(name: str, value: str, errors: list[str]) -> None:
         errors.append(f"{name} must be an absolute https:// URL")
 
 
+def validate_email(name: str, value: str, errors: list[str]) -> None:
+    if "@" not in value or value.startswith("@") or value.endswith("@"):
+        errors.append(f"{name} must be a valid email address")
+
+
 def validate_image(name: str, value: str, errors: list[str]) -> None:
     if not value:
         return
@@ -120,8 +125,12 @@ def validate(values: dict[str, str]) -> list[str]:
 
     require(values, "SMTP_HOST", errors)
     from_email = require(values, "FROM_EMAIL", errors)
-    if from_email and "@" not in from_email:
-        errors.append("FROM_EMAIL must be a valid email address")
+    if from_email:
+        validate_email("FROM_EMAIL", from_email, errors)
+
+    support_contact = require(values, "SUPPORT_CONTACT", errors)
+    if support_contact:
+        validate_email("SUPPORT_CONTACT", support_contact, errors)
 
     backend_image = require(values, "BACKEND_IMAGE", errors)
     frontend_image = require(values, "FRONTEND_IMAGE", errors)
