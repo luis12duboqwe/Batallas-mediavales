@@ -121,6 +121,12 @@ export const api = {
     }
 
     const productionBalance = balanceResult?.production ?? {};
+    const buildingCatalog = balanceResult?.buildings?.catalog ?? {};
+    const rawBuildings = availableBuildings.length > 0 ? availableBuildings : (activeCity?.buildings ?? []);
+    const decoratedBuildings = rawBuildings.map((building) => ({
+      ...building,
+      display_name: buildingCatalog[building.name]?.display_name ?? building.name,
+    }));
 
     return {
       data: {
@@ -129,7 +135,7 @@ export const api = {
         city: activeCity,
         resources: statusData ? statusData : buildResourceSnapshot(activeCity),
         storage_limit: statusData?.storage_limit ?? productionBalance.storage_base_capacity ?? null,
-        buildings: availableBuildings.length > 0 ? availableBuildings : (activeCity?.buildings ?? []),
+        buildings: decoratedBuildings,
         production: statusData?.production_per_hour ?? productionBalance.base_rates_per_hour ?? {},
         balance: balanceResult,
         balance_version: balanceResult?.version ?? null,
