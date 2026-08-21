@@ -68,6 +68,21 @@ def validate_image(name: str, value: str, errors: list[str]) -> None:
         errors.append(f"{name} must include an explicit immutable tag or digest")
 
 
+def validate_positive_number(
+    values: dict[str, str], key: str, default: str, errors: list[str]
+) -> float | None:
+    raw = values.get(key, default).strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        errors.append(f"{key} must be numeric")
+        return None
+    if value <= 0:
+        errors.append(f"{key} must be positive")
+        return None
+    return value
+
+
 def validate(values: dict[str, str]) -> list[str]:
     errors: list[str] = []
 
@@ -124,6 +139,30 @@ def validate(values: dict[str, str]) -> list[str]:
                 raise ValueError
         except ValueError:
             errors.append("BACKUP_RETENTION_DAYS must be a positive integer")
+
+    load_duration = validate_positive_number(
+        values, "LOAD_DURATION_SECONDS", "15", errors
+    )
+    load_concurrency = validate_positive_number(
+        values, "LOAD_CONCURRENCY", "8", errors
+    )
+    max_p95 = validate_positive_number(values, "MAX_P95_MS", "750", errors)
+    max_error_raw = values.get("MAX_ERROR_RATE", "0.005").strip()
+    try:
+        max_error_rate = float(max_error_raw)
+        if not 0 <= max_error_rate <= 1:
+            raise ValueError
+    except ValueError:
+        errors.append("MAX_ERROR_RATE must be between 0 and 1")
+
+    if load_duration is not None and load_duration > 3600:
+        errors.append("LOAD_DURATION_SECONDS cannot exceed 3600")
+    if load_concurrency is not None and (
+        load_concurrency < 1 or not load_concurrency.is_integer()
+    ):
+        errors.append("LOAD_CONCURRENCY must be a positive integer")
+    if max_p95 is not None and max_p95 > 10000:
+        errors.append("MAX_P95_MS cannot exceed 10000")
 
     return errors
 
