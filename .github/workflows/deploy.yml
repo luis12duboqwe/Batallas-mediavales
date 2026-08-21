@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Target environment (production or staging)"
+        description: "Target protected environment"
         required: true
         default: staging
+        type: choice
+        options:
+          - staging
+          - production
 
 permissions:
   contents: read
@@ -16,15 +20,22 @@ env:
   REGISTRY: ghcr.io
   BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/batalla-medieval-backend
   FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/batalla-medieval-frontend
-  DEPLOY_ENV: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+  DEPLOY_ENV: ${{ inputs.environment }}
   DOCKER_BUILDKIT: 1
 
 jobs:
   deploy:
+    name: Deploy immutable release
     runs-on: ubuntu-latest
     environment:
-      name: ${{ env.DEPLOY_ENV }}
+      name: ${{ inputs.environment }}
     steps:
+      - name: Refuse production deploys outside main
+        if: ${{ inputs.environment == 'production' && github.ref != 'refs/heads/main' }}
+        run: |
+          echo "Production deployments must be dispatched from main" >&2
+          exit 1
+
       - name: Checkout repository
         uses: actions/checkout@v7
 
@@ -36,24 +47,24 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          password: ${{ secrets.REGISTRY_PASSWORD || github.token }}
 
-      - name: Build and push backend image
+      - name: Build and push immutable backend image
         run: |
-          docker build -t $BACKEND_IMAGE:${{ github.sha }} -f batalla_medieval_backend/Dockerfile batalla_medieval_backend
-          docker push $BACKEND_IMAGE:${{ github.sha }}
-          docker tag $BACKEND_IMAGE:${{ github.sha }} $BACKEND_IMAGE:latest
-          docker push $BACKEND_IMAGE:latest
+          docker build -t "$BACKEND_IMAGE:${{ github.sha }}" -f batalla_medieval_backend/Dockerfile batalla_medieval_backend
+          docker push "$BACKEND_IMAGE:${{ github.sha }}"
 
-      - name: Build and push frontend image
+      - name: Build and push immutable frontend image
         run: |
-          docker build -t $FRONTEND_IMAGE:${{ github.sha }} -f batalla_medieval_frontend/Dockerfile batalla_medieval_frontend
-          docker push $FRONTEND_IMAGE:${{ github.sha }}
-          docker tag $FRONTEND_IMAGE:${{ github.sha }} $FRONTEND_IMAGE:latest
-          docker push $FRONTEND_IMAGE:latest
+          docker build -t "$FRONTEND_IMAGE:${{ github.sha }}" -f batalla_medieval_frontend/Dockerfile batalla_medieval_frontend
+          docker push "$FRONTEND_IMAGE:${{ github.sha }}"
 
-      - name: Deploy via SSH
-        if: ${{ success() }}
+      - name: Validate deployment bundle syntax
+        run: |
+          python3 -m compileall -q ops
+          for script in ops/*.sh; do bash -n "$script"; done
+
+      - name: Create remote application directory
         uses: appleboy/ssh-action@v0.1.10
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -62,10 +73,42 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
-            mkdir -p ${{ secrets.REMOTE_APP_DIR }}
-            cd ${{ secrets.REMOTE_APP_DIR }}
-            echo "${{ secrets.ENV_FILE }}" > .env
-            docker login ${{ env.REGISTRY }} -u ${{ secrets.REGISTRY_USERNAME || github.actor }} -p ${{ secrets.REGISTRY_PASSWORD }}
-            docker compose pull
-            docker compose up -d --remove-orphans
-            docker system prune -f
+            mkdir -p "${{ secrets.REMOTE_APP_DIR }}"
+            chmod 700 "${{ secrets.REMOTE_APP_DIR }}"
+
+      - name: Upload versioned deployment bundle
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.deploy.yml,nginx.conf,ops"
+          target: ${{ secrets.REMOTE_APP_DIR }}
+          overwrite: true
+
+      - name: Deploy with preflight, backup and automatic rollback
+        uses: appleboy/ssh-action@v0.1.10
+        env:
+          BASE_ENV_B64: ${{ secrets.ENV_FILE_BASE64 }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD || github.token }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: BASE_ENV_B64,REGISTRY_USERNAME,REGISTRY_PASSWORD
+          script: |
+            set -euo pipefail
+            umask 077
+            cd "${{ secrets.REMOTE_APP_DIR }}"
+            test -n "$BASE_ENV_B64"
+            printf '%s' "$BASE_ENV_B64" | base64 -d > .env.base
+            printf '%s' "$REGISTRY_PASSWORD" | docker login "${{ env.REGISTRY }}" -u "$REGISTRY_USERNAME" --password-stdin
+            bash ops/deploy_remote.sh \
+              .env.base \
+              "${{ github.sha }}" \
+              "${{ env.BACKEND_IMAGE }}" \
+              "${{ env.FRONTEND_IMAGE }}"
+            docker image prune -f
