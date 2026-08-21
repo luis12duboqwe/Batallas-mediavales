@@ -5,12 +5,17 @@ ENV_FILE="${1:-.env}"
 BACKUP_FILE="${2:-}"
 CONFIRMATION="${3:-}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.deploy.yml}"
+RESTORE_START_SERVICES="${RESTORE_START_SERVICES:-1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_DIR"
 
 if [[ -z "$BACKUP_FILE" ]]; then
   echo "Usage: $0 <env-file> <backup.dump> RESTORE:<database>" >&2
+  exit 2
+fi
+if [[ "$RESTORE_START_SERVICES" != "0" && "$RESTORE_START_SERVICES" != "1" ]]; then
+  echo "RESTORE_START_SERVICES must be 0 or 1" >&2
   exit 2
 fi
 
@@ -58,7 +63,10 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
   pg_restore --clean --if-exists --create --no-owner --no-privileges --exit-on-error \
   -U "$POSTGRES_USER" -d postgres < "$BACKUP_FILE"
 
-echo "Starting services and applying the selected release migration"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx
-
-echo "Restore completed. Run ops/smoke_http.py against PUBLIC_BASE_URL before ending maintenance."
+if [[ "$RESTORE_START_SERVICES" == "1" ]]; then
+  echo "Starting services and applying the selected release migration"
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx
+  echo "Restore completed. Run ops/smoke_http.py against PUBLIC_BASE_URL before ending maintenance."
+else
+  echo "Database-only restore verification completed; application services remain stopped."
+fi
