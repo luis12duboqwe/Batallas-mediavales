@@ -18,6 +18,22 @@ def _headers(user: models.User) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _assert_paid_from_starting_balance(
+    city: models.City,
+    *,
+    starting: dict[str, float],
+    costs: list[dict[str, float]],
+) -> None:
+    """Allow only the tiny server-authoritative production accrued in CI."""
+
+    for resource in balance.RESOURCE_FIELDS:
+        expected_after_costs = starting[resource] - sum(cost[resource] for cost in costs)
+        actual = float(getattr(city, resource))
+        assert actual >= expected_after_costs
+        assert actual < expected_after_costs + 1.0
+        assert actual >= 0
+
+
 def test_seeded_first_session_completes_without_admin_or_extra_resources(
     client, db_session, user, monkeypatch
 ):
@@ -60,9 +76,11 @@ def test_seeded_first_session_completes_without_admin_or_extra_resources(
 
     db_session.expire_all()
     city = db_session.query(models.City).filter_by(id=city.id).one()
-    for resource in balance.RESOURCE_FIELDS:
-        assert float(getattr(city, resource)) == starting[resource] - barracks_cost[resource]
-        assert float(getattr(city, resource)) >= 0
+    _assert_paid_from_starting_balance(
+        city,
+        starting=starting,
+        costs=[barracks_cost],
+    )
 
     building_queue = db_session.query(models.BuildingQueue).filter_by(id=upgrade.json()["id"]).one()
     building_queue.finish_time = utc_now() - timedelta(seconds=1)
@@ -80,10 +98,11 @@ def test_seeded_first_session_completes_without_admin_or_extra_resources(
 
     db_session.expire_all()
     city = db_session.query(models.City).filter_by(id=city.id).one()
-    for resource in balance.RESOURCE_FIELDS:
-        expected = starting[resource] - barracks_cost[resource] - infantry_cost[resource]
-        assert float(getattr(city, resource)) == expected
-        assert float(getattr(city, resource)) >= 0
+    _assert_paid_from_starting_balance(
+        city,
+        starting=starting,
+        costs=[barracks_cost, infantry_cost],
+    )
 
     troop_queue = db_session.query(models.TroopQueue).filter_by(id=train.json()["id"]).one()
     troop_queue.finish_time = utc_now() - timedelta(seconds=1)
