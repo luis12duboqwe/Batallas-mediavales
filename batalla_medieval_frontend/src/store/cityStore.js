@@ -44,22 +44,12 @@ export const useCityStore = create((set, get) => ({
       buildingType,
       worldId: city.world_id,
     });
-    set((state) => ({
-      queues: {
-        ...state.queues,
-        buildings: [...(state.queues.buildings || []), data],
-      },
-    }));
+    await get().loadCity();
     return data;
   },
   async cancelBuilding(queueId) {
     await api.cancelBuildingQueue(queueId);
-    set((state) => ({
-      queues: {
-        ...state.queues,
-        buildings: state.queues.buildings.filter((q) => q.id !== queueId),
-      },
-    }));
+    await get().loadCity();
   },
   async train({ troopType, amount }) {
     const city = get().currentCity;
@@ -70,22 +60,12 @@ export const useCityStore = create((set, get) => ({
       amount,
       worldId: city.world_id,
     });
-    set((state) => ({
-      queues: {
-        ...state.queues,
-        troops: [...(state.queues.troops || []), data],
-      },
-    }));
+    await get().loadCity();
     return data;
   },
   async cancelTroop(queueId) {
     await api.cancelTroopQueue(queueId);
-    set((state) => ({
-      queues: {
-        ...state.queues,
-        troops: state.queues.troops.filter((q) => q.id !== queueId),
-      },
-    }));
+    await get().loadCity();
   },
   async sendMovement({ targetCityId, targetOasisId, movementType, troops, spyCount = 0, targetBuilding = null }) {
     const city = get().currentCity;
@@ -106,6 +86,7 @@ export const useCityStore = create((set, get) => ({
     }
 
     const { data } = await api.sendMovement(payload);
+    await get().loadCity();
     return data;
   },
   setMovements(movements) {
