@@ -55,6 +55,22 @@ async function login() {
   await page.waitForLoadState('networkidle');
 }
 
+async function assertViewport(route) {
+  const overflow = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  if (overflow.scrollWidth > overflow.clientWidth + 1) {
+    failures.push(`${route} overflows viewport horizontally: ${JSON.stringify(overflow)}`);
+  }
+  if (!(await page.getByTestId('mobile-navigation').isVisible())) {
+    failures.push(`Mobile navigation disappeared on ${route}`);
+  }
+  if (page.url().includes('/login')) {
+    failures.push(`Slow API responses caused an unexpected logout on ${route}`);
+  }
+}
+
 try {
   await login();
 
@@ -62,14 +78,7 @@ try {
   if (!(await mobileNavigation.isVisible())) {
     failures.push('Mobile navigation is not visible at 390x844');
   }
-
-  const overflow = await page.evaluate(() => ({
-    scrollWidth: document.documentElement.scrollWidth,
-    clientWidth: document.documentElement.clientWidth,
-  }));
-  if (overflow.scrollWidth > overflow.clientWidth + 1) {
-    failures.push(`Page overflows viewport horizontally: ${JSON.stringify(overflow)}`);
-  }
+  await assertViewport('/');
 
   // The user profile defaults to English in the E2E fixture; App must apply it
   // after the authenticated profile is loaded instead of leaving detector text.
@@ -89,24 +98,37 @@ try {
   if (!focused) failures.push('Mobile navigation link could not receive keyboard focus');
   await page.keyboard.press('Enter');
   await page.waitForURL(`${BASE_URL}/map`, { timeout: 15000 });
-
-  // All API calls are delayed by 250 ms in this test. Opening another data-heavy
-  // route proves the visible shell remains functional under slow responses.
-  await mobileNavigation.getByRole('link', { name: 'Buildings' }).click();
-  await page.waitForURL(`${BASE_URL}/buildings`, { timeout: 15000 });
   await page.waitForLoadState('networkidle');
-  if (page.url().includes('/login')) {
-    failures.push('Slow API responses caused an unexpected logout');
+  await assertViewport('/map');
+
+  // Every visible MVP route must remain usable while API responses are delayed.
+  // This turns mobile/latency regressions and hidden 4xx/5xx calls into a CI gate.
+  const visibleRoutes = [
+    '/buildings',
+    '/academy',
+    '/troops',
+    '/map',
+    '/movements',
+    '/reports',
+    '/market',
+    '/ranking',
+    '/alliance',
+    '/messages',
+  ];
+  for (const route of visibleRoutes) {
+    await page.goto(`${BASE_URL}${route}`, { waitUntil: 'networkidle' });
+    await assertViewport(route);
   }
 
   await page.goto(`${BASE_URL}/profile`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'User Profile' }).waitFor();
+  await assertViewport('/profile');
 
   const languageSelect = page.getByLabel('Language');
   await languageSelect.selectOption('es');
   await page.getByRole('button', { name: 'Save Changes' }).click();
   await page.getByRole('heading', { name: 'Perfil de Usuario' }).waitFor();
-  if (!(await mobileNavigation.getByRole('link', { name: 'Ciudad' }).isVisible())) {
+  if (!(await page.getByTestId('mobile-navigation').getByRole('link', { name: 'Ciudad' }).isVisible())) {
     failures.push('Spanish language change did not update visible navigation');
   }
 
@@ -115,6 +137,7 @@ try {
   if (!(await page.getByLabel('Idioma').isVisible())) {
     failures.push('Saved Spanish language did not persist after reload');
   }
+  await assertViewport('/profile?language=es');
 
   // Restore the deterministic fixture preference while also proving reverse
   // switching works without a new login.
@@ -126,7 +149,7 @@ try {
     throw new Error(failures.join('\n'));
   }
 
-  console.log(`G4 UX smoke passed: 390x844 mobile navigation, keyboard focus, ${API_DELAY_MS}ms API delay and persisted es/en switching`);
+  console.log(`G4 UX smoke passed: all visible routes at 390x844, keyboard focus, ${API_DELAY_MS}ms API delay and persisted es/en switching`);
 } finally {
   await browser.close();
 }
