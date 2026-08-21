@@ -74,7 +74,7 @@ if [[ -n "$ROLLBACK_BACKUP" ]]; then
     echo "Rollback refused: database snapshot missing: $ROLLBACK_BACKUP" >&2
     exit 2
   fi
-  ops/restore_postgres.sh .release.env "$ROLLBACK_BACKUP" "RESTORE:${POSTGRES_DB}"
+  bash ops/restore_postgres.sh .release.env "$ROLLBACK_BACKUP" "RESTORE:${POSTGRES_DB}"
 else
   echo "No database snapshot was associated with this deployment; rolling back application images only"
   docker compose --env-file .release.env -f "$COMPOSE_FILE" pull backend worker frontend
