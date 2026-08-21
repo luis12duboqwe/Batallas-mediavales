@@ -37,6 +37,7 @@ SMTP_USERNAME=
 SMTP_PASSWORD=
 SMTP_USE_STARTTLS=true
 FROM_EMAIL=no-reply@example.invalid
+SUPPORT_CONTACT=support@example.invalid
 BACKEND_IMAGE=example.invalid/batalla-backend:0123456789abcdef0123456789abcdef01234567
 FRONTEND_IMAGE=example.invalid/batalla-frontend:0123456789abcdef0123456789abcdef01234567
 BACKUP_DIR=/tmp/bm-g5-backups
