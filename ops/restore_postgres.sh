@@ -64,8 +64,8 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
   -U "$POSTGRES_USER" -d postgres < "$BACKUP_FILE"
 
 if [[ "$RESTORE_START_SERVICES" == "1" ]]; then
-  echo "Starting services and applying the selected release migration"
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx
+  echo "Starting selected release, migration chain and HTTPS edge"
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy
   echo "Restore completed. Run ops/smoke_http.py against PUBLIC_BASE_URL before ending maintenance."
 else
   echo "Database-only restore verification completed; application services remain stopped."
