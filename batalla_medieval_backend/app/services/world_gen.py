@@ -3,6 +3,7 @@ import random
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import balance
 
 
 def create_world(db: Session, name: str, speed: float = 1.0) -> models.World:
@@ -41,6 +42,7 @@ def create_world(db: Session, name: str, speed: float = 1.0) -> models.World:
             continue
 
         occupied.add(coord)
+        resources = balance.BARBARIAN_STARTING_RESOURCES
         db.add(
             models.City(
                 name="Aldea Bárbara",
@@ -48,9 +50,10 @@ def create_world(db: Session, name: str, speed: float = 1.0) -> models.World:
                 x=x,
                 y=y,
                 owner_id=None,
-                wood=1000,
-                clay=1000,
-                iron=1000,
+                wood=resources["wood"],
+                stone=resources["stone"],
+                iron=resources["iron"],
+                gold=resources["gold"],
                 tile_type=get_tile_type(x, y),
             )
         )
@@ -73,7 +76,7 @@ def create_world(db: Session, name: str, speed: float = 1.0) -> models.World:
                 world_id=world.id,
                 x=x,
                 y=y,
-                resource_type=rng.choice(["wood", "clay", "iron", "crop"]),
+                resource_type=rng.choice(list(balance.RESOURCE_FIELDS)),
                 bonus_percent=25 if rng.random() > 0.2 else 50,
                 troops={
                     "rat": rng.randint(5, 15),
