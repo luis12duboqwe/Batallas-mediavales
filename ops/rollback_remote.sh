@@ -78,7 +78,7 @@ if [[ -n "$ROLLBACK_BACKUP" ]]; then
 else
   echo "No database snapshot was associated with this deployment; rolling back application images only"
   docker compose --env-file .release.env -f "$COMPOSE_FILE" pull backend worker frontend
-  docker compose --env-file .release.env -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx
+  docker compose --env-file .release.env -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy
 fi
 
 python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-ms 750

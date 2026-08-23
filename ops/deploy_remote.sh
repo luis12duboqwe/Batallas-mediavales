@@ -94,7 +94,7 @@ rollback() {
     else
       echo "No database snapshot was created; restoring previous application images only" >&2
       docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" pull backend worker frontend || true
-      docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx || true
+      docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy || true
     fi
     if [[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]; then
       echo "$previous_release_sha" > .release-sha
@@ -123,11 +123,35 @@ else
   echo "No existing application schema; treating this as first deployment"
 fi
 
-echo "Pulling immutable release images"
-docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" pull migrate seed backend worker frontend nginx
+echo "Pulling immutable release images and pinned edge images"
+docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" pull migrate seed backend worker frontend nginx caddy
 
 echo "Applying migrations and starting release ${RELEASE_SHA}"
 docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" up -d --remove-orphans
+
+echo "Waiting for HTTPS edge and certificate readiness at ${PUBLIC_BASE_URL}"
+edge_ready=0
+for _ in $(seq 1 60); do
+  if python3 - "$PUBLIC_BASE_URL" <<'PY' >/dev/null 2>&1
+import sys
+import urllib.request
+base = sys.argv[1].rstrip('/')
+with urllib.request.urlopen(base + '/health', timeout=3) as response:
+    if response.status != 200:
+        raise SystemExit(1)
+PY
+  then
+    edge_ready=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$edge_ready" -ne 1 ]]; then
+  echo "HTTPS edge did not become ready within 120 seconds" >&2
+  docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" ps >&2 || true
+  docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" logs --tail=200 caddy nginx backend >&2 || true
+  exit 1
+fi
 
 echo "Running post-deploy smoke against ${PUBLIC_BASE_URL}"
 python3 ops/smoke_http.py \

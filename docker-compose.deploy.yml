@@ -122,8 +122,6 @@ services:
   nginx:
     image: nginx:1.28-alpine
     restart: unless-stopped
-    ports:
-      - "${HTTP_PORT:-80}:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -133,8 +131,28 @@ services:
         condition: service_healthy
     networks: [web]
 
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?Set PUBLIC_HOST}
+      TLS_EMAIL: ${TLS_EMAIL:?Set TLS_EMAIL}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - nginx
+    networks: [web]
+
 volumes:
   postgres-data:
+  caddy-data:
+  caddy-config:
 
 networks:
   web:
