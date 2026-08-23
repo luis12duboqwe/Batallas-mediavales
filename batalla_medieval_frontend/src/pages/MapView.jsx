@@ -64,7 +64,7 @@ const MapView = () => {
   const renderTile = (tile) => {
     const isCenter = tile.x === center.x && tile.y === center.y;
     const isSelected = selectedTile && selectedTile.x === tile.x && selectedTile.y === tile.y;
-    const isMine = currentCity && tile.city_id === currentCity.id;
+    const isMine = Boolean(user?.id && tile.owner_id === user.id);
     const isOasis = !!tile.oasis_id;
     let content = null;
 
@@ -110,6 +110,7 @@ const MapView = () => {
     ? OASIS_RESOURCE_META[selectedTile.resource_type]
     : null;
   const selectedSettlementLabel = selectedTile?.settlement_type === 'camp' ? 'Campamento' : 'Ciudad';
+  const selectedSettlementIsMine = Boolean(user?.id && selectedTile?.owner_id === user.id);
 
   return (
     <div className="p-4 h-full flex flex-col">
@@ -169,8 +170,13 @@ const MapView = () => {
                       <div className="font-bold text-blue-400">[{selectedTile.alliance_name}]</div>
                     </div>
                   )}
+                  {selectedSettlementIsMine && (
+                    <div className="rounded border border-blue-700/50 bg-blue-950/30 p-2 text-xs text-blue-200">
+                      Este asentamiento te pertenece.
+                    </div>
+                  )}
                   <div className="divider" />
-                  {currentCity && selectedTile.city_id !== currentCity.id && (
+                  {currentCity && !selectedSettlementIsMine && (
                     <div className="grid grid-cols-2 gap-2">
                       <button className="btn btn-sm btn-error w-full" onClick={() => navigate(`/send-movement/${selectedTile.city_id}`)}>Atacar</button>
                       <button className="btn btn-sm btn-info w-full">Espiar</button>
