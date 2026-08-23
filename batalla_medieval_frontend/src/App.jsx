@@ -20,6 +20,7 @@ import ProfileView from './pages/ProfileView';
 import AdminPanel from './pages/AdminPanel';
 import MarketView from './pages/MarketView';
 import AcademyView from './pages/AcademyView';
+import ExpansionView from './pages/ExpansionView';
 import SendMovementView from './pages/SendMovementView';
 import TutorialOverlay from './components/TutorialOverlay';
 import { useUserStore } from './store/userStore';
@@ -29,6 +30,7 @@ import { useTranslation } from 'react-i18next';
 const sidebarLinks = [
   { to: '/', key: 'nav.city', icon: '🏰' },
   { to: '/buildings', key: 'nav.buildings', icon: '🛠️' },
+  { to: '/expansion', key: 'nav.expansion', icon: '⛺' },
   { to: '/academy', key: 'nav.academy', icon: '🎓' },
   { to: '/troops', key: 'nav.troops', icon: '⚔️' },
   { to: '/map', key: 'nav.map', icon: '🗺️' },
@@ -176,6 +178,7 @@ const App = () => {
       <Route path="/" element={<GameRoute><Dashboard /></GameRoute>} />
       <Route path="/profile" element={<GameRoute><ProfileView /></GameRoute>} />
       <Route path="/buildings" element={<GameRoute><BuildingsView /></GameRoute>} />
+      <Route path="/expansion" element={<GameRoute><ExpansionView /></GameRoute>} />
       <Route path="/academy" element={<GameRoute><AcademyView /></GameRoute>} />
       <Route path="/troops" element={<GameRoute><TroopsView /></GameRoute>} />
       <Route path="/market" element={<GameRoute><MarketView /></GameRoute>} />
