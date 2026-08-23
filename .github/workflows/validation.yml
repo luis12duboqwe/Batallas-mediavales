@@ -175,6 +175,7 @@ jobs:
           alembic -c batalla_medieval_backend/alembic.ini upgrade head
           python -m app.seed
           python scripts/prepare_g2_e2e.py
+          python scripts/prepare_g6_expansion_e2e.py
 
       - name: Start backend and frontend
         run: |
@@ -190,6 +191,7 @@ jobs:
         run: |
           node e2e/g2-alpha.mjs
           node e2e/g4-ux.mjs
+          node e2e/g6-expansion.mjs
 
       - name: Show service logs
         if: always()
