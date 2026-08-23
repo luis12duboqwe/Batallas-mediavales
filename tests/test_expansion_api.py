@@ -160,15 +160,13 @@ def test_camp_promotion_api(client, db_session, user, city):
     assert membership.expansion_points == 0
 
 
-def test_legacy_conquest_found_endpoint_cannot_bypass_points(
+def test_legacy_conquest_found_route_is_not_exposed(
     client,
     db_session,
     user,
     city,
-    monkeypatch,
 ):
     _prepare_membership(db_session, user, city, 0)
-    monkeypatch.setattr(world_gen, "get_tile_type", lambda x, y: "grass")
 
     response = client.post(
         "/conquest/found",
@@ -181,8 +179,7 @@ def test_legacy_conquest_found_endpoint_cannot_bypass_points(
         },
     )
 
-    assert response.status_code == 400
-    assert "expansion points" in response.json()["detail"]
+    assert response.status_code == 404
     assert (
         db_session.query(models.City)
         .filter_by(owner_id=user.id, world_id=city.world_id)
