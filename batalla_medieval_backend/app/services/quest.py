@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, List
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import balance
 
 DEFAULT_QUESTS: List[Dict[str, Any]] = [
     {
@@ -12,7 +13,7 @@ DEFAULT_QUESTS: List[Dict[str, Any]] = [
         "title": "Construye tu Ayuntamiento",
         "description": "Mejora tu Ayuntamiento al nivel 1.",
         "requirements": {"type": "building_finished", "building_type": "town_hall", "level": 1},
-        "reward": {"resources": {"wood": 100, "clay": 100, "iron": 100}},
+        "reward": {"resources": {"wood": 100, "stone": 100, "iron": 100}},
         "is_tutorial": True,
     },
     {
@@ -20,7 +21,7 @@ DEFAULT_QUESTS: List[Dict[str, Any]] = [
         "title": "Construye un Almacén",
         "description": "Construye un Almacén para guardar más recursos.",
         "requirements": {"type": "building_finished", "building_type": "warehouse", "level": 1},
-        "reward": {"resources": {"wood": 150, "clay": 150, "iron": 150}},
+        "reward": {"resources": {"wood": 150, "stone": 150, "iron": 150}},
         "is_tutorial": True,
     },
     {
@@ -28,7 +29,7 @@ DEFAULT_QUESTS: List[Dict[str, Any]] = [
         "title": "Construye una Granja",
         "description": "Construye una Granja para alimentar a tu población.",
         "requirements": {"type": "building_finished", "building_type": "farm", "level": 1},
-        "reward": {"resources": {"wood": 150, "clay": 150, "iron": 150}},
+        "reward": {"resources": {"wood": 150, "stone": 150, "iron": 150}},
         "is_tutorial": True,
     },
     {
@@ -36,7 +37,7 @@ DEFAULT_QUESTS: List[Dict[str, Any]] = [
         "title": "Construye Barracas",
         "description": "Construye Barracas para entrenar tropas.",
         "requirements": {"type": "building_finished", "building_type": "barracks", "level": 1},
-        "reward": {"resources": {"wood": 200, "clay": 200, "iron": 200}},
+        "reward": {"resources": {"wood": 200, "stone": 200, "iron": 200}},
         "is_tutorial": True,
     },
     {
@@ -44,7 +45,7 @@ DEFAULT_QUESTS: List[Dict[str, Any]] = [
         "title": "Entrena tropas",
         "description": "Entrena 10 unidades de infantería básica.",
         "requirements": {"type": "troops_trained", "unit_type": "basic_infantry", "amount": 10},
-        "reward": {"resources": {"wood": 300, "clay": 300, "iron": 300}},
+        "reward": {"resources": {"wood": 300, "stone": 300, "iron": 300}},
         "is_tutorial": True,
     },
     {
@@ -52,7 +53,7 @@ DEFAULT_QUESTS: List[Dict[str, Any]] = [
         "title": "Construye un Mercado",
         "description": "Construye un Mercado para comerciar recursos.",
         "requirements": {"type": "building_finished", "building_type": "market", "level": 1},
-        "reward": {"resources": {"wood": 250, "clay": 250, "iron": 250}},
+        "reward": {"resources": {"wood": 250, "stone": 250, "iron": 250}},
         "is_tutorial": True,
     },
     {
@@ -60,7 +61,7 @@ DEFAULT_QUESTS: List[Dict[str, Any]] = [
         "title": "Recolecta recursos",
         "description": "Acumula 1000 recursos producidos en tus ciudades.",
         "requirements": {"type": "resources_collected", "amount": 1000},
-        "reward": {"resources": {"wood": 300, "clay": 300, "iron": 400}},
+        "reward": {"resources": {"wood": 300, "stone": 300, "iron": 400}},
         "is_tutorial": False,
     },
     {
@@ -76,7 +77,7 @@ DEFAULT_QUESTS: List[Dict[str, Any]] = [
         "title": "Envía tu primer ataque",
         "description": "Demuestra tu valor iniciando tu primera ofensiva.",
         "requirements": {"type": "attack_sent"},
-        "reward": {"resources": {"wood": 200, "clay": 200, "iron": 200}},
+        "reward": {"resources": {"wood": 200, "stone": 200, "iron": 200}},
         "is_tutorial": False,
     },
     {
@@ -159,7 +160,7 @@ def _maybe_complete_resources(progress: models.QuestProgress, event_data: Dict[s
         return False
     required_amount = progress.quest.requirements.get("amount", 0)
     collected = progress.progress_data.get("collected", 0)
-    collected += sum(event_data.get(resource, 0) for resource in ("wood", "clay", "iron"))
+    collected += sum(event_data.get(resource, 0) for resource in balance.RESOURCE_FIELDS)
     progress.progress_data["collected"] = collected
     if collected >= required_amount:
         _mark_completed(progress)
@@ -204,7 +205,7 @@ def _apply_resource_reward(user: models.User, resources: Dict[str, Any]) -> None
         return
     city = user.cities[0]
     for resource, value in resources.items():
-        if hasattr(city, resource):
+        if resource in balance.RESOURCE_FIELDS:
             setattr(city, resource, getattr(city, resource) + value)
 
 
