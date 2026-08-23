@@ -3,6 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { formatNumber } from '../utils/format';
 import Timer from './Timer';
 
+const resourceCostMeta = [
+  ['wood', '🪵'],
+  ['stone', '🪨'],
+  ['iron', '⛓️'],
+  ['gold', '🪙'],
+];
+
 const TroopCard = ({ troop, onTrain }) => {
   const { t } = useTranslation();
   const [amount, setAmount] = useState(1);
@@ -13,6 +20,9 @@ const TroopCard = ({ troop, onTrain }) => {
   const canSubmit = researched && requirementsMet && Number(amount) > 0 && !submitting;
   const displayName = t(troop.unit_type);
   const inputId = `train-${troop.unit_type}-amount`;
+  const visibleCosts = resourceCostMeta.filter(
+    ([resource]) => (troop.training_cost?.[resource] ?? 0) > 0
+  );
 
   const handleTrain = async () => {
     if (!canSubmit) return;
@@ -43,8 +53,13 @@ const TroopCard = ({ troop, onTrain }) => {
       </div>
 
       <div className="text-sm text-gray-300 flex items-center justify-between gap-3 flex-wrap">
-        <span>
-          🪵 {formatNumber(troop.training_cost?.wood ?? 0)} · 🧱 {formatNumber(troop.training_cost?.clay ?? 0)} · ⛓️ {formatNumber(troop.training_cost?.iron ?? 0)}
+        <span className="flex gap-2 flex-wrap">
+          {visibleCosts.map(([resource, icon], index) => (
+            <span key={resource}>
+              {index > 0 && <span className="mr-2">·</span>}
+              {icon} {formatNumber(troop.training_cost?.[resource] ?? 0)}
+            </span>
+          ))}
         </span>
         <span className="text-yellow-200 text-xs">
           Tiempo/unidad: {troop.training_time_seconds}s
