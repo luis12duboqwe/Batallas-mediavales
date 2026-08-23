@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api } from '../api/axiosClient';
 import expansionApi from '../api/expansionApi';
-import { useCityStore } from '../store/cityStore';
+import { useUserStore } from '../store/userStore';
 import { formatNumber } from '../utils/format';
 
 const RESOURCE_META = [
@@ -19,7 +20,8 @@ const CostLine = ({ cost = {} }) => (
 );
 
 const ExpansionView = () => {
-  const { currentCity, cities, loadCity } = useCityStore();
+  const { user } = useUserStore();
+  const [settlements, setSettlements] = useState([]);
   const [status, setStatus] = useState(null);
   const [form, setForm] = useState({
     name: '',
@@ -31,28 +33,29 @@ const ExpansionView = () => {
   const [message, setMessage] = useState('');
   const [messageKind, setMessageKind] = useState('status');
 
-  const worldId = currentCity?.world_id || cities[0]?.world_id || null;
+  const worldId = user?.world_id || null;
   const originCity = useMemo(
-    () => (currentCity?.settlement_type !== 'camp' ? currentCity : null)
-      || cities.find((settlement) => settlement.settlement_type !== 'camp')
-      || null,
-    [currentCity, cities],
+    () => settlements.find((settlement) => settlement.settlement_type === 'city') || null,
+    [settlements],
   );
   const camps = useMemo(
-    () => cities.filter((settlement) => settlement.settlement_type === 'camp'),
-    [cities],
+    () => settlements.filter((settlement) => settlement.settlement_type === 'camp'),
+    [settlements],
   );
 
   const loadExpansion = useCallback(async () => {
-    const cityData = await loadCity();
-    const resolvedWorldId = cityData?.city?.world_id || cityData?.cities?.[0]?.world_id;
-    if (!resolvedWorldId) {
+    if (!worldId) {
+      setSettlements([]);
       setStatus(null);
       return;
     }
-    const response = await expansionApi.getStatus(resolvedWorldId);
-    setStatus(response.data);
-  }, [loadCity]);
+    const [citiesResponse, statusResponse] = await Promise.all([
+      api.getCities(worldId),
+      expansionApi.getStatus(worldId),
+    ]);
+    setSettlements(citiesResponse.data || []);
+    setStatus(statusResponse.data);
+  }, [worldId]);
 
   useEffect(() => {
     loadExpansion().catch((error) => {
@@ -296,7 +299,10 @@ const ExpansionView = () => {
                     Promover
                   </button>
                 </div>
-                <div className="mt-3"><CostLine cost={camp} /></div>
+                <div className="mt-3">
+                  <div className="mb-1 text-[11px] uppercase tracking-wider text-gray-500">Recursos disponibles</div>
+                  <CostLine cost={camp} />
+                </div>
               </article>
             ))}
           </div>
