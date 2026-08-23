@@ -62,8 +62,9 @@ def _create_peer(db_session, world_id: int):
         x=60,
         y=60,
         wood=1000,
-        clay=1000,
+        stone=1000,
         iron=1000,
+        gold=1000,
         last_production=utc_now(),
     )
     db_session.add(city)
@@ -83,8 +84,9 @@ def _dispatch(origin_id: int, target_id: int):
             schemas.TransportRequest(
                 target_city_id=target_id,
                 wood=TRANSFER_PER_HOUR,
-                clay=0,
+                stone=0,
                 iron=0,
+                gold=0,
             ),
         )
         return movement.id
@@ -136,7 +138,6 @@ def test_g3_concurrent_24h_transport_simulation_has_no_duplicates_or_negative_st
     city,
     monkeypatch,
 ):
-    # Keep this gate focused on durable economic/worker invariants, not telemetry.
     monkeypatch.setattr(market, "_audit_transport_after_commit", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         market.production,
@@ -149,7 +150,7 @@ def test_g3_concurrent_24h_transport_simulation_has_no_duplicates_or_negative_st
         lambda *args, **kwargs: None,
     )
 
-    city.wood = city.clay = city.iron = 1000
+    city.wood = city.stone = city.iron = city.gold = 1000
     city.last_production = utc_now()
     db_session.add(models.Building(city_id=city.id, name="market", level=1))
     db_session.commit()
@@ -183,10 +184,11 @@ def test_g3_concurrent_24h_transport_simulation_has_no_duplicates_or_negative_st
             .all()
         )
         assert len(balances) == 2
-        for balance in balances:
-            assert balance.wood >= 0
-            assert balance.clay >= 0
-            assert balance.iron >= 0
+        for resource_balance in balances:
+            assert resource_balance.wood >= 0
+            assert resource_balance.stone >= 0
+            assert resource_balance.iron >= 0
+            assert resource_balance.gold >= 0
         assert (
             db_session.query(models.Movement)
             .filter(models.Movement.status == "ongoing")
