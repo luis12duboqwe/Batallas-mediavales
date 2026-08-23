@@ -69,8 +69,9 @@ def test_two_build_requests_cannot_double_spend_or_overfill_queue(db_session, ci
     assert results.count("ok") == 1
     assert queued == 1
     assert refreshed_city.wood >= 0
-    assert refreshed_city.clay >= 0
+    assert refreshed_city.stone >= 0
     assert refreshed_city.iron >= 0
+    assert refreshed_city.gold >= 0
 
 
 def test_two_premium_purchases_cannot_spend_same_rubies(db_session, user):

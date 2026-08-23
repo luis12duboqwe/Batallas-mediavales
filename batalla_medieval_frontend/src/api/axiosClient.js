@@ -29,8 +29,9 @@ const loadBalanceSnapshot = () => {
 
 const EMPTY_OVERVIEW = {
   wood: 0,
-  clay: 0,
+  stone: 0,
   iron: 0,
+  gold: 0,
   population: 0,
   populationMax: 0,
   loyalty: 0,
@@ -45,8 +46,9 @@ const buildResourceSnapshot = (city) => {
     : 0;
   return {
     wood: city.wood ?? 0,
-    clay: city.clay ?? 0,
+    stone: city.stone ?? 0,
     iron: city.iron ?? 0,
+    gold: city.gold ?? 0,
     population,
     populationMax: city.population_max ?? 0,
     loyalty: city.loyalty ?? 0,

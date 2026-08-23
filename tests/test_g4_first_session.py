@@ -29,7 +29,9 @@ def _assert_paid_from_starting_balance(
     """Allow only the tiny server-authoritative production accrued in CI."""
 
     for resource in balance.RESOURCE_FIELDS:
-        expected_after_costs = starting[resource] - sum(cost[resource] for cost in costs)
+        expected_after_costs = starting[resource] - sum(
+            cost.get(resource, 0.0) for cost in costs
+        )
         actual = float(getattr(city, resource))
         assert actual >= expected_after_costs
         assert actual < expected_after_costs + 1.0
@@ -43,8 +45,8 @@ def test_seeded_first_session_completes_without_admin_or_extra_resources(
 
     The test may fast-forward durable timers, but it never grants resources,
     troops, buildings or tutorial progress. Every purchase is paid from the
-    starting city's normal 500/500/500 resources and the target comes from the
-    canonical seed.
+    starting city's normal 500/500/500/500 resources and the target comes from
+    the canonical seed.
     """
 
     seed_game(db_session)
@@ -60,13 +62,17 @@ def test_seeded_first_session_completes_without_admin_or_extra_resources(
         .filter_by(owner_id=user.id, world_id=world.id)
         .one()
     )
-    starting = {resource: float(getattr(city, resource)) for resource in balance.RESOURCE_FIELDS}
-    assert starting == {"wood": 500.0, "clay": 500.0, "iron": 500.0}
+    starting = {
+        resource: float(getattr(city, resource))
+        for resource in balance.RESOURCE_FIELDS
+    }
+    assert starting == balance.CITY_STARTING_RESOURCES
 
     barracks_cost = balance.get_building_cost("barracks", 1)
     infantry_cost = balance.UNIT_CATALOG["basic_infantry"]["training_cost"]
     for resource in balance.RESOURCE_FIELDS:
-        assert starting[resource] >= barracks_cost[resource] + infantry_cost[resource]
+        required = barracks_cost.get(resource, 0.0) + infantry_cost.get(resource, 0.0)
+        assert starting[resource] >= required
 
     upgrade = client.post(
         "/building/upgrade",

@@ -11,8 +11,9 @@ def _create_barbarian(db_session):
         x=61,
         y=62,
         wood=100.0,
-        clay=100.0,
+        stone=100.0,
         iron=100.0,
+        gold=100.0,
     )
     db_session.add(city)
     db_session.commit()
@@ -52,7 +53,7 @@ def test_barbarian_recruitment_pays_canonical_unit_cost(monkeypatch, db_session)
     unit = balance.BARBARIAN_RECRUIT_UNIT
     cost = balance.UNIT_CATALOG[unit]["training_cost"]
     for resource in balance.RESOURCE_FIELDS:
-        assert getattr(city, resource) == before[resource] - cost[resource]
+        assert getattr(city, resource) == before[resource] - cost.get(resource, 0.0)
 
     troop = (
         db_session.query(models.Troop)

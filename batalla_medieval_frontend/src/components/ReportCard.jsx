@@ -2,6 +2,13 @@ import { useMemo, useState } from 'react';
 import { formatDate, formatNumber } from '../utils/format';
 import { TROOP_TYPES } from '../utils/gameMath';
 
+const RESOURCE_TYPES = [
+  { type: 'wood', label: 'Madera' },
+  { type: 'stone', label: 'Piedra' },
+  { type: 'iron', label: 'Hierro' },
+  { type: 'gold', label: 'Oro' },
+];
+
 const ArrowIcon = () => (
   <svg viewBox="0 0 24 24" className="h-5 w-5 text-amber-300" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M5 12h14m0 0-4-4m4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
@@ -66,7 +73,7 @@ const ResourceIcon = ({ type }) => {
         strokeLinejoin="round"
       />
     ),
-    clay: (
+    stone: (
       <path
         d="M4 14.5 12 4l8 10.5-8 5.5-8-5.5Z"
         strokeLinecap="round"
@@ -80,6 +87,12 @@ const ResourceIcon = ({ type }) => {
         strokeLinejoin="round"
       />
     ),
+    gold: (
+      <>
+        <circle cx="12" cy="12" r="7" />
+        <path d="M9 9.5h6M9 14.5h6" strokeLinecap="round" />
+      </>
+    ),
   };
 
   return (
@@ -92,6 +105,30 @@ const ResourceIcon = ({ type }) => {
     >
       {icons[type] ?? icons.wood}
     </svg>
+  );
+};
+
+const ResourceAmounts = ({ values, onlyPositive = false, labeled = false }) => {
+  const visible = RESOURCE_TYPES.filter(({ type }) => {
+    const amount = Number(values?.[type] ?? 0);
+    return !onlyPositive || amount > 0;
+  });
+
+  return (
+    <div className={labeled ? 'space-y-1 text-sm' : 'flex flex-wrap gap-3 text-sm'}>
+      {visible.map(({ type, label }) => (
+        labeled ? (
+          <div key={type} className="flex justify-between gap-4">
+            <span>{label}</span>
+            <span>{formatNumber(values?.[type] ?? 0)}</span>
+          </div>
+        ) : (
+          <div key={type} className="flex items-center gap-1">
+            <ResourceIcon type={type} /> {formatNumber(values?.[type] ?? 0)}
+          </div>
+        )
+      ))}
+    </div>
   );
 };
 
@@ -217,16 +254,11 @@ const ReportCard = ({ report }) => {
       {/* Expanded Details */}
       {expanded && (
         <div className="p-4 border-t border-gray-800 bg-black/20 space-y-6">
-          
           {/* Trade Details */}
           {isTrade && resources && (
             <div className="bg-green-900/10 border border-green-900/30 rounded p-3">
               <h4 className="font-bold text-green-400 mb-2">Recursos Transferidos</h4>
-              <div className="flex gap-6 text-sm">
-                <div className="flex items-center gap-2"><ResourceIcon type="wood" /> {formatNumber(resources.wood)}</div>
-                <div className="flex items-center gap-2"><ResourceIcon type="clay" /> {formatNumber(resources.clay)}</div>
-                <div className="flex items-center gap-2"><ResourceIcon type="iron" /> {formatNumber(resources.iron)}</div>
-              </div>
+              <ResourceAmounts values={resources} />
             </div>
           )}
 
@@ -246,11 +278,7 @@ const ReportCard = ({ report }) => {
               {resources && Object.values(resources).some(v => v > 0) && (
                 <div className="mt-4 pt-2 border-t border-blue-900/30">
                   <h5 className="font-bold text-blue-300 mb-2 text-xs uppercase">Recursos Traídos</h5>
-                  <div className="flex gap-4 text-sm">
-                    {resources.wood > 0 && <div className="flex items-center gap-1"><ResourceIcon type="wood" /> {formatNumber(resources.wood)}</div>}
-                    {resources.clay > 0 && <div className="flex items-center gap-1"><ResourceIcon type="clay" /> {formatNumber(resources.clay)}</div>}
-                    {resources.iron > 0 && <div className="flex items-center gap-1"><ResourceIcon type="iron" /> {formatNumber(resources.iron)}</div>}
-                  </div>
+                  <ResourceAmounts values={resources} onlyPositive />
                 </div>
               )}
             </div>
@@ -324,9 +352,7 @@ const ReportCard = ({ report }) => {
                   {loot && (
                     <div className="flex gap-3 items-center bg-black/30 px-3 py-1 rounded">
                       <span className="text-gray-400">Botín:</span>
-                      <div className="flex items-center gap-1"><ResourceIcon type="wood" /> {formatNumber(loot.wood)}</div>
-                      <div className="flex items-center gap-1"><ResourceIcon type="clay" /> {formatNumber(loot.clay)}</div>
-                      <div className="flex items-center gap-1"><ResourceIcon type="iron" /> {formatNumber(loot.iron)}</div>
+                      <ResourceAmounts values={loot} />
                     </div>
                   )}
                   
@@ -376,11 +402,7 @@ const ReportCard = ({ report }) => {
                   {resources && (
                     <div className="bg-black/20 p-3 rounded border border-gray-800">
                       <h5 className="font-bold text-amber-200 mb-2 text-sm">Recursos</h5>
-                      <div className="space-y-1 text-sm">
-                        <div className="flex justify-between"><span>Madera</span><span>{formatNumber(resources.wood)}</span></div>
-                        <div className="flex justify-between"><span>Barro</span><span>{formatNumber(resources.clay)}</span></div>
-                        <div className="flex justify-between"><span>Hierro</span><span>{formatNumber(resources.iron)}</span></div>
-                      </div>
+                      <ResourceAmounts values={resources} labeled />
                     </div>
                   )}
                   

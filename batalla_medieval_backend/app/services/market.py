@@ -344,8 +344,6 @@ def accept_offer(db: Session, buyer_city: models.City, offer_id: int):
         if available_capacity < offer.request_amount:
             raise HTTPException(status_code=400, detail="Not enough merchant capacity")
 
-        # Seller resources were reserved exactly once by create_offer(). Buyer
-        # payment is reserved exactly once here. The transport helper never pays.
         production.pay_cost(locked_buyer, payment)
 
         seller_resources = {offer.offer_type: offer.offer_amount}
@@ -428,8 +426,9 @@ def send_resources(
 
     resources = {
         "wood": request.wood,
-        "clay": request.clay,
+        "stone": request.stone,
         "iron": request.iron,
+        "gold": request.gold,
     }
     normalized = _normalize_transport_resources(resources)
     total_amount = sum(normalized.values())
@@ -472,8 +471,6 @@ def send_resources(
         if available_capacity < total_amount:
             raise HTTPException(status_code=400, detail="Not enough merchant capacity")
 
-        # Pay exactly once while both city rows remain locked. The movement
-        # creator is deliberately non-economic and commit-free.
         production.pay_cost(locked_origin, normalized)
         movement = _create_transport_uncommitted(
             db,

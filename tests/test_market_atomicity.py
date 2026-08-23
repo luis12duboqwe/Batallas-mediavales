@@ -26,8 +26,9 @@ def _create_other_player_city(db_session, world_id: int, *, x: int, y: int):
         x=x,
         y=y,
         wood=1000,
-        clay=1000,
+        stone=1000,
         iron=1000,
+        gold=1000,
         last_production=utc_now(),
     )
     db_session.add(city)
@@ -37,10 +38,19 @@ def _create_other_player_city(db_session, world_id: int, *, x: int, y: int):
     return user, city
 
 
-def _reset_resources(db_session, city: models.City, *, wood=1000, clay=1000, iron=1000):
+def _reset_resources(
+    db_session,
+    city: models.City,
+    *,
+    wood=1000,
+    stone=1000,
+    iron=1000,
+    gold=1000,
+):
     city.wood = wood
-    city.clay = clay
+    city.stone = stone
     city.iron = iron
+    city.gold = gold
     city.last_production = utc_now()
     db_session.add(city)
     db_session.commit()
@@ -55,11 +65,18 @@ def test_direct_transport_charges_resources_exactly_once(db_session, city):
     movement = market.send_resources(
         db_session,
         city,
-        schemas.TransportRequest(target_city_id=target.id, wood=100, clay=0, iron=0),
+        schemas.TransportRequest(
+            target_city_id=target.id,
+            wood=100,
+            stone=0,
+            iron=0,
+            gold=0,
+        ),
     )
 
     db_session.refresh(city)
     assert city.wood == pytest.approx(900, abs=0.1)
+    assert city.gold == pytest.approx(1000, abs=0.1)
     assert movement.resources == {"wood": 100}
     assert movement.origin_city_id == city.id
     assert movement.target_city_id == target.id
@@ -78,7 +95,7 @@ def test_offer_acceptance_charges_each_side_once_and_creates_both_transports(db_
         schemas.MarketOfferCreate(
             offer_type="wood",
             offer_amount=100,
-            request_type="clay",
+            request_type="stone",
             request_amount=50,
             is_alliance_only=False,
         ),
@@ -91,7 +108,8 @@ def test_offer_acceptance_charges_each_side_once_and_creates_both_transports(db_
     db_session.refresh(city)
     db_session.refresh(buyer)
     assert city.wood == pytest.approx(900, abs=0.1)
-    assert buyer.clay == pytest.approx(950, abs=0.1)
+    assert buyer.stone == pytest.approx(950, abs=0.1)
+    assert buyer.gold == pytest.approx(1000, abs=0.1)
     assert db_session.query(models.MarketOffer).filter_by(id=offer.id).one_or_none() is None
 
     assert seller_movement.origin_city_id == city.id
@@ -99,7 +117,7 @@ def test_offer_acceptance_charges_each_side_once_and_creates_both_transports(db_
     assert seller_movement.resources == {"wood": 100}
     assert buyer_movement.origin_city_id == buyer.id
     assert buyer_movement.target_city_id == city.id
-    assert buyer_movement.resources == {"clay": 50}
+    assert buyer_movement.resources == {"stone": 50}
 
 
 def test_offer_acceptance_rolls_back_everything_if_second_transport_fails(
@@ -118,14 +136,14 @@ def test_offer_acceptance_rolls_back_everything_if_second_transport_fails(
         schemas.MarketOfferCreate(
             offer_type="wood",
             offer_amount=100,
-            request_type="clay",
+            request_type="stone",
             request_amount=50,
             is_alliance_only=False,
         ),
     )
     db_session.refresh(city)
     seller_reserved_balance = city.wood
-    buyer_balance = buyer.clay
+    buyer_balance = buyer.stone
 
     original_create = market._create_transport_uncommitted
     calls = 0
@@ -151,6 +169,6 @@ def test_offer_acceptance_rolls_back_everything_if_second_transport_fails(
     ).all()
 
     assert seller_after.wood == pytest.approx(seller_reserved_balance, abs=0.1)
-    assert buyer_after.clay == pytest.approx(buyer_balance, abs=0.1)
+    assert buyer_after.stone == pytest.approx(buyer_balance, abs=0.1)
     assert persisted_offer is not None
     assert transports == []

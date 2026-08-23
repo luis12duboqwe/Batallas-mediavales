@@ -44,12 +44,14 @@
   "resources": {
     "summary": "City resources",
     "wood": "Wood",
-    "clay": "Clay",
+    "stone": "Stone",
     "iron": "Iron",
+    "gold": "Gold",
     "population": "Population",
     "wood_tip": "City base wood production",
-    "clay_tip": "City base clay production",
+    "stone_tip": "City base stone production",
     "iron_tip": "City base iron production",
+    "gold_tip": "City base gold production",
     "population_tip": "Population used and maximum capacity for units"
   },
   "tutorial": {

@@ -1,8 +1,10 @@
+const RESOURCE_FIELDS = ['wood', 'stone', 'iron', 'gold'];
+
 export const calculateProduction = (resources, productionRates, seconds) => {
   const updated = { ...resources };
-  updated.wood += (productionRates.wood || 0) * (seconds / 3600);
-  updated.clay += (productionRates.clay || 0) * (seconds / 3600);
-  updated.iron += (productionRates.iron || 0) * (seconds / 3600);
+  RESOURCE_FIELDS.forEach((resource) => {
+    updated[resource] = (updated[resource] || 0) + (productionRates[resource] || 0) * (seconds / 3600);
+  });
   updated.population = Math.min(updated.population, updated.populationMax || updated.population);
   return updated;
 };
@@ -24,7 +26,7 @@ export const troopList = Object.keys(TROOP_TYPES);
 export const buildingList = [
   'Casa Central',
   'Aserradero',
-  'Cantera de Ladrillo',
+  'Cantera de Piedra',
   'Mina Profunda',
   'Hacienda',
   'Gran Depósito',

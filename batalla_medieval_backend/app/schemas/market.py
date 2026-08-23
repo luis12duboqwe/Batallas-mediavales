@@ -4,10 +4,15 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+ResourceType = Literal["wood", "stone", "iron", "gold"]
+
+
 class MarketOfferBase(BaseModel):
-    offer_type: Literal["wood", "clay", "iron"]
+    model_config = ConfigDict(extra="forbid")
+
+    offer_type: ResourceType
     offer_amount: int = Field(..., gt=0)
-    request_type: Literal["wood", "clay", "iron"]
+    request_type: ResourceType
     request_amount: int = Field(..., gt=0)
     is_alliance_only: bool = False
 
@@ -17,7 +22,7 @@ class MarketOfferCreate(MarketOfferBase):
 
 
 class MarketOfferResponse(MarketOfferBase):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
 
     id: int
     city_id: int
@@ -28,7 +33,10 @@ class MarketOfferResponse(MarketOfferBase):
 
 
 class TransportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     target_city_id: int
     wood: int = Field(0, ge=0)
-    clay: int = Field(0, ge=0)
+    stone: int = Field(0, ge=0)
     iron: int = Field(0, ge=0)
+    gold: int = Field(0, ge=0)

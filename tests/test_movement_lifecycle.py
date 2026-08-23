@@ -5,7 +5,7 @@ import pytest
 
 from app import models
 from app.routers.auth import create_access_token
-from app.services import combat
+from app.services import balance, combat
 from app.services import movement as movement_service
 
 
@@ -31,8 +31,9 @@ def _barbarian_city(db_session, city, *, x=5, y=0):
         x=x,
         y=y,
         wood=100.0,
-        clay=100.0,
+        stone=100.0,
         iron=100.0,
+        gold=100.0,
         loyalty=100.0,
     )
     db_session.add(barbarian)
@@ -97,7 +98,8 @@ def test_worker_uses_frozen_movement_army_and_loot_returns_once(
     db_session, city, user, monkeypatch
 ):
     barbarian = _barbarian_city(db_session, city)
-    city.wood = city.clay = city.iron = 1000.0
+    for resource in balance.RESOURCE_FIELDS:
+        setattr(city, resource, 1000.0)
     city.last_production = FIXED_NOW
     db_session.commit()
 
@@ -135,12 +137,9 @@ def test_worker_uses_frozen_movement_army_and_loot_returns_once(
     attacker = db_session.query(models.City).filter_by(id=city.id).one()
     defender = db_session.query(models.City).filter_by(id=barbarian.id).one()
     # Loot is not credited at impact time.
-    assert attacker.wood == pytest.approx(1000.0)
-    assert attacker.clay == pytest.approx(1000.0)
-    assert attacker.iron == pytest.approx(1000.0)
-    assert defender.wood < 100.0
-    assert defender.clay < 100.0
-    assert defender.iron < 100.0
+    for resource in balance.RESOURCE_FIELDS:
+        assert getattr(attacker, resource) == pytest.approx(1000.0)
+        assert getattr(defender, resource) < 100.0
 
     attacker_report = (
         db_session.query(models.Report)
@@ -176,8 +175,10 @@ def test_worker_uses_frozen_movement_army_and_loot_returns_once(
         .one()
     )
     assert troop.quantity == 2
-    for resource in ("wood", "clay", "iron"):
-        assert getattr(attacker, resource) == pytest.approx(1000.0 + loot[resource])
+    for resource in balance.RESOURCE_FIELDS:
+        assert getattr(attacker, resource) == pytest.approx(
+            1000.0 + loot.get(resource, 0.0)
+        )
 
     # Re-running the worker cannot apply the completed return a second time.
     assert movement_service.resolve_due_movements(db_session) == []

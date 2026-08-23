@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app import models
+from app.services import balance
 from app.services import event as event_service
 from app.services import production, troops
 
@@ -37,11 +38,13 @@ def test_world_event_affects_only_its_world(db_session, city, user, monkeypatch)
         y=5,
         tile_type="grass",
         wood=1000.0,
-        clay=1000.0,
+        stone=1000.0,
         iron=1000.0,
+        gold=1000.0,
         last_production=FIXED_NOW,
     )
-    city.wood = city.clay = city.iron = 1000.0
+    for resource in balance.RESOURCE_FIELDS:
+        setattr(city, resource, 1000.0)
     city.last_production = FIXED_NOW
     db_session.add(second_city)
     db_session.flush()
@@ -69,11 +72,12 @@ def test_world_event_affects_only_its_world(db_session, city, user, monkeypatch)
 
     world_one_rates = production.get_production_per_hour(db_session, city)
     world_two_rates = production.get_production_per_hour(db_session, second_city)
-    assert world_one_rates == pytest.approx(
-        {"wood": 15.0, "clay": 12.0, "iron": 10.0}
-    )
+    assert world_one_rates == pytest.approx(balance.PRODUCTION_RATES_PER_HOUR)
     assert world_two_rates == pytest.approx(
-        {"wood": 30.0, "clay": 24.0, "iron": 20.0}
+        {
+            resource: rate * 2.0
+            for resource, rate in balance.PRODUCTION_RATES_PER_HOUR.items()
+        }
     )
 
     world_one_queue = troops.queue_training(

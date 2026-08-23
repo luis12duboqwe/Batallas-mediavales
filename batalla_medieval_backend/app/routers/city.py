@@ -143,8 +143,9 @@ def city_status(
     return schemas.CityResourceStatus(
         city_id=city.id,
         wood=city.wood,
-        clay=city.clay,
+        stone=city.stone,
         iron=city.iron,
+        gold=city.gold,
         loyalty=city.loyalty,
         storage_limit=storage_limit,
         production_per_hour=production_per_hour,

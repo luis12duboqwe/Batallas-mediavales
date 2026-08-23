@@ -221,7 +221,10 @@ def resolve_battle(
         for unit in defender_troops
     }
 
-    loot = {"wood": 0, "clay": 0, "iron": 0}
+    # Loot always follows the versioned resource catalog. This prevents combat
+    # from silently omitting a newly introduced resource or carrying a legacy
+    # resource name after a migration.
+    loot = {resource: 0 for resource in balance.RESOURCE_FIELDS}
     if sum(defender_survivors.values()) == 0 and base_attack > 0:
         total_carry = 0
         for unit, amount in attacker_survivors.items():
@@ -231,23 +234,20 @@ def resolve_battle(
 
         loot_modifier = max(float(modifiers.get("loot_modifier", 1.0)), 0.0)
         effective_carry = total_carry * loot_modifier
-        available_wood = defender_city.wood
-        available_clay = defender_city.clay
-        available_iron = defender_city.iron
-        total_resources = available_wood + available_clay + available_iron
+        available = {
+            resource: max(float(getattr(defender_city, resource)), 0.0)
+            for resource in balance.RESOURCE_FIELDS
+        }
+        total_resources = sum(available.values())
         if total_resources > 0:
             take_ratio = min(1.0, effective_carry / total_resources)
             loot = {
-                "wood": int(available_wood * take_ratio),
-                "clay": int(available_clay * take_ratio),
-                "iron": int(available_iron * take_ratio),
+                resource: int(amount * take_ratio)
+                for resource, amount in available.items()
             }
-            defender_city.wood -= loot["wood"]
-            defender_city.clay -= loot["clay"]
-            defender_city.iron -= loot["iron"]
-            attacker_city.wood += loot["wood"]
-            attacker_city.clay += loot["clay"]
-            attacker_city.iron += loot["iron"]
+            for resource, amount in loot.items():
+                setattr(defender_city, resource, getattr(defender_city, resource) - amount)
+                setattr(attacker_city, resource, getattr(attacker_city, resource) + amount)
 
     wall_damage = None
     building_damage = None

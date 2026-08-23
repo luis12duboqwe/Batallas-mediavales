@@ -18,7 +18,7 @@ def test_concurrent_tutorial_completion_grants_reward_once(db_session, city, use
     user.world_id = city.world_id
     user.tutorial_step = 0
     user.tutorial_reward_claimed = False
-    city.wood = city.clay = city.iron = 1000.0
+    city.wood = city.stone = city.iron = city.gold = 1000.0
 
     barbarian = models.City(
         name="Tutorial Concurrent Barbarian",
@@ -109,5 +109,6 @@ def test_concurrent_tutorial_completion_grants_reward_once(db_session, city, use
     assert final_user.tutorial_reward_claimed is True
     assert final_user.tutorial_step == tutorial.FINAL_STEP
     assert final_city.wood == pytest.approx(1250.0)
-    assert final_city.clay == pytest.approx(1250.0)
+    assert final_city.stone == pytest.approx(1250.0)
     assert final_city.iron == pytest.approx(1250.0)
+    assert final_city.gold == pytest.approx(1250.0)

@@ -4,6 +4,7 @@ import pytest
 
 from app import models
 from app.routers.auth import create_access_token
+from app.services import balance
 from app.services import movement as movement_service
 from app.utils import utc_now
 
@@ -47,8 +48,9 @@ def _other_player_city(
         x=x,
         y=y,
         wood=500,
-        clay=500,
+        stone=500,
         iron=500,
+        gold=500,
         last_production=utc_now(),
     )
     db_session.add(target)
@@ -96,9 +98,8 @@ def test_same_world_two_player_movement_can_be_dispatched_and_reserved_once(
     payload_extra,
 ):
     user.protection_ends_at = datetime.now(timezone.utc) - timedelta(hours=1)
-    city.wood = 1000
-    city.clay = 1000
-    city.iron = 1000
+    for resource in balance.RESOURCE_FIELDS:
+        setattr(city, resource, 1000)
     city.last_production = utc_now()
     db_session.add_all([user, city])
     _, target = _other_player_city(
@@ -148,6 +149,7 @@ def test_same_world_two_player_movement_can_be_dispatched_and_reserved_once(
     else:
         origin_after = db_session.query(models.City).filter_by(id=city.id).one()
         assert origin_after.wood == pytest.approx(875, abs=0.1)
+        assert origin_after.gold == pytest.approx(1000, abs=0.1)
 
 
 @pytest.mark.parametrize("movement_type", ["attack", "spy", "reinforce", "transport"])
