@@ -6,17 +6,19 @@ Este documento define el procedimiento operativo mínimo para desplegar, verific
 
 ## 1. Arquitectura operativa
 
-La topología esperada es:
+La topología protegida es:
 
-1. dominio público con TLS gestionado por un edge, load balancer o reverse proxy administrado;
-2. `nginx` del stack como entrada HTTP interna;
-3. frontend estático y API/Socket.IO detrás de `nginx`;
-4. API y worker separados;
-5. PostgreSQL persistente;
-6. migraciones y seed ejecutados como trabajos de una sola ejecución;
-7. imágenes de backend/frontend identificadas por el SHA exacto del commit desplegado.
+1. DNS público de `PUBLIC_HOST` apuntando al servidor;
+2. Caddy expuesto en 80/443 y encargado de obtener/renovar TLS automáticamente;
+3. `nginx` interno, sin puerto público, conservando rate-limit, proxy de API y WebSocket;
+4. frontend estático y API/Socket.IO detrás de `nginx`;
+5. API y worker separados;
+6. PostgreSQL persistente;
+7. migraciones y seed ejecutados como trabajos de una sola ejecución;
+8. imágenes de backend/frontend identificadas por el SHA exacto del commit desplegado;
+9. volúmenes persistentes de Caddy para certificados/configuración y de PostgreSQL para datos.
 
-No se utiliza `:latest` para una release protegida. `ops/preflight.py` rechaza imágenes mutables y configuraciones protegidas sin HTTPS público, PostgreSQL, SMTP, CORS explícito, secreto fuerte o política de backup.
+No se utiliza `:latest` para una release protegida. `ops/preflight.py` rechaza imágenes mutables y configuraciones protegidas sin HTTPS público, hostname TLS coherente, PostgreSQL, SMTP, CORS explícito, secreto fuerte o política de backup.
 
 ## 2. Variables y secretos de GitHub
 
@@ -40,18 +42,39 @@ Variable de GitHub del ambiente `staging`:
 
 El archivo de entorno puede prepararse tomando `ops/staging.env.example`, reemplazando todos los placeholders y codificándolo en base64. El texto plano no se debe almacenar en el repositorio.
 
-## 3. Requisitos del host
+## 3. Requisitos del host y DNS
 
 - Linux actualizado;
 - Docker Engine y Docker Compose v2;
-- Python 3.11+ disponible para los probes sin dependencias;
+- Python 3.11+ disponible para probes sin dependencias;
 - usuario de despliegue autorizado para Docker;
-- almacenamiento persistente suficiente para PostgreSQL y backups;
-- edge/TLS operativo antes del primer smoke protegido;
-- DNS del dominio apuntando al edge correcto;
+- almacenamiento persistente suficiente para PostgreSQL, Caddy y backups;
+- puertos TCP 80 y TCP/UDP 443 accesibles públicamente;
+- DNS `A`/`AAAA` de `PUBLIC_HOST` apuntando al servidor antes del primer despliegue protegido;
 - SMTP funcional para verificación/recuperación de cuenta.
 
-## 4. Despliegue normal
+Caddy necesita alcanzar públicamente el dominio para emitir el certificado. El deploy espera hasta 120 segundos por `https://PUBLIC_HOST/health`; si TLS no queda operativo, falla y activa rollback cuando existe una release previa.
+
+## 4. Contrato de entorno protegido
+
+`ops/preflight.py` exige, como mínimo:
+
+- `APP_ENV=staging|production`;
+- `SECRET_KEY` fuerte;
+- PostgreSQL en `DB_URL`;
+- `PUBLIC_HOST` sin esquema/ruta y coincidente con `PUBLIC_BASE_URL`;
+- `PUBLIC_BASE_URL`, `FRONTEND_URL` y cada CORS en HTTPS;
+- `TLS_EMAIL` válido;
+- puertos HTTP/HTTPS válidos y distintos;
+- SMTP + `FROM_EMAIL`;
+- `SUPPORT_CONTACT`;
+- imágenes backend/frontend con tag/digest inmutable;
+- `BACKUP_DIR` absoluto y retención positiva;
+- presupuestos de carga/latencia válidos.
+
+Una configuración que solo “dice HTTPS” pero cuyo hostname TLS no coincide con la URL pública es rechazada antes de mutar servicios.
+
+## 5. Despliegue normal
 
 El workflow `.github/workflows/deploy.yml` se ejecuta manualmente.
 
@@ -60,35 +83,37 @@ El workflow `.github/workflows/deploy.yml` se ejecuta manualmente.
 1. seleccionar la rama/commit a verificar;
 2. elegir `staging`;
 3. el workflow construye y publica imágenes con `${github.sha}`;
-4. sube `docker-compose.deploy.yml`, `nginx.conf` y `ops/` al host;
+4. sube `docker-compose.deploy.yml`, `nginx.conf`, `Caddyfile` y `ops/` al host;
 5. reconstruye `.env.base` desde `ENV_FILE_BASE64`;
-6. `ops/deploy_remote.sh` añade las referencias inmutables de imagen;
+6. `ops/deploy_remote.sh` añade referencias inmutables de imagen;
 7. se ejecuta preflight antes de mutar servicios;
 8. si ya existe esquema, se crea backup verificado;
 9. se aplican migraciones y seed;
-10. se levantan API, worker, frontend y proxy;
-11. se ejecuta smoke HTTP;
-12. se ejecuta carga acotada;
-13. solo si todo pasa se registra la release en `.ops-state/` y `.release-sha`.
+10. se levantan API, worker, frontend, Nginx y Caddy;
+11. se espera HTTPS/certificado;
+12. se ejecuta smoke HTTPS;
+13. se ejecuta carga acotada;
+14. solo si todo pasa se registra la release en `.ops-state/` y `.release-sha`.
 
 ### Producción
 
-El workflow rechaza producción si el dispatch no parte de `main`. Antes de habilitar la beta pública/cerrada debe existir aprobación explícita del propietario y, preferiblemente, protección de aprobación en el ambiente `production` de GitHub.
+El workflow rechaza producción si el dispatch no parte de `main`. Antes de habilitar la beta debe existir aprobación explícita del propietario y, preferiblemente, protección de aprobación en el ambiente `production` de GitHub.
 
-## 5. Rollback automático
+## 6. Rollback automático
 
-`ops/deploy_remote.sh` mantiene un trap de error durante migración, arranque, smoke y carga.
+`ops/deploy_remote.sh` mantiene un trap de error durante backup, migración, arranque, TLS, smoke y carga.
 
 Si una release falla después de haber tomado snapshot:
 
 - restaura el `.env` de la release anterior;
 - restaura el snapshot de PostgreSQL previo al deploy;
 - vuelve a levantar las imágenes anteriores;
+- vuelve a levantar Nginx + Caddy;
 - conserva `.release-sha` apuntando a la última release válida.
 
-Si es el primer despliegue y no existe release anterior, no se inventa rollback: los servicios quedan disponibles para diagnóstico y el deploy termina con error.
+Los volúmenes TLS de Caddy no se eliminan durante rollback. Si es el primer despliegue y no existe release anterior, no se inventa rollback: los servicios quedan disponibles para diagnóstico y el deploy termina con error.
 
-## 6. Rollback manual
+## 7. Rollback manual
 
 Identificar el SHA actual desde `.release-sha` y ejecutar:
 
@@ -96,18 +121,9 @@ Identificar el SHA actual desde `.release-sha` y ejecutar:
 bash ops/rollback_remote.sh <SHA_ACTUAL> ROLLBACK:<SHA_ACTUAL>
 ```
 
-El script exige:
+El script exige manifest de despliegue, release anterior válida, entorno archivado, snapshot cuando corresponde, preflight de destino y smoke HTTPS posterior. Nunca editar manualmente `.release-sha` para simular un rollback.
 
-- manifest de despliegue de la release actual;
-- referencia válida a release anterior;
-- `.env` archivado de la release anterior;
-- snapshot asociado cuando corresponde;
-- preflight de la release de destino;
-- smoke posterior al rollback.
-
-Nunca editar manualmente `.release-sha` para simular un rollback.
-
-## 7. Backups
+## 8. Backups
 
 Backup manual:
 
@@ -125,11 +141,11 @@ Cada backup:
 - aplica permisos restrictivos;
 - elimina backups más antiguos que `BACKUP_RETENTION_DAYS`.
 
-Para G5, staging debe demostrar al menos un ciclo backup→mutación→restore. CI ya reproduce ese ciclo sobre PostgreSQL real mediante `G5 operations recovery`; falta repetirlo en el staging real.
+Para G5, staging debe demostrar al menos un ciclo backup→mutación→restore. CI ya reproduce ese ciclo sobre PostgreSQL real mediante `G5 operations recovery`; falta repetirlo en staging real.
 
 Se recomienda copiar backups fuera del mismo disco/host. La beta no debe depender de un único volumen como única copia recuperable.
 
-## 8. Restauración
+## 9. Restauración
 
 Restaurar es destructivo y requiere confirmación explícita:
 
@@ -137,19 +153,11 @@ Restaurar es destructivo y requiere confirmación explícita:
 bash ops/restore_postgres.sh .release.env /ruta/backup.dump RESTORE:<POSTGRES_DB>
 ```
 
-El script:
-
-1. valida entorno;
-2. exige checksum;
-3. detiene API y worker;
-4. termina conexiones a la base;
-5. usa `pg_restore --clean --if-exists --create --exit-on-error`;
-6. vuelve a levantar la release seleccionada;
-7. exige que el operador ejecute smoke antes de cerrar mantenimiento.
+El script valida entorno y checksum, detiene escritores, termina conexiones, ejecuta `pg_restore --clean --if-exists --create --exit-on-error` y vuelve a levantar la release seleccionada con Nginx + Caddy. El operador debe ejecutar smoke antes de cerrar mantenimiento.
 
 `RESTORE_START_SERVICES=0` existe únicamente para el drill automatizado de CI.
 
-## 9. Smoke, carga y SLO iniciales
+## 10. Smoke, carga y SLO iniciales
 
 Smoke protegido:
 
@@ -177,25 +185,15 @@ Presupuesto inicial G5:
 
 Estos límites son de beta cerrada, no una promesa de capacidad final.
 
-## 10. Monitorización y alertas
+## 11. Monitorización y alertas
 
-`.github/workflows/staging-health.yml` ejecuta cada hora:
+`.github/workflows/staging-health.yml` ejecuta cada hora smoke y carga corta, deja el fallo visible en Actions y puede llamar un webhook opcional mediante `ALERT_WEBHOOK_URL`.
 
-- smoke completo;
-- carga corta;
-- fallo visible en GitHub Actions;
-- webhook opcional mediante `ALERT_WEBHOOK_URL`.
+`.github/workflows/staging-soak.yml` permite una prueba larga controlada antes de ampliar cupos. Antes de abrir beta, `STAGING_BASE_URL` debe estar configurada y debe existir evidencia verde reciente de ambos tipos de validación según el corte de apertura.
 
-Antes de abrir beta, `STAGING_BASE_URL` debe estar configurada y debe existir evidencia de al menos una ejecución verde reciente.
+## 12. Rotación de secretos
 
-## 11. Rotación de secretos
-
-Rotar inmediatamente cuando:
-
-- una llave pudo quedar expuesta;
-- cambia el personal autorizado;
-- se reemplaza proveedor SMTP/infra;
-- se sospecha acceso no autorizado.
+Rotar inmediatamente cuando una llave pudo quedar expuesta, cambia el personal autorizado, se reemplaza proveedor SMTP/infra o se sospecha acceso no autorizado.
 
 Procedimiento:
 
@@ -208,7 +206,7 @@ Procedimiento:
 
 Para `SECRET_KEY`, considerar que la rotación invalida tokens existentes; debe ejecutarse en ventana controlada.
 
-## 12. Incidentes
+## 13. Incidentes
 
 Clasificación mínima:
 
@@ -221,19 +219,20 @@ Ante P0/P1:
 1. congelar nuevos despliegues;
 2. registrar SHA activo y hora;
 3. revisar salud de contenedores y logs;
-4. si el incidente coincide con un deploy, rollback inmediato;
+4. si coincide con un deploy, rollback inmediato;
 5. si hay sospecha de datos, preservar evidencia antes de limpiar;
 6. rotar secretos si aplica;
 7. validar recuperación con smoke;
 8. abrir issue con causa, impacto, corrección y prevención;
 9. no ampliar la beta hasta cerrar P0/P1.
 
-## 13. Criterio de salida G5
+## 14. Criterio de salida G5
 
 G5 solo puede marcarse APROBADO cuando exista evidencia reciente de:
 
 - Validation completa verde;
 - staging real desplegado desde el workflow;
+- DNS/TLS real operativo;
 - migración real exitosa;
 - backup real y restore drill real;
 - smoke/carga dentro de presupuesto;
