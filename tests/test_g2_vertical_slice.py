@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from app import models
 from app.routers.auth import create_access_token
-from app.services import building, combat, movement, troops
+from app.services import balance, building, combat, movement, troops
 
 
 def _headers(user: models.User) -> dict[str, str]:
@@ -63,8 +63,9 @@ def test_g2_new_player_vertical_slice_end_to_end(
         x=city.x + 3,
         y=city.y,
         wood=120.0,
-        clay=120.0,
+        stone=120.0,
         iron=120.0,
+        gold=120.0,
         loyalty=100.0,
     )
     db_session.add(barbarian)
@@ -148,7 +149,7 @@ def test_g2_new_player_vertical_slice_end_to_end(
 
     before_reward = {
         resource: float(getattr(db_session.query(models.City).filter_by(id=city.id).one(), resource))
-        for resource in ("wood", "clay", "iron")
+        for resource in balance.RESOURCE_FIELDS
     }
 
     # GET is read-only: it may discover completion but never performs a reward write.
@@ -167,13 +168,13 @@ def test_g2_new_player_vertical_slice_end_to_end(
     assert completed["step"] == 7
     assert completed["completed"] is True
     assert completed["reward_claimed"] is True
-    assert completed["reward"] == {"wood": 250, "clay": 250, "iron": 250}
+    assert completed["reward"] == balance.TUTORIAL_REWARD
 
     db_session.expire_all()
     after_first = db_session.query(models.City).filter_by(id=city.id).one()
     first_balances = {
         resource: float(getattr(after_first, resource))
-        for resource in ("wood", "clay", "iron")
+        for resource in balance.RESOURCE_FIELDS
     }
     for resource in first_balances:
         assert first_balances[resource] >= before_reward[resource]
@@ -191,5 +192,5 @@ def test_g2_new_player_vertical_slice_end_to_end(
     after_second = db_session.query(models.City).filter_by(id=city.id).one()
     assert {
         resource: float(getattr(after_second, resource))
-        for resource in ("wood", "clay", "iron")
+        for resource in balance.RESOURCE_FIELDS
     } == first_balances

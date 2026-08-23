@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app import models
-from app.services import building, production
+from app.services import balance, building, production
 
 
 FIXED_NOW = datetime(2026, 8, 18, 19, 0, tzinfo=timezone.utc)
@@ -14,11 +14,16 @@ def _freeze_time(monkeypatch):
     monkeypatch.setattr(production, "utc_now", lambda: FIXED_NOW)
 
 
+def _set_resources(city, amount: float) -> None:
+    for resource in balance.RESOURCE_FIELDS:
+        setattr(city, resource, amount)
+
+
 def test_level_two_quote_matches_exact_payment(db_session, city, monkeypatch):
     _freeze_time(monkeypatch)
     town_hall = models.Building(city_id=city.id, name="town_hall", level=1)
     db_session.add(town_hall)
-    city.wood = city.clay = city.iron = 5000.0
+    _set_resources(city, 5000.0)
     city.last_production = FIXED_NOW
     db_session.commit()
     db_session.refresh(city)
@@ -33,25 +38,31 @@ def test_level_two_quote_matches_exact_payment(db_session, city, monkeypatch):
     assert quote["cost"] == pytest.approx(expected)
     assert quote["build_time"] == building.calculate_build_time(2)
 
-    before = {resource: getattr(city, resource) for resource in ("wood", "clay", "iron")}
+    before = {
+        resource: float(getattr(city, resource))
+        for resource in balance.RESOURCE_FIELDS
+    }
     queue_entry = building.queue_upgrade(db_session, city, "town_hall")
 
     assert queue_entry.target_level == 2
     assert queue_entry.paid_cost == pytest.approx(expected)
-    for resource, amount in expected.items():
-        assert getattr(city, resource) == pytest.approx(before[resource] - amount)
+    for resource in balance.RESOURCE_FIELDS:
+        assert getattr(city, resource) == pytest.approx(
+            before[resource] - expected.get(resource, 0.0)
+        )
 
 
 def test_cancel_refunds_persisted_payment_not_recomputed_cost(db_session, city, monkeypatch):
     _freeze_time(monkeypatch)
-    city.wood = city.clay = city.iron = 100.0
+    _set_resources(city, 100.0)
     city.last_production = FIXED_NOW
+    paid_cost = {"wood": 111.0, "stone": 222.0, "iron": 333.0}
     queue_entry = models.BuildingQueue(
         city_id=city.id,
         building_type="town_hall",
         target_level=9,
         finish_time=FIXED_NOW + timedelta(hours=1),
-        paid_cost={"wood": 111.0, "clay": 222.0, "iron": 333.0},
+        paid_cost=paid_cost,
     )
     db_session.add(queue_entry)
     db_session.commit()
@@ -60,9 +71,9 @@ def test_cancel_refunds_persisted_payment_not_recomputed_cost(db_session, city, 
     assert building.cancel_building_queue(db_session, queue_id, city.owner_id) is True
 
     db_session.refresh(city)
-    assert city.wood == pytest.approx(100.0 + 111.0 * building.REFUND_FACTOR)
-    assert city.clay == pytest.approx(100.0 + 222.0 * building.REFUND_FACTOR)
-    assert city.iron == pytest.approx(100.0 + 333.0 * building.REFUND_FACTOR)
+    for resource in balance.RESOURCE_FIELDS:
+        expected = 100.0 + paid_cost.get(resource, 0.0) * building.REFUND_FACTOR
+        assert getattr(city, resource) == pytest.approx(expected)
     assert db_session.query(models.BuildingQueue).filter_by(id=queue_id).first() is None
 
 
@@ -71,15 +82,16 @@ def test_cancel_refund_respects_storage_without_destroying_existing_overflow(
 ):
     _freeze_time(monkeypatch)
     city.wood = 4990.0
-    city.clay = 6000.0
+    city.stone = 6000.0
     city.iron = 4995.0
+    city.gold = 4999.0
     city.last_production = FIXED_NOW
     queue_entry = models.BuildingQueue(
         city_id=city.id,
         building_type="town_hall",
         target_level=1,
         finish_time=FIXED_NOW + timedelta(hours=1),
-        paid_cost={"wood": 100.0, "clay": 100.0, "iron": 100.0},
+        paid_cost={"wood": 100.0, "stone": 100.0, "iron": 100.0},
     )
     db_session.add(queue_entry)
     db_session.commit()
@@ -88,20 +100,21 @@ def test_cancel_refund_respects_storage_without_destroying_existing_overflow(
 
     db_session.refresh(city)
     assert city.wood == 5000.0
-    assert city.clay == 6000.0
+    assert city.stone == 6000.0
     assert city.iron == 5000.0
+    assert city.gold == 4999.0
 
 
 def test_completed_queue_cannot_be_cancelled_for_refund(db_session, city, monkeypatch):
     _freeze_time(monkeypatch)
-    city.wood = city.clay = city.iron = 100.0
+    _set_resources(city, 100.0)
     city.last_production = FIXED_NOW
     queue_entry = models.BuildingQueue(
         city_id=city.id,
         building_type="town_hall",
         target_level=1,
         finish_time=FIXED_NOW,
-        paid_cost={"wood": 260.0, "clay": 200.0, "iron": 150.0},
+        paid_cost={"wood": 260.0, "stone": 200.0, "iron": 150.0},
     )
     db_session.add(queue_entry)
     db_session.commit()
@@ -111,7 +124,9 @@ def test_completed_queue_cannot_be_cancelled_for_refund(db_session, city, monkey
 
     db_session.expire_all()
     assert db_session.query(models.BuildingQueue).filter_by(id=queue_entry.id).first() is not None
-    assert db_session.query(models.City).filter_by(id=city.id).one().wood == 100.0
+    persisted = db_session.query(models.City).filter_by(id=city.id).one()
+    for resource in balance.RESOURCE_FIELDS:
+        assert getattr(persisted, resource) == 100.0
 
 
 def test_unknown_building_cannot_be_queued(db_session, city):
@@ -127,7 +142,7 @@ def test_due_queue_completion_deletes_queue_before_side_effects(db_session, city
         building_type="town_hall",
         target_level=1,
         finish_time=FIXED_NOW - timedelta(seconds=1),
-        paid_cost={"wood": 260.0, "clay": 200.0, "iron": 150.0},
+        paid_cost={"wood": 260.0, "stone": 200.0, "iron": 150.0},
     )
     db_session.add_all([building_row, queue_entry])
     db_session.commit()
