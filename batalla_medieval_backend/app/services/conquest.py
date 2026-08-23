@@ -3,7 +3,8 @@ from typing import Dict, Tuple
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import balance, combat, production, world_gen
+from . import balance, combat, production
+from . import expansion as expansion_service
 
 # Compatibility aliases. Expansion balance lives only in ``balance``.
 FOUNDING_COST = balance.CITY_FOUNDING_COST
@@ -124,52 +125,14 @@ def found_city(
     x: int,
     y: int,
 ) -> models.City:
-    """Found a city without allowing concurrent requests to double-spend."""
+    """Compatibility wrapper: all additional cities use BM-0061 expansion rules."""
 
-    origin_city, production_gains = production.lock_and_recalculate_resources(
-        db, origin_city
+    return expansion_service.found_settlement(
+        db,
+        owner,
+        origin_city,
+        name,
+        x,
+        y,
+        "city",
     )
-
-    existing_city = (
-        db.query(models.City)
-        .filter(
-            models.City.world_id == origin_city.world_id,
-            models.City.x == x,
-            models.City.y == y,
-        )
-        .first()
-    )
-    if existing_city:
-        db.rollback()
-        raise ValueError("Another city already exists at those coordinates")
-
-    if not production.check_cost(origin_city, FOUNDING_COST):
-        db.rollback()
-        raise ValueError("Not enough resources to found a new city")
-    production.pay_cost(origin_city, FOUNDING_COST)
-
-    tile_type = world_gen.get_tile_type(x, y)
-    new_city = models.City(
-        name=name,
-        x=x,
-        y=y,
-        owner_id=owner.id,
-        world_id=origin_city.world_id,
-        loyalty=balance.CITY_INITIAL_LOYALTY,
-        tile_type=tile_type,
-    )
-    db.add(new_city)
-    db.flush()
-
-    for building in STARTER_BUILDINGS:
-        starter = models.Building(
-            city_id=new_city.id,
-            name=building["name"],
-            level=building["level"],
-        )
-        db.add(starter)
-
-    db.commit()
-    db.refresh(new_city)
-    production.record_resource_gains(db, origin_city, production_gains)
-    return new_city
