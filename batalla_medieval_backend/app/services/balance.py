@@ -9,6 +9,11 @@ legacy clay values are preserved 1:1 as stone by migration 0007. Gold is live
 for production, storage, trade, transport and loot; final gold upkeep/costs are
 owned by BM-0062/BM-0063 so this migration does not introduce a first-session
 economic dead end.
+
+BM-0061 adds the canonical territorial expansion contract. Church and cathedral
+completions mint expansion points for the owning player/world membership. Those
+points are consumed to found cities/camps or promote a camp; camps remain a
+reduced-capacity logistics settlement and cannot recursively generate points.
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, Tuple
 
-BALANCE_VERSION = "2026.08.23-bm0060.1"
+BALANCE_VERSION = "2026.08.23-bm0061.1"
 
 RESOURCE_FIELDS = ("wood", "stone", "iron", "gold")
 CITY_STARTING_RESOURCES: Dict[str, float] = {
@@ -40,6 +45,8 @@ BUILDING_ORDER = [
     "warehouse",
     "smithy",
     "workshop",
+    "church",
+    "cathedral",
     "world_wonder",
 ]
 
@@ -53,6 +60,8 @@ BUILDING_DISPLAY_NAMES = {
     "warehouse": "Gran Depósito",
     "smithy": "Forja Bélica",
     "workshop": "Taller de Asedio",
+    "church": "Iglesia",
+    "cathedral": "Catedral",
     "world_wonder": "Maravilla del Mundo",
 }
 
@@ -66,6 +75,8 @@ BUILDING_COSTS: Dict[str, Dict[str, float]] = {
     "warehouse": {"wood": 130.0, "stone": 100.0, "iron": 90.0},
     "smithy": {"wood": 220.0, "stone": 180.0, "iron": 240.0},
     "workshop": {"wood": 460.0, "stone": 510.0, "iron": 600.0},
+    "church": {"wood": 300.0, "stone": 350.0, "iron": 180.0, "gold": 100.0},
+    "cathedral": {"wood": 1200.0, "stone": 1400.0, "iron": 800.0, "gold": 500.0},
     "world_wonder": {"wood": 10000.0, "stone": 10000.0, "iron": 10000.0},
 }
 
@@ -75,7 +86,9 @@ BUILDING_PREREQUISITES: Dict[str, Dict[str, int]] = {
     "wall": {"barracks": 1},
     "smithy": {"town_hall": 5, "barracks": 1},
     "workshop": {"town_hall": 10, "stable": 10},
-    "world_wonder": {"town_hall": 20, "warehouse": 20},
+    "church": {"town_hall": 3},
+    "cathedral": {"town_hall": 10, "church": 10},
+    "world_wonder": {"town_hall": 20, "warehouse": 20, "cathedral": 10},
 }
 
 BUILDING_COST_GROWTH = 1.20
@@ -103,11 +116,41 @@ CITY_FOUNDING_COST: Dict[str, float] = {
     "stone": 800.0,
     "iron": 800.0,
 }
+CAMP_FOUNDING_COST: Dict[str, float] = {
+    "wood": 300.0,
+    "stone": 300.0,
+    "iron": 300.0,
+}
+CAMP_PROMOTION_COST: Dict[str, float] = {
+    resource: CITY_FOUNDING_COST.get(resource, 0.0) - CAMP_FOUNDING_COST.get(resource, 0.0)
+    for resource in RESOURCE_FIELDS
+    if CITY_FOUNDING_COST.get(resource, 0.0) - CAMP_FOUNDING_COST.get(resource, 0.0) > 0
+}
+SETTLEMENT_EXPANSION_POINT_COSTS = {
+    "camp": 2,
+    "city": 5,
+}
+CAMP_PROMOTION_POINT_COST = 3
+EXPANSION_POINTS_PER_COMPLETION = {
+    "church": 1,
+    "cathedral": 3,
+}
 CITY_INITIAL_LOYALTY = LOYALTY_MAX
+CITY_POPULATION_MAX = 100
+CAMP_POPULATION_MAX = 50
+CAMP_PRODUCTION_MULTIPLIER = 0.25
+CAMP_ALLOWED_BUILDINGS = ("barracks", "wall", "warehouse")
 STARTER_BUILDINGS = (
     {"name": "town_hall", "level": 1},
     {"name": "barracks", "level": 1},
 )
+CAMP_STARTER_BUILDINGS = (
+    {"name": "warehouse", "level": 1},
+    {"name": "barracks", "level": 1},
+)
+CAMP_STARTING_RESOURCES: Dict[str, float] = {
+    resource: 0.0 for resource in RESOURCE_FIELDS
+}
 
 # Tutorial is part of the accepted G2 economic path. Its completion reward is
 # versioned here so the service, API/help and tests cannot silently diverge.
@@ -511,9 +554,20 @@ def snapshot() -> Dict[str, Any]:
             "loyalty_recovery_per_hour": LOYALTY_RECOVERY_PER_HOUR,
         },
         "expansion": {
-            "founding_cost": deepcopy(CITY_FOUNDING_COST),
+            "city_founding_cost": deepcopy(CITY_FOUNDING_COST),
+            "camp_founding_cost": deepcopy(CAMP_FOUNDING_COST),
+            "camp_promotion_cost": deepcopy(CAMP_PROMOTION_COST),
+            "point_costs": deepcopy(SETTLEMENT_EXPANSION_POINT_COSTS),
+            "camp_promotion_point_cost": CAMP_PROMOTION_POINT_COST,
+            "points_per_completion": deepcopy(EXPANSION_POINTS_PER_COMPLETION),
             "initial_loyalty": CITY_INITIAL_LOYALTY,
-            "starter_buildings": deepcopy(list(STARTER_BUILDINGS)),
+            "city_population_max": CITY_POPULATION_MAX,
+            "camp_population_max": CAMP_POPULATION_MAX,
+            "camp_production_multiplier": CAMP_PRODUCTION_MULTIPLIER,
+            "camp_allowed_buildings": list(CAMP_ALLOWED_BUILDINGS),
+            "city_starter_buildings": deepcopy(list(STARTER_BUILDINGS)),
+            "camp_starter_buildings": deepcopy(list(CAMP_STARTER_BUILDINGS)),
+            "camp_starting_resources": deepcopy(CAMP_STARTING_RESOURCES),
         },
         "tutorial": {
             "completion_reward": deepcopy(TUTORIAL_REWARD),
