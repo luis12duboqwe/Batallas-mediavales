@@ -4,9 +4,12 @@ import { useCityStore } from '../store/cityStore';
 
 const RESOURCE_OPTIONS = [
   { value: 'wood', label: 'Madera' },
-  { value: 'clay', label: 'Barro' },
+  { value: 'stone', label: 'Piedra' },
   { value: 'iron', label: 'Hierro' },
+  { value: 'gold', label: 'Oro' },
 ];
+
+const EMPTY_TRANSPORT = { target_city_id: '', wood: 0, stone: 0, iron: 0, gold: 0 };
 
 const resourceLabel = (value) => (
   RESOURCE_OPTIONS.find((option) => option.value === value)?.label || value
@@ -21,9 +24,9 @@ const MarketView = () => {
   const [messageKind, setMessageKind] = useState('status');
   const [filterAlliance, setFilterAlliance] = useState(false);
 
-  const [transport, setTransport] = useState({ target_city_id: '', wood: 0, clay: 0, iron: 0 });
-  const [newOffer, setNewOffer] = useState({ offer_type: 'wood', offer_amount: 1000, request_type: 'clay', request_amount: 1000 });
-  const [npcTrade, setNpcTrade] = useState({ offer_type: 'wood', request_type: 'clay', amount: 1000 });
+  const [transport, setTransport] = useState({ ...EMPTY_TRANSPORT });
+  const [newOffer, setNewOffer] = useState({ offer_type: 'wood', offer_amount: 1000, request_type: 'stone', request_amount: 1000 });
+  const [npcTrade, setNpcTrade] = useState({ offer_type: 'wood', request_type: 'stone', amount: 1000 });
 
   const showSuccess = (text) => {
     setMessageKind('status');
@@ -63,7 +66,7 @@ const MarketView = () => {
     setMessage('');
     try {
       await api.sendResources(currentCity.id, currentCity.world_id, transport);
-      setTransport({ target_city_id: '', wood: 0, clay: 0, iron: 0 });
+      setTransport({ ...EMPTY_TRANSPORT });
       await refreshAfterMutation();
       showSuccess('Recursos enviados correctamente.');
     } catch (error) {
@@ -198,7 +201,7 @@ const MarketView = () => {
                 required
               />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {RESOURCE_OPTIONS.map((resource) => (
                 <div key={resource.value}>
                   <label htmlFor={`market-send-${resource.value}`} className="label text-amber-200">{resource.label}</label>
