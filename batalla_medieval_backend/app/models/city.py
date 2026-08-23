@@ -28,6 +28,16 @@ class City(Base):
     researched_units: Mapped[list] = mapped_column(JSON, default=["basic_infantry"])
     tile_type: Mapped[str] = mapped_column(String, default="grass")  # grass, forest, mountain, water
 
+    @property
+    def clay(self) -> float:
+        """Internal migration bridge; API/balance must use ``stone`` only."""
+
+        return self.stone
+
+    @clay.setter
+    def clay(self, value: float) -> None:
+        self.stone = value
+
     owner = relationship("User", back_populates="cities")
     world = relationship("World", back_populates="cities")
     buildings = relationship("Building", back_populates="city", cascade="all, delete-orphan")
