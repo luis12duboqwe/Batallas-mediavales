@@ -1,13 +1,15 @@
 """Versioned, server-authoritative balance data for the live game.
 
-BM-0040 establishes this module as the only place where gameplay balance
-numbers are defined. Domain services may expose compatibility aliases, but
-those aliases must point back to the objects in this module.
+BM-0040 established this module as the only place where gameplay balance
+numbers are defined. BM-0060 migrates the economy to the v1.0 canonical
+resources: wood, stone, iron and gold.
 
-The values preserve the accepted G2/G3 gameplay unless a previously declared
-rule was not actually wired (for example the global loot event). Maintenance
-is explicitly zero until the planned gold-resource migration supplies its
-resource model.
+The migration is deliberately conservative: every clay value becomes stone
+1:1, existing gold starts at zero, and existing building/unit prices preserve
+their accepted economic value apart from the resource rename. Gold is now a
+real produced/stored/tradable/lootable resource, while final gold costs and
+troop upkeep values remain part of BM-0062/BM-0063 rather than being invented
+inside the schema migration.
 """
 
 from __future__ import annotations
@@ -15,9 +17,12 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, Tuple
 
-BALANCE_VERSION = "2026.08.20-bm0040.4"
+BALANCE_VERSION = "2026.08.23-bm0060.1"
+PREVIOUS_BALANCE_VERSION = "2026.08.20-bm0040.4"
 
-RESOURCE_FIELDS = ("wood", "clay", "iron")
+RESOURCE_FIELDS = ("wood", "stone", "iron", "gold")
+CLAY_TO_STONE_RATIO = 1.0
+EXISTING_CITY_INITIAL_GOLD = 0.0
 
 # ---------------------------------------------------------------------------
 # Buildings
@@ -50,16 +55,16 @@ BUILDING_DISPLAY_NAMES = {
 }
 
 BUILDING_COSTS: Dict[str, Dict[str, float]] = {
-    "town_hall": {"wood": 260.0, "clay": 200.0, "iron": 150.0},
-    "barracks": {"wood": 200.0, "clay": 160.0, "iron": 170.0},
-    "stable": {"wood": 320.0, "clay": 260.0, "iron": 260.0},
-    "wall": {"wood": 100.0, "clay": 100.0, "iron": 50.0},
-    "market": {"wood": 100.0, "clay": 100.0, "iron": 100.0},
-    "farm": {"wood": 80.0, "clay": 80.0, "iron": 60.0},
-    "warehouse": {"wood": 130.0, "clay": 100.0, "iron": 90.0},
-    "smithy": {"wood": 220.0, "clay": 180.0, "iron": 240.0},
-    "workshop": {"wood": 460.0, "clay": 510.0, "iron": 600.0},
-    "world_wonder": {"wood": 10000.0, "clay": 10000.0, "iron": 10000.0},
+    "town_hall": {"wood": 260.0, "stone": 200.0, "iron": 150.0},
+    "barracks": {"wood": 200.0, "stone": 160.0, "iron": 170.0},
+    "stable": {"wood": 320.0, "stone": 260.0, "iron": 260.0},
+    "wall": {"wood": 100.0, "stone": 100.0, "iron": 50.0},
+    "market": {"wood": 100.0, "stone": 100.0, "iron": 100.0},
+    "farm": {"wood": 80.0, "stone": 80.0, "iron": 60.0},
+    "warehouse": {"wood": 130.0, "stone": 100.0, "iron": 90.0},
+    "smithy": {"wood": 220.0, "stone": 180.0, "iron": 240.0},
+    "workshop": {"wood": 460.0, "stone": 510.0, "iron": 600.0},
+    "world_wonder": {"wood": 10000.0, "stone": 10000.0, "iron": 10000.0},
 }
 
 BUILDING_PREREQUISITES: Dict[str, Dict[str, int]] = {
@@ -81,8 +86,11 @@ QUEUE_REFUND_FACTOR = 0.80
 
 PRODUCTION_RATES_PER_HOUR: Dict[str, float] = {
     "wood": 15.0,
-    "clay": 12.0,
+    "stone": 12.0,
     "iron": 10.0,
+    # Gold is intentionally scarcer. This establishes the resource model;
+    # BM-0063 assigns final upkeep values against this same canonical field.
+    "gold": 5.0,
 }
 
 STORAGE_BASE_CAPACITY = 5000.0
@@ -92,7 +100,7 @@ LOYALTY_RECOVERY_PER_HOUR = 2.0
 
 CITY_FOUNDING_COST: Dict[str, float] = {
     "wood": 800.0,
-    "clay": 800.0,
+    "stone": 800.0,
     "iron": 800.0,
 }
 CITY_INITIAL_LOYALTY = LOYALTY_MAX
@@ -101,22 +109,17 @@ STARTER_BUILDINGS = (
     {"name": "barracks", "level": 1},
 )
 
-# Tutorial is part of the accepted G2 economic path. Its completion reward is
-# versioned here so the service, API/help and tests cannot silently diverge.
 TUTORIAL_REWARD: Dict[str, float] = {
     "wood": 250.0,
-    "clay": 250.0,
+    "stone": 250.0,
     "iron": 250.0,
 }
 
-# The alpha PvE seed/AI values are versioned here because they directly affect
-# tutorial difficulty, loot availability and recovery. BM-0067 may replace
-# these values with the final barbarian/oasis model without creating a second
-# source of truth.
 BARBARIAN_STARTING_RESOURCES: Dict[str, float] = {
     "wood": 1000.0,
-    "clay": 1000.0,
+    "stone": 1000.0,
     "iron": 1000.0,
+    "gold": 0.0,
 }
 BARBARIAN_POPULATION_MAX = 100
 BARBARIAN_STARTING_BUILDINGS = (
@@ -163,11 +166,11 @@ UNIT_DISPLAY_NAMES = {
     "noble": "Noble",
 }
 
-# Every currently live troop occupies one population slot. Upkeep is explicitly
-# zero until BM-0060 introduces gold as the maintenance resource.
+# Gold is the canonical maintenance resource from BM-0060 onward. The final
+# non-zero per-unit upkeep schedule is intentionally BM-0063 scope.
 UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
     "basic_infantry": {
-        "training_cost": {"wood": 50.0, "clay": 30.0, "iron": 20.0},
+        "training_cost": {"wood": 50.0, "stone": 30.0, "iron": 20.0},
         "training_time_seconds": 45,
         "training_requirements": {"barracks": 1},
         "research_cost": {},
@@ -177,80 +180,80 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "upkeep_per_hour": 0.0,
     },
     "heavy_infantry": {
-        "training_cost": {"wood": 70.0, "clay": 60.0, "iron": 50.0},
+        "training_cost": {"wood": 70.0, "stone": 60.0, "iron": 50.0},
         "training_time_seconds": 60,
         "training_requirements": {"barracks": 3, "smithy": 1},
-        "research_cost": {"wood": 500.0, "clay": 400.0, "iron": 300.0},
+        "research_cost": {"wood": 500.0, "stone": 400.0, "iron": 300.0},
         "research_requirements": {"barracks": 3},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
     },
     "archer": {
-        "training_cost": {"wood": 80.0, "clay": 40.0, "iron": 40.0},
+        "training_cost": {"wood": 80.0, "stone": 40.0, "iron": 40.0},
         "training_time_seconds": 50,
         "training_requirements": {"barracks": 5, "smithy": 3},
-        "research_cost": {"wood": 600.0, "clay": 300.0, "iron": 300.0},
+        "research_cost": {"wood": 600.0, "stone": 300.0, "iron": 300.0},
         "research_requirements": {"barracks": 5},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
     },
     "fast_cavalry": {
-        "training_cost": {"wood": 120.0, "clay": 80.0, "iron": 100.0},
+        "training_cost": {"wood": 120.0, "stone": 80.0, "iron": 100.0},
         "training_time_seconds": 70,
         "training_requirements": {"stable": 1},
-        "research_cost": {"wood": 1000.0, "clay": 800.0, "iron": 600.0},
+        "research_cost": {"wood": 1000.0, "stone": 800.0, "iron": 600.0},
         "research_requirements": {"stable": 3},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
     },
     "heavy_cavalry": {
-        "training_cost": {"wood": 200.0, "clay": 150.0, "iron": 200.0},
+        "training_cost": {"wood": 200.0, "stone": 150.0, "iron": 200.0},
         "training_time_seconds": 80,
         "training_requirements": {"stable": 5, "smithy": 5},
-        "research_cost": {"wood": 2000.0, "clay": 1500.0, "iron": 1500.0},
+        "research_cost": {"wood": 2000.0, "stone": 1500.0, "iron": 1500.0},
         "research_requirements": {"stable": 10},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
     },
     "spy": {
-        "training_cost": {"wood": 40.0, "clay": 40.0, "iron": 40.0},
+        "training_cost": {"wood": 40.0, "stone": 40.0, "iron": 40.0},
         "training_time_seconds": 30,
         "training_requirements": {"stable": 1},
-        "research_cost": {"wood": 200.0, "clay": 200.0, "iron": 200.0},
+        "research_cost": {"wood": 200.0, "stone": 200.0, "iron": 200.0},
         "research_requirements": {"stable": 1},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
     },
     "ram": {
-        "training_cost": {"wood": 300.0, "clay": 200.0, "iron": 150.0},
+        "training_cost": {"wood": 300.0, "stone": 200.0, "iron": 150.0},
         "training_time_seconds": 90,
         "training_requirements": {"workshop": 1},
-        "research_cost": {"wood": 1500.0, "clay": 1000.0, "iron": 1000.0},
+        "research_cost": {"wood": 1500.0, "stone": 1000.0, "iron": 1000.0},
         "research_requirements": {"barracks": 10},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
     },
     "catapult": {
-        "training_cost": {"wood": 350.0, "clay": 250.0, "iron": 300.0},
+        "training_cost": {"wood": 350.0, "stone": 250.0, "iron": 300.0},
         "training_time_seconds": 120,
         "training_requirements": {"workshop": 5},
-        "research_cost": {"wood": 2000.0, "clay": 1500.0, "iron": 1500.0},
+        "research_cost": {"wood": 2000.0, "stone": 1500.0, "iron": 1500.0},
         "research_requirements": {"barracks": 15},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
     },
     "noble": {
-        "training_cost": {"wood": 1000.0, "clay": 1000.0, "iron": 1000.0},
+        "training_cost": {"wood": 1000.0, "stone": 1000.0, "iron": 1000.0},
         "training_time_seconds": 45,
         "training_requirements": {"town_hall": 20, "workshop": 10},
-        "research_cost": {"wood": 10000.0, "clay": 10000.0, "iron": 10000.0},
+        "research_cost": {"wood": 10000.0, "stone": 10000.0, "iron": 10000.0},
         "research_requirements": {"town_hall": 20},
         "researchable": True,
         "population": 1,
@@ -271,78 +274,15 @@ UNIT_SPEED: Dict[str, float] = {
 }
 
 UNIT_COMBAT_STATS: Dict[str, Dict[str, Any]] = {
-    "basic_infantry": {
-        "attack": 10,
-        "def_inf": 20,
-        "def_cav": 10,
-        "def_siege": 20,
-        "type": "infantry",
-        "carry": 40,
-    },
-    "heavy_infantry": {
-        "attack": 25,
-        "def_inf": 40,
-        "def_cav": 30,
-        "def_siege": 40,
-        "type": "infantry",
-        "carry": 30,
-    },
-    "archer": {
-        "attack": 30,
-        "def_inf": 10,
-        "def_cav": 40,
-        "def_siege": 15,
-        "type": "infantry",
-        "carry": 35,
-    },
-    "fast_cavalry": {
-        "attack": 60,
-        "def_inf": 20,
-        "def_cav": 20,
-        "def_siege": 20,
-        "type": "cavalry",
-        "carry": 80,
-    },
-    "heavy_cavalry": {
-        "attack": 100,
-        "def_inf": 40,
-        "def_cav": 60,
-        "def_siege": 40,
-        "type": "cavalry",
-        "carry": 60,
-    },
-    "spy": {
-        "attack": 0,
-        "def_inf": 0,
-        "def_cav": 0,
-        "def_siege": 0,
-        "type": "infantry",
-        "carry": 0,
-    },
-    "ram": {
-        "attack": 2,
-        "def_inf": 40,
-        "def_cav": 35,
-        "def_siege": 60,
-        "type": "siege",
-        "carry": 0,
-    },
-    "catapult": {
-        "attack": 2,
-        "def_inf": 70,
-        "def_cav": 70,
-        "def_siege": 90,
-        "type": "siege",
-        "carry": 0,
-    },
-    "noble": {
-        "attack": 30,
-        "def_inf": 50,
-        "def_cav": 50,
-        "def_siege": 50,
-        "type": "infantry",
-        "carry": 0,
-    },
+    "basic_infantry": {"attack": 10, "def_inf": 20, "def_cav": 10, "def_siege": 20, "type": "infantry", "carry": 40},
+    "heavy_infantry": {"attack": 25, "def_inf": 40, "def_cav": 30, "def_siege": 40, "type": "infantry", "carry": 30},
+    "archer": {"attack": 30, "def_inf": 10, "def_cav": 40, "def_siege": 15, "type": "infantry", "carry": 35},
+    "fast_cavalry": {"attack": 60, "def_inf": 20, "def_cav": 20, "def_siege": 20, "type": "cavalry", "carry": 80},
+    "heavy_cavalry": {"attack": 100, "def_inf": 40, "def_cav": 60, "def_siege": 40, "type": "cavalry", "carry": 60},
+    "spy": {"attack": 0, "def_inf": 0, "def_cav": 0, "def_siege": 0, "type": "infantry", "carry": 0},
+    "ram": {"attack": 2, "def_inf": 40, "def_cav": 35, "def_siege": 60, "type": "siege", "carry": 0},
+    "catapult": {"attack": 2, "def_inf": 70, "def_cav": 70, "def_siege": 90, "type": "siege", "carry": 0},
+    "noble": {"attack": 30, "def_inf": 50, "def_cav": 50, "def_siege": 50, "type": "infantry", "carry": 0},
 }
 
 LEGACY_UNIT_ALIASES = {
@@ -481,6 +421,12 @@ def snapshot() -> Dict[str, Any]:
     return {
         "version": BALANCE_VERSION,
         "resources": list(RESOURCE_FIELDS),
+        "migration": {
+            "previous_version": PREVIOUS_BALANCE_VERSION,
+            "clay_to_stone_ratio": CLAY_TO_STONE_RATIO,
+            "existing_city_initial_gold": EXISTING_CITY_INITIAL_GOLD,
+            "downgrade_requires_zero_gold": True,
+        },
         "buildings": {
             "catalog": buildings,
             "cost_growth": BUILDING_COST_GROWTH,
@@ -490,7 +436,8 @@ def snapshot() -> Dict[str, Any]:
         "units": {
             "catalog": units,
             "order": list(UNIT_ORDER),
-            "maintenance_resource": None,
+            "maintenance_resource": "gold",
+            "maintenance_active": False,
         },
         "production": {
             "base_rates_per_hour": deepcopy(PRODUCTION_RATES_PER_HOUR),
@@ -504,9 +451,7 @@ def snapshot() -> Dict[str, Any]:
             "initial_loyalty": CITY_INITIAL_LOYALTY,
             "starter_buildings": deepcopy(list(STARTER_BUILDINGS)),
         },
-        "tutorial": {
-            "completion_reward": deepcopy(TUTORIAL_REWARD),
-        },
+        "tutorial": {"completion_reward": deepcopy(TUTORIAL_REWARD)},
         "pve_alpha": {
             "barbarian_starting_resources": deepcopy(BARBARIAN_STARTING_RESOURCES),
             "barbarian_population_max": BARBARIAN_POPULATION_MAX,
