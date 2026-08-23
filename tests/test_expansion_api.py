@@ -88,6 +88,17 @@ def test_expansion_status_and_camp_founding_api(
     assert payload["settlement_type"] == "camp"
     assert payload["population_max"] == balance.CAMP_POPULATION_MAX
 
+    map_response = client.get(
+        "/map/tiles",
+        params={"world_id": city.world_id, "x": 12, "y": 13, "radius": 0},
+        headers=_headers(user),
+    )
+    assert map_response.status_code == 200, map_response.text
+    tile = map_response.json()["tiles"][0]
+    assert tile["city_id"] == payload["id"]
+    assert tile["settlement_type"] == "camp"
+    assert tile["owner_id"] == user.id
+
     db_session.refresh(membership)
     assert membership.expansion_points == 0
 
