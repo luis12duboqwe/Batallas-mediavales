@@ -120,7 +120,7 @@ def _rewrite_payloads(source: str, target: str) -> None:
         ("troop_queue", "paid_cost"),
         ("quests", "reward"),
         ("quests", "requirements"),
-        ("quest_progress", "progress"),
+        ("quest_progress", "progress_data"),
     ):
         _rewrite_json_column(table_name, column_name, source, target)
 
