@@ -3,6 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../api/axiosClient';
 import { useCityStore } from '../store/cityStore';
 
+const resourceCostMeta = [
+  ['wood', '🪵'],
+  ['stone', '🪨'],
+  ['iron', '⛓️'],
+  ['gold', '🪙'],
+];
+
 const AcademyView = () => {
   const { t } = useTranslation();
   const { loadCity } = useCityStore();
@@ -73,6 +80,7 @@ const AcademyView = () => {
             ? []
             : formatRequirements(unit.research_requirements);
           const cost = unit.research_cost || {};
+          const visibleCosts = resourceCostMeta.filter(([resource]) => (cost[resource] || 0) > 0);
 
           return (
             <div
@@ -88,11 +96,11 @@ const AcademyView = () => {
               <h3 className="font-bold text-xl text-amber-100 mb-2">{t(unit.unit_type)}</h3>
 
               <div className="text-sm text-gray-400 mb-4">
-                {Object.keys(cost).length > 0 ? (
+                {visibleCosts.length > 0 ? (
                   <div className="flex gap-2 mb-1 flex-wrap">
-                    <span>🪵 {cost.wood || 0}</span>
-                    <span>🧱 {cost.clay || 0}</span>
-                    <span>⛓️ {cost.iron || 0}</span>
+                    {visibleCosts.map(([resource, icon]) => (
+                      <span key={resource}>{icon} {cost[resource]}</span>
+                    ))}
                   </div>
                 ) : (
                   <span className="text-green-300">Disponible desde el inicio</span>
