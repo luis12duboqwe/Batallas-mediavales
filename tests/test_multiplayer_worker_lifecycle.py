@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app import models
-from app.services import combat, espionage
+from app.services import balance, combat, espionage
 from app.services import movement as movement_service
 
 
@@ -27,8 +27,9 @@ def _peer_city(db_session, world_id: int, *, username: str, x: int, y: int):
         x=x,
         y=y,
         wood=500.0,
-        clay=500.0,
+        stone=500.0,
         iron=500.0,
+        gold=500.0,
         last_production=FIXED_NOW,
     )
     db_session.add(target)
@@ -78,7 +79,8 @@ def test_two_player_attack_resolves_reports_and_returns_without_conquest(
         x=30,
         y=30,
     )
-    city.wood = city.clay = city.iron = 1000.0
+    for resource in balance.RESOURCE_FIELDS:
+        setattr(city, resource, 1000.0)
     city.last_production = FIXED_NOW
     db_session.add(city)
     db_session.commit()
@@ -236,6 +238,7 @@ def test_two_player_transport_delivers_once_and_merchants_return(
     db_session.expire_all()
     target_after = db_session.query(models.City).filter_by(id=target.id).one()
     assert target_after.wood == pytest.approx(600.0, abs=0.1)
+    assert target_after.gold == pytest.approx(500.0, abs=0.1)
 
     merchant_return = (
         db_session.query(models.Movement)
