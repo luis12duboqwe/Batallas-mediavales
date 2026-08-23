@@ -15,8 +15,9 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 class ResourceUpdate(BaseModel):
     wood: float | None = None
-    clay: float | None = None
+    stone: float | None = None
     iron: float | None = None
+    gold: float | None = None
     population_max: int | None = None
 
 
@@ -35,8 +36,9 @@ class AdminCityCreate(BaseModel):
     x: int = 0
     y: int = 0
     wood: float = 500.0
-    clay: float = 500.0
+    stone: float = 500.0
     iron: float = 500.0
+    gold: float = 0.0
     population_max: int = 100
 
 
