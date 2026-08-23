@@ -5,8 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
-from . import ranking
-from . import production
+from . import balance, production, ranking
 
 
 def log_action(db: Session, user_id: int, action: str, details: Dict) -> models.Log:
@@ -50,9 +49,6 @@ def set_user_freeze(
     user.is_frozen = is_frozen
     user.freeze_reason = normalized_reason if is_frozen else None
     if changed:
-        # Both HTTP and Socket.IO access tokens include auth_version. Revoking
-        # it prevents an already-issued token from remaining valid after a
-        # moderation state transition.
         user.auth_version += 1
 
     log_action(
@@ -211,15 +207,17 @@ def create_city(
     if occupied:
         raise HTTPException(status_code=409, detail="Coordinates already occupied in this world")
 
+    defaults = balance.CITY_STARTING_RESOURCES
     city = models.City(
         name=payload["name"],
         x=payload.get("x", 0),
         y=payload.get("y", 0),
         owner_id=owner.id,
         world_id=world.id,
-        wood=payload.get("wood", 500.0),
-        clay=payload.get("clay", 500.0),
-        iron=payload.get("iron", 500.0),
+        wood=payload.get("wood", defaults["wood"]),
+        stone=payload.get("stone", defaults["stone"]),
+        iron=payload.get("iron", defaults["iron"]),
+        gold=payload.get("gold", defaults["gold"]),
         population_max=payload.get("population_max", 100),
     )
     db.add(city)
