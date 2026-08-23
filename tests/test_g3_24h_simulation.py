@@ -62,8 +62,9 @@ def _create_peer(db_session, world_id: int):
         x=60,
         y=60,
         wood=1000,
-        clay=1000,
+        stone=1000,
         iron=1000,
+        gold=1000,
         last_production=utc_now(),
     )
     db_session.add(city)
@@ -74,18 +75,15 @@ def _create_peer(db_session, world_id: int):
     return city
 
 
-def _dispatch(origin_id: int, target_id: int):
+def _dispatch(origin_id: int, target_id: int, *, resource: str):
     def callback(session):
         origin = session.query(models.City).filter(models.City.id == origin_id).one()
+        payload = {"target_city_id": target_id, "wood": 0, "stone": 0, "iron": 0, "gold": 0}
+        payload[resource] = TRANSFER_PER_HOUR
         movement = market.send_resources(
             session,
             origin,
-            schemas.TransportRequest(
-                target_city_id=target_id,
-                wood=TRANSFER_PER_HOUR,
-                clay=0,
-                iron=0,
-            ),
+            schemas.TransportRequest(**payload),
         )
         return movement.id
 
@@ -149,7 +147,7 @@ def test_g3_concurrent_24h_transport_simulation_has_no_duplicates_or_negative_st
         lambda *args, **kwargs: None,
     )
 
-    city.wood = city.clay = city.iron = 1000
+    city.wood = city.stone = city.iron = city.gold = 1000
     city.last_production = utc_now()
     db_session.add(models.Building(city_id=city.id, name="market", level=1))
     db_session.commit()
@@ -159,8 +157,8 @@ def test_g3_concurrent_24h_transport_simulation_has_no_duplicates_or_negative_st
     for _hour in range(HOURS):
         dispatch_results = _run_parallel(
             [
-                _dispatch(city.id, peer_city.id),
-                _dispatch(peer_city.id, city.id),
+                _dispatch(city.id, peer_city.id, resource="stone"),
+                _dispatch(peer_city.id, city.id, resource="gold"),
             ]
         )
         for result in dispatch_results:
@@ -183,10 +181,11 @@ def test_g3_concurrent_24h_transport_simulation_has_no_duplicates_or_negative_st
             .all()
         )
         assert len(balances) == 2
-        for balance in balances:
-            assert balance.wood >= 0
-            assert balance.clay >= 0
-            assert balance.iron >= 0
+        for current in balances:
+            assert current.wood >= 0
+            assert current.stone >= 0
+            assert current.iron >= 0
+            assert current.gold >= 0
         assert (
             db_session.query(models.Movement)
             .filter(models.Movement.status == "ongoing")
