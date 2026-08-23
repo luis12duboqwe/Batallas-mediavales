@@ -17,8 +17,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_WORLD_NAME = "Mundo 1"
 DEFAULT_WORLD_MAP_SIZE = 100
 
-# Fixed, valid map coordinates. They deliberately avoid water tiles and are
-# stable across runs so a restored/new database gets the same initial world.
 CANONICAL_BARBARIANS = (
     (20, 15),
     (30, 25),
@@ -30,7 +28,6 @@ CANONICAL_BARBARIANS = (
     (15, 80),
 )
 
-# Compatibility aliases. PvE content numbers live in the balance catalog.
 BARBARIAN_BUILDINGS = balance.BARBARIAN_STARTING_BUILDINGS
 BARBARIAN_TROOPS = balance.BARBARIAN_STARTING_TROOPS
 
@@ -49,8 +46,6 @@ def _get_or_create_world(db: Session) -> tuple[models.World, bool]:
         .one_or_none()
     )
     if world:
-        # Never rewrite rules of a world that may already contain player
-        # progress. World balance changes must be versioned explicitly.
         return world, False
 
     world = models.World(
@@ -81,8 +76,9 @@ def _create_barbarian_city(
         x=x,
         y=y,
         wood=resources["wood"],
-        clay=resources["clay"],
+        stone=resources["stone"],
         iron=resources["iron"],
+        gold=resources["gold"],
         population_max=balance.BARBARIAN_POPULATION_MAX,
         loyalty=balance.LOYALTY_MAX,
         tile_type=get_tile_type(x, y),
@@ -134,8 +130,6 @@ def seed_game(db: Session) -> SeedResult:
                         "Canonical seed coordinate is occupied by a player city: "
                         f"world={world.id} x={x} y={y}"
                     )
-                # Existing barbarian progress belongs to the running world. Do
-                # not replenish resources, troops or building levels on restart.
                 continue
 
             _create_barbarian_city(db, world, index, x, y)
@@ -146,9 +140,6 @@ def seed_game(db: Session) -> SeedResult:
         db.rollback()
         raise
 
-    # Hero/items are outside the MVP cut, but keeping the existing item catalog
-    # in this single bootstrap process avoids a regression while removing the
-    # old per-API-startup seed side effect.
     hero_service.seed_items(db)
 
     return SeedResult(
