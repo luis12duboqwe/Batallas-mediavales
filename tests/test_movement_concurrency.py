@@ -112,8 +112,9 @@ def test_two_workers_resolve_one_attack_exactly_once(db_session, city, monkeypat
         x=8,
         y=0,
         wood=120.0,
-        clay=120.0,
+        stone=120.0,
         iron=120.0,
+        gold=120.0,
     )
     attack = models.Movement(
         origin_city_id=city.id,
@@ -165,14 +166,16 @@ def test_two_workers_resolve_one_attack_exactly_once(db_session, city, monkeypat
     refreshed_barbarian = db_session.query(models.City).filter_by(id=barbarian_id).one()
     first_balances = (
         refreshed_barbarian.wood,
-        refreshed_barbarian.clay,
+        refreshed_barbarian.stone,
         refreshed_barbarian.iron,
+        refreshed_barbarian.gold,
     )
     movement_service.resolve_due_movements(db_session)
     db_session.expire_all()
     refreshed_barbarian = db_session.query(models.City).filter_by(id=barbarian_id).one()
     assert (
         refreshed_barbarian.wood,
-        refreshed_barbarian.clay,
+        refreshed_barbarian.stone,
         refreshed_barbarian.iron,
+        refreshed_barbarian.gold,
     ) == pytest.approx(first_balances)
