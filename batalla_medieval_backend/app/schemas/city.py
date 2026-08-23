@@ -25,8 +25,9 @@ class CityRead(CityBase):
 
     id: int
     wood: float
-    clay: float
+    stone: float
     iron: float
+    gold: float
     loyalty: float
     population_max: int
     last_production: datetime
@@ -42,8 +43,9 @@ class CityResourceStatus(BaseModel):
 
     city_id: int
     wood: float
-    clay: float
+    stone: float
     iron: float
+    gold: float
     loyalty: float
     storage_limit: float
     production_per_hour: dict
