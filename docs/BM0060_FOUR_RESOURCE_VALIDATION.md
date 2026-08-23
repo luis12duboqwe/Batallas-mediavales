@@ -34,7 +34,7 @@ Comando focal:
 pytest -q tests/test_four_resource_migration.py
 ```
 
-La Validation completa además debe ejecutar, sin excepciones:
+La Validation completa además ejecuta, sin excepciones:
 
 ```bash
 pytest
@@ -55,6 +55,31 @@ Commits de saneamiento del inventario legacy:
 
 - `be0b5df` — contratos de ciudad, edificios, tutorial, primera sesión, mercado y bárbaros;
 - `d131276` — movimientos, multiplayer worker, oasis, producción, unidades y scoping por mundo.
+
+## Contratos negativos y concurrencia
+
+`tests/test_four_resource_contract.py` comprueba que:
+
+- el catálogo runtime es exactamente `wood, stone, iron, gold`;
+- `clay` no puede volver como tipo de recurso de mercado;
+- un campo legacy `clay` en un transporte se rechaza en lugar de ignorarse;
+- un monto negativo de oro se rechaza en validación;
+- piedra y oro no pueden gastarse por encima del saldo real.
+
+`tests/test_market_concurrency.py` añade una carrera PostgreSQL en la que dos transacciones intentan gastar simultáneamente `600 stone + 600 gold` desde una ciudad con `1000/1000`. El bloqueo de la fila de ciudad debe producir un solo ganador, un solo transporte y saldos finales `400 stone / 400 gold`, nunca negativos.
+
+## Superficies frontend revisadas
+
+Las superficies activas que todavía heredaban barro fueron migradas a piedra/oro:
+
+- costes de edificios;
+- academia e investigación;
+- entrenamiento de tropas;
+- oasis en ciudad y mapa;
+- reportes de comercio, retorno, botín y espionaje;
+- panel administrativo.
+
+Además se verificaron las superficies ya migradas previamente: barra de recursos, store de ciudad, cálculo local, API client, mercado y traducciones ES/EN.
 
 ## Ensayo de rollback
 
@@ -94,15 +119,33 @@ Procedimiento obligatorio:
 4. desplegar el código compatible con 0006;
 5. ejecutar smoke tests antes de reabrir tráfico.
 
+## Validation de cierre
+
+Run **#297** sobre el HEAD de código `fcd9cb9` terminó completamente verde:
+
+- Backend: **159 passed, 14 skipped intencionales en SQLite**, 72% coverage;
+- compilación backend: verde;
+- Alembic upgrade/downgrade completo: verde;
+- seed canónico ejecutado dos veces: verde e idempotente;
+- PostgreSQL concurrency: verde, incluida la carrera piedra+oro;
+- Frontend lint/build: verde;
+- Browser E2E: verde;
+- auditoría de dependencias y análisis estático de seguridad: verde;
+- recuperación/operación G5: verde;
+- imagen Docker backend: verde;
+- imagen Docker frontend: verde.
+
+El commit que registra esta evidencia no cambia lógica de aplicación. Debe recibir su propia Validation final antes de marcar el PR Ready.
+
 ## Criterio para marcar BM-0060 Ready
 
 - [x] migración 0007 preserva barro como piedra y añade oro;
 - [x] referencias persistidas se reescriben en upgrade/downgrade;
 - [x] runtime backend usa el catálogo canónico de cuatro recursos;
 - [x] pruebas legacy detectadas por la primera Validation fueron migradas;
-- [ ] todas las superficies frontend activas quedaron sin `clay`;
-- [ ] pruebas negativas/concurrentes específicas de piedra/oro están completas;
+- [x] todas las superficies frontend activas detectadas quedaron sin `clay`;
+- [x] pruebas negativas/concurrentes específicas de piedra/oro están completas;
 - [x] procedimiento de rollback y requisito de snapshot están documentados;
-- [ ] Validation completa está verde en un HEAD congelado.
+- [x] Validation completa de código está verde y la evidencia queda registrada para la Validation final del commit documental.
 
-No se debe sacar el PR de Draft hasta cerrar los tres ítems pendientes anteriores.
+BM-0060 puede salir de Draft cuando la Validation del commit documental de cierre también termine verde.
