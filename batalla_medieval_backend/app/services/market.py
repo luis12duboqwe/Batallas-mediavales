@@ -15,7 +15,6 @@ from . import production
 
 logger = logging.getLogger(__name__)
 
-# Compatibility aliases. Market balance lives only in ``balance``.
 MARKET_BUILDING_NAME = balance.MARKET_BUILDING_KEY
 MERCHANT_CAPACITY = balance.MERCHANT_CAPACITY_PER_LEVEL
 TRANSPORT_BASE_SPEED = balance.TRANSPORT_BASE_SPEED
@@ -92,12 +91,7 @@ def _create_transport_uncommitted(
     target_city: models.City,
     resources: Dict[str, int],
 ) -> models.Movement:
-    """Create a market transport without charging resources or committing.
-
-    The caller must already hold the relevant city locks and reserve the
-    resources. Keeping this helper commit-free lets an offer exchange persist
-    both directions, the payment and offer consumption in one transaction.
-    """
+    """Create a market transport without charging resources or committing."""
 
     normalized = _normalize_transport_resources(resources)
     if origin_city.world_id != target_city.world_id:
@@ -136,8 +130,6 @@ def _audit_transport_after_commit(
     origin_city: models.City,
     target_city: models.City,
 ) -> None:
-    """Run monitoring after the economic transaction is already durable."""
-
     if not origin_city.owner:
         return
     try:
@@ -161,8 +153,6 @@ def _audit_transport_after_commit(
 def create_offer(
     db: Session, city: models.City, offer: schemas.MarketOfferCreate
 ) -> models.MarketOffer:
-    """Reserve resources for a market offer under the city row lock."""
-
     city, production_gains = production.lock_and_recalculate_resources(db, city)
     db.expire(city, ["buildings"])
 
@@ -175,11 +165,7 @@ def create_offer(
         db.rollback()
         raise HTTPException(status_code=400, detail="Not enough merchant capacity")
 
-    setattr(
-        city,
-        offer.offer_type,
-        getattr(city, offer.offer_type) - offer.offer_amount,
-    )
+    setattr(city, offer.offer_type, getattr(city, offer.offer_type) - offer.offer_amount)
 
     db_offer = models.MarketOffer(
         city_id=city.id,
@@ -204,8 +190,6 @@ def npc_trade(
     request_type: str,
     amount: int,
 ):
-    """Instant 1:1 trade with NPC, serialized per city."""
-
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
     if offer_type == request_type:
@@ -264,20 +248,14 @@ def get_offers(
             if filter_alliance:
                 query = (
                     query.join(models.User, models.City.owner_id == models.User.id)
-                    .join(
-                        models.AllianceMember,
-                        models.User.id == models.AllianceMember.user_id,
-                    )
+                    .join(models.AllianceMember, models.User.id == models.AllianceMember.user_id)
                     .filter(models.AllianceMember.alliance_id == alliance_id)
                 )
             else:
-                query = query.join(
-                    models.User, models.City.owner_id == models.User.id
-                ).outerjoin(
+                query = query.join(models.User, models.City.owner_id == models.User.id).outerjoin(
                     models.AllianceMember,
                     models.User.id == models.AllianceMember.user_id,
                 )
-
                 query = query.filter(
                     or_(
                         models.MarketOffer.is_alliance_only == False,  # noqa: E712
@@ -293,8 +271,6 @@ def get_offers(
 
 
 def accept_offer(db: Session, buyer_city: models.City, offer_id: int):
-    """Atomically consume one offer and create both resource transports."""
-
     production_gains: Dict[str, float] = {}
     try:
         offer = (
@@ -344,8 +320,6 @@ def accept_offer(db: Session, buyer_city: models.City, offer_id: int):
         if available_capacity < offer.request_amount:
             raise HTTPException(status_code=400, detail="Not enough merchant capacity")
 
-        # Seller resources were reserved exactly once by create_offer(). Buyer
-        # payment is reserved exactly once here. The transport helper never pays.
         production.pay_cost(locked_buyer, payment)
 
         seller_resources = {offer.offer_type: offer.offer_amount}
@@ -354,16 +328,10 @@ def accept_offer(db: Session, buyer_city: models.City, offer_id: int):
         db.flush()
 
         seller_movement = _create_transport_uncommitted(
-            db,
-            origin_city=seller_city,
-            target_city=locked_buyer,
-            resources=seller_resources,
+            db, origin_city=seller_city, target_city=locked_buyer, resources=seller_resources
         )
         buyer_movement = _create_transport_uncommitted(
-            db,
-            origin_city=locked_buyer,
-            target_city=seller_city,
-            resources=buyer_resources,
+            db, origin_city=locked_buyer, target_city=seller_city, resources=buyer_resources
         )
 
         db.commit()
@@ -375,23 +343,15 @@ def accept_offer(db: Session, buyer_city: models.City, offer_id: int):
 
     production.record_resource_gains(db, locked_buyer, production_gains)
     _audit_transport_after_commit(
-        db,
-        movement=seller_movement,
-        origin_city=seller_city,
-        target_city=locked_buyer,
+        db, movement=seller_movement, origin_city=seller_city, target_city=locked_buyer
     )
     _audit_transport_after_commit(
-        db,
-        movement=buyer_movement,
-        origin_city=locked_buyer,
-        target_city=seller_city,
+        db, movement=buyer_movement, origin_city=locked_buyer, target_city=seller_city
     )
     return seller_movement, buyer_movement
 
 
 def cancel_offer(db: Session, city: models.City, offer_id: int):
-    """Cancel and refund an offer exactly once."""
-
     offer = (
         db.query(models.MarketOffer)
         .filter(
@@ -419,17 +379,11 @@ def cancel_offer(db: Session, city: models.City, offer_id: int):
 def send_resources(
     db: Session, origin_city: models.City, request: schemas.TransportRequest
 ):
-    """Reserve resources and create one transport in one transaction.
-
-    Both city rows are locked in deterministic id order. Reciprocal transports
-    (A→B and B→A) therefore cannot deadlock while PostgreSQL checks the movement
-    foreign keys during insert.
-    """
-
     resources = {
         "wood": request.wood,
-        "clay": request.clay,
+        "stone": request.stone,
         "iron": request.iron,
+        "gold": request.gold,
     }
     normalized = _normalize_transport_resources(resources)
     total_amount = sum(normalized.values())
@@ -472,8 +426,6 @@ def send_resources(
         if available_capacity < total_amount:
             raise HTTPException(status_code=400, detail="Not enough merchant capacity")
 
-        # Pay exactly once while both city rows remain locked. The movement
-        # creator is deliberately non-economic and commit-free.
         production.pay_cost(locked_origin, normalized)
         movement = _create_transport_uncommitted(
             db,
