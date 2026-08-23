@@ -19,13 +19,12 @@ def create_city(
     if not world:
         raise HTTPException(status_code=404, detail="World not found or inactive")
 
-    # Automatic spawning if coordinates are not provided
     if city.x is None or city.y is None:
         try:
             city.x, city.y = world_gen.find_spawn_location(db, city.world_id, world.map_size)
         except ValueError:
             raise HTTPException(status_code=500, detail="No valid spawn location found")
-    
+
     if city.x < 0 or city.y < 0 or city.x >= world.map_size or city.y >= world.map_size:
         raise HTTPException(status_code=400, detail="Invalid coordinates for this world")
     occupied = (
@@ -47,17 +46,16 @@ def create_city(
         db.refresh(membership)
     current_user.world_id = city.world_id
     db.add(current_user)
-    
-    # Determine tile type
+
     tile_type = world_gen.get_tile_type(city.x, city.y)
-    
+
     db_city = models.City(
         name=city.name,
         x=city.x,
         y=city.y,
         owner_id=current_user.id,
         world_id=city.world_id,
-        tile_type=tile_type
+        tile_type=tile_type,
     )
     db.add(db_city)
     db.commit()
@@ -143,8 +141,9 @@ def city_status(
     return schemas.CityResourceStatus(
         city_id=city.id,
         wood=city.wood,
-        clay=city.clay,
+        stone=city.stone,
         iron=city.iron,
+        gold=city.gold,
         loyalty=city.loyalty,
         storage_limit=storage_limit,
         production_per_hour=production_per_hour,
