@@ -50,9 +50,6 @@ def set_user_freeze(
     user.is_frozen = is_frozen
     user.freeze_reason = normalized_reason if is_frozen else None
     if changed:
-        # Both HTTP and Socket.IO access tokens include auth_version. Revoking
-        # it prevents an already-issued token from remaining valid after a
-        # moderation state transition.
         user.auth_version += 1
 
     log_action(
@@ -218,8 +215,9 @@ def create_city(
         owner_id=owner.id,
         world_id=world.id,
         wood=payload.get("wood", 500.0),
-        clay=payload.get("clay", 500.0),
+        stone=payload.get("stone", 500.0),
         iron=payload.get("iron", 500.0),
+        gold=payload.get("gold", 0.0),
         population_max=payload.get("population_max", 100),
     )
     db.add(city)
