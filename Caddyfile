@@ -14,5 +14,10 @@
         -Server
     }
 
-    reverse_proxy nginx:80
+    # Caddy is the only public edge. Overwrite rather than trust any
+    # client-supplied forwarding chain so the internal proxy can safely use
+    # this value for per-client rate limiting.
+    reverse_proxy nginx:80 {
+        header_up X-Forwarded-For {remote_host}
+    }
 }
