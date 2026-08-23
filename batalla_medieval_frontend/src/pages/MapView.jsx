@@ -6,6 +6,12 @@ import { useNavigate } from 'react-router-dom';
 
 const TILE_SIZE = 50;
 const RADIUS = 7; // 15x15 grid
+const OASIS_RESOURCE_META = {
+  wood: { icon: '🌲', label: 'Madera' },
+  stone: { icon: '🪨', label: 'Piedra' },
+  iron: { icon: '⛓️', label: 'Hierro' },
+  gold: { icon: '🪙', label: 'Oro' },
+};
 
 const MapView = () => {
   const { user } = useUserStore();
@@ -78,13 +84,13 @@ const MapView = () => {
           </div>
         );
     } else if (isOasis) {
-        const resourceIcons = { wood: '🌲', clay: '🧱', iron: '⛏️', crop: '🌾' };
+        const resourceMeta = OASIS_RESOURCE_META[tile.resource_type];
         content = (
             <div className={`
                 w-8 h-8 mx-auto mt-2 rounded-full shadow-lg flex items-center justify-center text-xs font-bold
                 ${tile.is_conquered ? (tile.owner_id === user?.id ? 'bg-blue-500 ring-2 ring-blue-300' : 'bg-red-500 ring-2 ring-red-300') : 'bg-green-600 ring-2 ring-green-300'}
             `}>
-                {resourceIcons[tile.resource_type] || '🌴'}
+                {resourceMeta?.icon || '🌴'}
             </div>
         );
     }
@@ -122,6 +128,9 @@ const MapView = () => {
   
   // Sort rows by Y descending
   const sortedY = Object.keys(rows).sort((a, b) => b - a);
+  const selectedOasisResource = selectedTile?.oasis_id
+    ? OASIS_RESOURCE_META[selectedTile.resource_type]
+    : null;
 
   return (
     <div className="p-4 h-full flex flex-col">
@@ -221,7 +230,9 @@ const MapView = () => {
                 <div className="space-y-3">
                     <div>
                         <div className="text-sm text-gray-400">Oasis</div>
-                        <div className="font-bold text-lg text-white capitalize">{selectedTile.resource_type} (+{selectedTile.bonus_percent}%)</div>
+                        <div className="font-bold text-lg text-white">
+                          {selectedOasisResource?.icon || '🏞️'} {selectedOasisResource?.label || selectedTile.resource_type} (+{selectedTile.bonus_percent}%)
+                        </div>
                     </div>
                     <div>
                         <div className="text-sm text-gray-400">Estado</div>
