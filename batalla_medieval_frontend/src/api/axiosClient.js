@@ -29,8 +29,9 @@ const loadBalanceSnapshot = () => {
 
 const EMPTY_OVERVIEW = {
   wood: 0,
-  clay: 0,
+  stone: 0,
   iron: 0,
+  gold: 0,
   population: 0,
   populationMax: 0,
   loyalty: 0,
@@ -45,8 +46,9 @@ const buildResourceSnapshot = (city) => {
     : 0;
   return {
     wood: city.wood ?? 0,
-    clay: city.clay ?? 0,
+    stone: city.stone ?? 0,
     iron: city.iron ?? 0,
+    gold: city.gold ?? 0,
     population,
     populationMax: city.population_max ?? 0,
     loyalty: city.loyalty ?? 0,
@@ -188,14 +190,11 @@ export const api = {
   getCityStatus: ({ cityId, worldId }) =>
     axiosClient.get(`/city/${cityId}/status`, { params: { world_id: worldId } }),
 
-  // Map
   getMapTiles: (worldId, x, y, radius = 10) => axiosClient.get('/map/tiles', { params: { world_id: worldId, x, y, radius } }),
   getOasis: (oasisId) => axiosClient.get(`/map/oasis/${oasisId}`),
 
-  // Themes
   getThemes: () => axiosClient.get('/theme/'),
 
-  // Admin
   adminUpdateResources: (cityId, resources) => axiosClient.patch(`/admin/city/${cityId}/resources`, resources),
   adminSetBuildingLevel: (cityId, buildingType, level) => axiosClient.patch(`/admin/city/${cityId}/building/${buildingType}`, { new_level: level }),
   adminSetTroops: (cityId, troops) => axiosClient.patch(`/admin/city/${cityId}/troops`, { troops }),
@@ -204,12 +203,10 @@ export const api = {
   adminDeleteUser: (userId) => axiosClient.delete(`/admin/user/${userId}`),
   adminDeleteCity: (cityId) => axiosClient.delete(`/admin/city/${cityId}`),
 
-  // Troops
   getAvailableUnits: (cityId, worldId) =>
     axiosClient.get('/troop/available', { params: { city_id: cityId, world_id: worldId } }),
   researchUnit: (cityId, worldId, unitType) => axiosClient.post('/troop/research', { city_id: cityId, unit_type: unitType }, { params: { world_id: worldId } }),
 
-  // Hero
   getHeroItems: () => axiosClient.get('/hero/items'),
   equipHeroItem: (itemId) => axiosClient.post(`/hero/items/${itemId}/equip`),
   unequipHeroItem: (itemId) => axiosClient.post(`/hero/items/${itemId}/unequip`),
@@ -217,7 +214,6 @@ export const api = {
   startAdventure: (adventureId) => axiosClient.post(`/adventure/${adventureId}/start`),
   claimAdventure: (adventureId) => axiosClient.post(`/adventure/${adventureId}/claim`),
 
-  // Market
   getOffers: (worldId, filterAlliance = false) => axiosClient.get('/market/offers', { params: { world_id: worldId, filter_alliance: filterAlliance } }),
   createOffer: (cityId, worldId, data) => axiosClient.post('/market/offers', data, { params: { city_id: cityId, world_id: worldId } }),
   acceptOffer: (offerId, cityId, worldId) => axiosClient.post(`/market/offers/${offerId}/accept`, {}, { params: { city_id: cityId, world_id: worldId } }),
@@ -225,22 +221,18 @@ export const api = {
   sendResources: (cityId, worldId, data) => axiosClient.post('/market/transport', data, { params: { city_id: cityId, world_id: worldId } }),
   npcTrade: (cityId, worldId, offerType, requestType, amount) => axiosClient.post('/market/npc_trade', null, { params: { city_id: cityId, world_id: worldId, offer_type: offerType, request_type: requestType, amount } }),
 
-  // Alliance
   sendMassMessage: (allianceId, subject, content) => axiosClient.post(`/alliance/${allianceId}/mass-message`, { subject, content }),
 
-  // Diplomacy
   getDiplomacy: (allianceId) => axiosClient.get(`/alliance/${allianceId}/diplomacy`),
   requestDiplomacy: (allianceId, targetId, status) => axiosClient.post(`/alliance/${allianceId}/diplomacy`, { alliance_target_id: targetId, status }),
   acceptDiplomacy: (allianceId, diplomacyId) => axiosClient.post(`/alliance/${allianceId}/diplomacy/${diplomacyId}/accept`),
   cancelDiplomacy: (allianceId, diplomacyId) => axiosClient.delete(`/alliance/${allianceId}/diplomacy/${diplomacyId}`),
 
-  // Forum
   getForumThreads: (allianceId) => axiosClient.get(`/forum/alliance/${allianceId}/threads`),
   createForumThread: (allianceId, title, content) => axiosClient.post(`/forum/alliance/${allianceId}/threads`, { title, content }),
   getForumThread: (threadId) => axiosClient.get(`/forum/threads/${threadId}`),
   replyForumThread: (threadId, content) => axiosClient.post(`/forum/threads/${threadId}/reply`, { content }),
 
-  // Tutorial
   getTutorialStatus: () => axiosClient.get('/tutorial/status'),
   advanceTutorial: (step) => axiosClient.post('/tutorial/advance', { step }),
 };
