@@ -30,8 +30,9 @@ def _market_city(db_session, world_id: int, *, username: str, x: int, y: int):
         x=x,
         y=y,
         wood=1000,
-        clay=1000,
+        stone=1000,
         iron=1000,
+        gold=1000,
         last_production=utc_now(),
     )
     db_session.add(city)
@@ -78,7 +79,7 @@ def _create_offer(db_session, seller):
         schemas.MarketOfferCreate(
             offer_type="wood",
             offer_amount=100,
-            request_type="clay",
+            request_type="stone",
             request_amount=50,
             is_alliance_only=False,
         ),
@@ -87,7 +88,7 @@ def _create_offer(db_session, seller):
 
 def test_two_buyers_cannot_accept_the_same_offer_twice(db_session, city):
     world_id = city.world_id
-    city.wood = city.clay = city.iron = 1000
+    city.wood = city.stone = city.iron = city.gold = 1000
     city.last_production = utc_now()
     db_session.add(models.Building(city_id=city.id, name="market", level=2))
     db_session.commit()
@@ -125,17 +126,17 @@ def test_two_buyers_cannot_accept_the_same_offer_twice(db_session, city):
     assert db_session.query(models.MarketOffer).filter_by(id=offer_id).one_or_none() is None
     assert len(transports) == 2
     assert seller.wood == pytest.approx(900, abs=0.1)
-    assert sorted([buyers[buyer_a.id].clay, buyers[buyer_b.id].clay]) == pytest.approx(
+    assert sorted([buyers[buyer_a.id].stone, buyers[buyer_b.id].stone]) == pytest.approx(
         [950, 1000], abs=0.1
     )
-    assert all(value >= 0 for value in [seller.wood, seller.clay, seller.iron])
+    assert all(value >= 0 for value in [seller.wood, seller.stone, seller.iron, seller.gold])
     for buyer in buyers.values():
-        assert buyer.wood >= 0 and buyer.clay >= 0 and buyer.iron >= 0
+        assert buyer.wood >= 0 and buyer.stone >= 0 and buyer.iron >= 0 and buyer.gold >= 0
 
 
 def test_accept_vs_cancel_same_offer_has_one_atomic_winner(db_session, city):
     world_id = city.world_id
-    city.wood = city.clay = city.iron = 1000
+    city.wood = city.stone = city.iron = city.gold = 1000
     city.last_production = utc_now()
     db_session.add(models.Building(city_id=city.id, name="market", level=2))
     db_session.commit()
@@ -168,14 +169,12 @@ def test_accept_vs_cancel_same_offer_has_one_atomic_winner(db_session, city):
 
     assert results.count("ok") == 1
     assert offer_after is None
-    assert seller.wood >= 0 and buyer_after.clay >= 0
+    assert seller.wood >= 0 and buyer_after.stone >= 0
 
     if len(transports) == 2:
-        # Acceptance won: seller's wood stays reserved and buyer paid once.
         assert seller.wood == pytest.approx(900, abs=0.1)
-        assert buyer_after.clay == pytest.approx(950, abs=0.1)
+        assert buyer_after.stone == pytest.approx(950, abs=0.1)
     else:
-        # Cancellation won: reservation was refunded and buyer was untouched.
         assert transports == []
         assert seller.wood == pytest.approx(1000, abs=0.1)
-        assert buyer_after.clay == pytest.approx(1000, abs=0.1)
+        assert buyer_after.stone == pytest.approx(1000, abs=0.1)
