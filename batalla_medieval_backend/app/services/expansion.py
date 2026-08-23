@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 from copy import deepcopy
 
 from sqlalchemy.orm import Session
 
 from .. import models
 from . import balance, production, world_gen
-
-logger = logging.getLogger(__name__)
 
 SETTLEMENT_TYPES = ("city", "camp")
 
@@ -124,7 +121,13 @@ def award_expansion_points_for_building(
     city: models.City,
     building_name: str,
 ) -> int:
-    """Mint points inside the same transaction that completes the building queue."""
+    """Mint points inside the same transaction that completes the building queue.
+
+    A missing PlayerWorld row is an integrity failure, not a reason to complete
+    the building while silently losing its expansion reward. Raising keeps the
+    queue and level mutation rollback-safe so the operation can be retried after
+    the membership inconsistency is repaired.
+    """
 
     amount = int(balance.EXPANSION_POINTS_PER_COMPLETION.get(building_name, 0))
     if amount <= 0 or city.owner_id is None or city.settlement_type != "city":
@@ -141,11 +144,9 @@ def award_expansion_points_for_building(
         .one_or_none()
     )
     if membership is None:
-        logger.warning(
-            "expansion_points_missing_membership",
-            extra={"city_id": city.id, "owner_id": city.owner_id, "world_id": city.world_id},
+        raise RuntimeError(
+            "Expansion point generator cannot complete without PlayerWorld membership"
         )
-        return 0
 
     membership.expansion_points = int(membership.expansion_points or 0) + amount
     db.add(membership)
@@ -290,9 +291,12 @@ def promote_camp(
             user_id=owner.id,
             world_id=camp.world_id,
         )
+        world = _lock_active_world(db, camp.world_id)
         camp, production_gains = production.lock_and_recalculate_resources(db, camp)
         if camp.owner_id != owner.id:
             raise ValueError("Camp does not belong to player")
+        if camp.world_id != world.id:
+            raise ValueError("Cross-world camp promotion is not allowed")
         if camp.settlement_type != "camp":
             raise ValueError("Only camps can be promoted")
 
