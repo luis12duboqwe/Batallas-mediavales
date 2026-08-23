@@ -83,7 +83,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           port: ${{ secrets.SSH_PORT || 22 }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.deploy.yml,nginx.conf,ops"
+          source: "docker-compose.deploy.yml,nginx.conf,Caddyfile,ops"
           target: ${{ secrets.REMOTE_APP_DIR }}
           overwrite: true
 
