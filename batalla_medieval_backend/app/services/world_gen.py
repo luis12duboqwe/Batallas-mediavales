@@ -3,6 +3,7 @@ import random
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import balance
 
 
 def create_world(db: Session, name: str, speed: float = 1.0) -> models.World:
@@ -30,7 +31,6 @@ def create_world(db: Session, name: str, speed: float = 1.0) -> models.World:
     rng = random.Random(f"batallas-medievales:{name}:{speed}")
     occupied: set[tuple[int, int]] = set()
 
-    # Generate deterministic barbarian villages on valid, non-water tiles.
     attempts = 0
     while len(occupied) < 50 and attempts < 2000:
         attempts += 1
@@ -41,6 +41,7 @@ def create_world(db: Session, name: str, speed: float = 1.0) -> models.World:
             continue
 
         occupied.add(coord)
+        resources = balance.BARBARIAN_STARTING_RESOURCES
         db.add(
             models.City(
                 name="Aldea Bárbara",
@@ -48,9 +49,10 @@ def create_world(db: Session, name: str, speed: float = 1.0) -> models.World:
                 x=x,
                 y=y,
                 owner_id=None,
-                wood=1000,
-                clay=1000,
-                iron=1000,
+                wood=resources["wood"],
+                stone=resources["stone"],
+                iron=resources["iron"],
+                gold=resources["gold"],
                 tile_type=get_tile_type(x, y),
             )
         )
@@ -73,7 +75,7 @@ def create_world(db: Session, name: str, speed: float = 1.0) -> models.World:
                 world_id=world.id,
                 x=x,
                 y=y,
-                resource_type=rng.choice(["wood", "clay", "iron", "crop"]),
+                resource_type=rng.choice(list(balance.RESOURCE_FIELDS)),
                 bonus_percent=25 if rng.random() > 0.2 else 50,
                 troops={
                     "rat": rng.randint(5, 15),
@@ -136,7 +138,6 @@ def find_spawn_location(db: Session, world_id: int, map_size: int) -> tuple[int,
 
     rng = random.SystemRandom()
 
-    # Try random locations first for performance.
     for _ in range(50):
         x = rng.randrange(map_size)
         y = rng.randrange(map_size)
@@ -144,7 +145,6 @@ def find_spawn_location(db: Session, world_id: int, map_size: int) -> tuple[int,
         if _coordinate_is_free(db, world_id, x, y) and get_tile_type(x, y) != "water":
             return x, y
 
-    # Fall back to a deterministic expanding search around the map center.
     center_x, center_y = map_size // 2, map_size // 2
     for radius in range(0, map_size):
         for offset_x in range(-radius, radius + 1):
