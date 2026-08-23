@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List
+from typing import List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -7,6 +7,9 @@ from .building import BuildingRead
 from .troop import TroopRead
 from .queue import BuildingQueueRead, TroopQueueRead
 from .oasis import OasisRead
+
+
+SettlementType = Literal["city", "camp"]
 
 
 class CityBase(BaseModel):
@@ -24,6 +27,7 @@ class CityRead(CityBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    settlement_type: SettlementType = "city"
     wood: float
     stone: float
     iron: float
@@ -42,6 +46,7 @@ class CityResourceStatus(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     city_id: int
+    settlement_type: SettlementType = "city"
     wood: float
     stone: float
     iron: float
