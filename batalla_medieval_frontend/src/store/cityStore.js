@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { api } from '../api/axiosClient';
 import soundManager from '../services/sound';
 
+const RESOURCE_KEYS = ['wood', 'stone', 'iron', 'gold'];
+
 const movementCategory = (movement, ownedCityIds) => {
   const direction = ownedCityIds.has(movement.origin_city_id) ? 'out' : 'in';
   switch (movement.movement_type) {
@@ -20,10 +22,10 @@ const movementCategory = (movement, ownedCityIds) => {
 export const useCityStore = create((set, get) => ({
   currentCity: null,
   cities: [],
-  resources: { wood: 0, clay: 0, iron: 0, population: 0, populationMax: 0 },
+  resources: { wood: 0, stone: 0, iron: 0, gold: 0, population: 0, populationMax: 0 },
   storageLimit: 0,
   buildings: [],
-  productionRates: { wood: 0, clay: 0, iron: 0 },
+  productionRates: { wood: 0, stone: 0, iron: 0, gold: 0 },
   queues: { buildings: [], troops: [] },
   movements: [],
   reports: [],
@@ -45,11 +47,11 @@ export const useCityStore = create((set, get) => ({
   tickResources(elapsedSeconds = 1) {
     const { resources, productionRates, storageLimit } = get();
     const updated = { ...resources };
-    ['wood', 'clay', 'iron'].forEach(res => {
-      const produced = (productionRates[res] / 3600) * elapsedSeconds;
-      updated[res] = storageLimit > 0
-        ? Math.min(updated[res] + produced, storageLimit)
-        : updated[res] + produced;
+    RESOURCE_KEYS.forEach((resource) => {
+      const produced = ((productionRates[resource] || 0) / 3600) * elapsedSeconds;
+      updated[resource] = storageLimit > 0
+        ? Math.min((updated[resource] || 0) + produced, storageLimit)
+        : (updated[resource] || 0) + produced;
     });
     set({ resources: updated });
   },
