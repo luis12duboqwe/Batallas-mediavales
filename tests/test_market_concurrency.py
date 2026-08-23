@@ -158,8 +158,8 @@ def test_accept_vs_cancel_same_offer_has_one_atomic_winner(db_session, city):
     results = _run_parallel([accept, cancel])
 
     db_session.expire_all()
-    seller = db_session.query(models.City).filter(models.City.id == seller_id).one()
-    buyer_after = db_session.query(models.City).filter(models.City.id == buyer_id).one()
+    seller = db_session.query(models.City).filter_by(id=seller_id).one()
+    buyer_after = db_session.query(models.City).filter_by(id=buyer_id).one()
     offer_after = db_session.query(models.MarketOffer).filter_by(id=offer_id).one_or_none()
     transports = (
         db_session.query(models.Movement)
@@ -180,3 +180,54 @@ def test_accept_vs_cancel_same_offer_has_one_atomic_winner(db_session, city):
         assert transports == []
         assert seller.wood == pytest.approx(1000, abs=0.1)
         assert buyer_after.gold == pytest.approx(1000, abs=0.1)
+
+
+def test_two_transports_cannot_double_spend_stone_and_gold(db_session, city):
+    """The city row lock must serialize the two new BM-0060 balances together."""
+
+    world_id = city.world_id
+    city.wood = city.stone = city.iron = city.gold = 1000
+    city.last_production = utc_now()
+    db_session.add(models.Building(city_id=city.id, name="market", level=2))
+    db_session.commit()
+
+    target = _market_city(
+        db_session,
+        world_id,
+        username="stone_gold_target",
+        x=43,
+        y=43,
+    )
+    origin_id = city.id
+    target_id = target.id
+
+    def send_once(session):
+        origin = session.query(models.City).filter_by(id=origin_id).one()
+        market.send_resources(
+            session,
+            origin,
+            schemas.TransportRequest(
+                target_city_id=target_id,
+                stone=600,
+                gold=600,
+            ),
+        )
+
+    results = _run_parallel([send_once, send_once])
+
+    db_session.expire_all()
+    origin_after = db_session.query(models.City).filter_by(id=origin_id).one()
+    transports = (
+        db_session.query(models.Movement)
+        .filter_by(origin_city_id=origin_id, movement_type="transport")
+        .all()
+    )
+
+    assert results.count("ok") == 1
+    assert len(transports) == 1
+    assert transports[0].resources == {"stone": 600, "gold": 600}
+    assert origin_after.stone == pytest.approx(400, abs=0.1)
+    assert origin_after.gold == pytest.approx(400, abs=0.1)
+    assert origin_after.wood == pytest.approx(1000, abs=0.1)
+    assert origin_after.iron == pytest.approx(1000, abs=0.1)
+    assert origin_after.stone >= 0 and origin_after.gold >= 0
