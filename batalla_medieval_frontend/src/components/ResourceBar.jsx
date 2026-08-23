@@ -37,16 +37,22 @@ const ResourceBar = () => {
         tip={t('resources.wood_tip')}
       />
       <ResourceItem
-        label={t('resources.clay')}
-        value={`${formatNumber(resources.clay)}/${formatNumber(storageLimit)}`}
-        icon="🧱"
-        tip={t('resources.clay_tip')}
+        label={t('resources.stone')}
+        value={`${formatNumber(resources.stone)}/${formatNumber(storageLimit)}`}
+        icon="🪨"
+        tip={t('resources.stone_tip')}
       />
       <ResourceItem
         label={t('resources.iron')}
         value={`${formatNumber(resources.iron)}/${formatNumber(storageLimit)}`}
         icon="⛓️"
         tip={t('resources.iron_tip')}
+      />
+      <ResourceItem
+        label={t('resources.gold')}
+        value={`${formatNumber(resources.gold)}/${formatNumber(storageLimit)}`}
+        icon="🪙"
+        tip={t('resources.gold_tip')}
       />
       <ResourceItem
         label={t('resources.population')}
