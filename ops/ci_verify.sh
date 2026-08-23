@@ -6,6 +6,7 @@ cd "$ROOT"
 
 ENV_FILE="/tmp/bm-g5-ci.env"
 BAD_ENV_FILE="/tmp/bm-g5-ci-bad.env"
+BAD_TLS_ENV_FILE="/tmp/bm-g5-ci-bad-tls.env"
 BACKUP_DIR="/tmp/bm-g5-backups"
 COMPOSE_FILE="docker-compose.deploy.yml"
 PROJECT_NAME="bm-g5-ci"
@@ -16,7 +17,7 @@ cleanup() {
     kill "$SMOKE_PID" 2>/dev/null || true
   fi
   docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1 || true
-  rm -rf "$BACKUP_DIR" "$ENV_FILE" "$BAD_ENV_FILE"
+  rm -rf "$BACKUP_DIR" "$ENV_FILE" "$BAD_ENV_FILE" "$BAD_TLS_ENV_FILE"
 }
 trap cleanup EXIT
 
@@ -24,9 +25,13 @@ rm -rf "$BACKUP_DIR"
 cat > "$ENV_FILE" <<'EOF'
 APP_ENV=staging
 SECRET_KEY=ci-only-secret-key-that-is-long-enough-1234567890
+PUBLIC_HOST=staging.example.invalid
 FRONTEND_URL=https://staging.example.invalid
 PUBLIC_BASE_URL=https://staging.example.invalid
 CORS_ORIGINS=https://staging.example.invalid
+TLS_EMAIL=ops@example.invalid
+HTTP_PORT=18080
+HTTPS_PORT=18443
 POSTGRES_USER=batalla
 POSTGRES_PASSWORD=ci-password
 POSTGRES_DB=batalla_ci
@@ -42,14 +47,25 @@ BACKEND_IMAGE=example.invalid/batalla-backend:0123456789abcdef0123456789abcdef01
 FRONTEND_IMAGE=example.invalid/batalla-frontend:0123456789abcdef0123456789abcdef01234567
 BACKUP_DIR=/tmp/bm-g5-backups
 BACKUP_RETENTION_DAYS=7
-HTTP_PORT=18080
+LOAD_DURATION_SECONDS=2
+LOAD_CONCURRENCY=4
+MAX_P95_MS=750
+MAX_ERROR_RATE=0
 EOF
 
 python3 ops/preflight.py "$ENV_FILE"
+
 cp "$ENV_FILE" "$BAD_ENV_FILE"
 sed -i 's#FRONTEND_IMAGE=.*#FRONTEND_IMAGE=example.invalid/batalla-frontend:latest#' "$BAD_ENV_FILE"
 if python3 ops/preflight.py "$BAD_ENV_FILE"; then
   echo "Expected preflight to reject :latest image" >&2
+  exit 1
+fi
+
+cp "$ENV_FILE" "$BAD_TLS_ENV_FILE"
+sed -i 's#PUBLIC_HOST=.*#PUBLIC_HOST=other.example.invalid#' "$BAD_TLS_ENV_FILE"
+if python3 ops/preflight.py "$BAD_TLS_ENV_FILE"; then
+  echo "Expected preflight to reject a TLS hostname mismatch" >&2
   exit 1
 fi
 
