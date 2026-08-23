@@ -35,7 +35,7 @@ const BuildingCard = ({ building, onUpgrade }) => {
 
       <div className="text-sm text-gray-300">
         <p className="leading-relaxed">
-          Coste próximo nivel: 🪵 {formatNumber(building.cost?.wood ?? 0)} · 🧱 {formatNumber(building.cost?.clay ?? 0)} · ⛓️ {formatNumber(building.cost?.iron ?? 0)}
+          Coste próximo nivel: 🪵 {formatNumber(building.cost?.wood ?? 0)} · 🪨 {formatNumber(building.cost?.stone ?? 0)} · ⛓️ {formatNumber(building.cost?.iron ?? 0)}
         </p>
       </div>
 
