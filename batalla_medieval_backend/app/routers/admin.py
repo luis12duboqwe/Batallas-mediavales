@@ -8,15 +8,16 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services import admin as admin_service
-from ..services import onboarding_metrics
+from ..services import balance, onboarding_metrics
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 class ResourceUpdate(BaseModel):
     wood: float | None = None
-    clay: float | None = None
+    stone: float | None = None
     iron: float | None = None
+    gold: float | None = None
     population_max: int | None = None
 
 
@@ -34,9 +35,10 @@ class AdminCityCreate(BaseModel):
     world_id: int
     x: int = 0
     y: int = 0
-    wood: float = 500.0
-    clay: float = 500.0
-    iron: float = 500.0
+    wood: float = balance.CITY_STARTING_RESOURCES["wood"]
+    stone: float = balance.CITY_STARTING_RESOURCES["stone"]
+    iron: float = balance.CITY_STARTING_RESOURCES["iron"]
+    gold: float = balance.CITY_STARTING_RESOURCES["gold"]
     population_max: int = 100
 
 
