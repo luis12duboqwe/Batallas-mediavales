@@ -16,6 +16,7 @@ from .routers import (
     economy,
     queue,
     event,
+    expansion,
     message,
     movement,
     notification,
@@ -55,7 +56,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 app.add_middleware(LanguageMiddleware)
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -69,6 +69,7 @@ app.include_router(market.router, prefix="/market", tags=["Market"])
 app.include_router(hero.router)
 app.include_router(adventure.router)
 app.include_router(tutorial.router, prefix="/tutorial", tags=["Tutorial"])
+app.include_router(expansion.router)
 app.include_router(map.router)
 app.include_router(message.router, prefix="/message", tags=["Message"])
 app.include_router(ranking.router, prefix="/ranking", tags=["Ranking"])
