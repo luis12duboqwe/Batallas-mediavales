@@ -21,6 +21,7 @@ WEAK_SECRETS = {
     "development-only-secret-key-do-not-use",
 }
 IMMUTABLE_IMAGE_RE = re.compile(r"^.+:[A-Za-z0-9][A-Za-z0-9_.-]{6,}$")
+HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$")
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -53,6 +54,8 @@ def validate_https_url(name: str, value: str, errors: list[str]) -> None:
     parsed = urlparse(value)
     if parsed.scheme != "https" or not parsed.netloc:
         errors.append(f"{name} must be an absolute https:// URL")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        errors.append(f"{name} must not contain credentials, query parameters or fragments")
 
 
 def validate_email(name: str, value: str, errors: list[str]) -> None:
@@ -88,6 +91,19 @@ def validate_positive_number(
     return value
 
 
+def validate_port(values: dict[str, str], key: str, default: str, errors: list[str]) -> int | None:
+    raw = values.get(key, default).strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        errors.append(f"{key} must be an integer TCP/UDP port")
+        return None
+    if not 1 <= value <= 65535:
+        errors.append(f"{key} must be between 1 and 65535")
+        return None
+    return value
+
+
 def validate(values: dict[str, str]) -> list[str]:
     errors: list[str] = []
 
@@ -114,6 +130,24 @@ def validate(values: dict[str, str]) -> list[str]:
     public_base_url = require(values, "PUBLIC_BASE_URL", errors)
     if public_base_url:
         validate_https_url("PUBLIC_BASE_URL", public_base_url, errors)
+
+    public_host = require(values, "PUBLIC_HOST", errors)
+    if public_host:
+        if "://" in public_host or "/" in public_host or not HOST_RE.match(public_host):
+            errors.append("PUBLIC_HOST must be a DNS hostname without scheme, path or port")
+        if public_base_url:
+            parsed_host = (urlparse(public_base_url).hostname or "").lower()
+            if parsed_host and public_host.lower() != parsed_host:
+                errors.append("PUBLIC_HOST must match the hostname in PUBLIC_BASE_URL")
+
+    tls_email = require(values, "TLS_EMAIL", errors)
+    if tls_email:
+        validate_email("TLS_EMAIL", tls_email, errors)
+
+    http_port = validate_port(values, "HTTP_PORT", "80", errors)
+    https_port = validate_port(values, "HTTPS_PORT", "443", errors)
+    if http_port is not None and https_port is not None and http_port == https_port:
+        errors.append("HTTP_PORT and HTTPS_PORT must be different")
 
     cors_raw = require(values, "CORS_ORIGINS", errors)
     if cors_raw:
@@ -149,12 +183,8 @@ def validate(values: dict[str, str]) -> list[str]:
         except ValueError:
             errors.append("BACKUP_RETENTION_DAYS must be a positive integer")
 
-    load_duration = validate_positive_number(
-        values, "LOAD_DURATION_SECONDS", "15", errors
-    )
-    load_concurrency = validate_positive_number(
-        values, "LOAD_CONCURRENCY", "8", errors
-    )
+    load_duration = validate_positive_number(values, "LOAD_DURATION_SECONDS", "15", errors)
+    load_concurrency = validate_positive_number(values, "LOAD_CONCURRENCY", "8", errors)
     max_p95 = validate_positive_number(values, "MAX_P95_MS", "750", errors)
     max_error_raw = values.get("MAX_ERROR_RATE", "0.005").strip()
     try:
