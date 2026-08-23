@@ -6,7 +6,7 @@ const AdminPanel = () => {
   const [message, setMessage] = useState('');
   
   // Resources
-  const [res, setRes] = useState({ wood: 1000, clay: 1000, iron: 1000 });
+  const [res, setRes] = useState({ wood: 1000, stone: 1000, iron: 1000, gold: 1000 });
   
   // Building
   const [buildType, setBuildType] = useState('town_hall');
@@ -118,8 +118,9 @@ const AdminPanel = () => {
                   <h3 className="font-bold mb-4 text-amber-500">1. Recursos</h3>
                   <div className="space-y-2">
                       <input type="number" value={res.wood} onChange={e => setRes({...res, wood: +e.target.value})} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Madera" />
-                      <input type="number" value={res.clay} onChange={e => setRes({...res, clay: +e.target.value})} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Barro" />
+                      <input type="number" value={res.stone} onChange={e => setRes({...res, stone: +e.target.value})} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Piedra" />
                       <input type="number" value={res.iron} onChange={e => setRes({...res, iron: +e.target.value})} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Hierro" />
+                      <input type="number" value={res.gold} onChange={e => setRes({...res, gold: +e.target.value})} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Oro" />
                       <button onClick={updateResources} className="btn btn-sm bg-red-700 hover:bg-red-600 text-white w-full border-none">Actualizar</button>
                   </div>
               </div>
