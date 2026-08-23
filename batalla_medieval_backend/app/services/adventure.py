@@ -4,7 +4,7 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 from .. import models
 from ..utils import utc_now
-from . import hero as hero_service
+from . import balance, hero as hero_service
 
 DIFFICULTY_CONFIG = {
     "easy": {"duration": 300, "xp": 50, "damage_min": 1, "damage_max": 10},
@@ -19,14 +19,9 @@ def get_adventures(db: Session, hero_id: int) -> list[models.Adventure]:
         models.Adventure.status.in_(["available", "active", "completed"])
     ).all()
     
-    # Filter out expired or claimed ones if we want to clean up?
-    # For now, let's just check if we need to generate more.
-    # If no available or active adventures, generate new ones.
-    
     active_or_available = [a for a in adventures if a.status in ["available", "active"]]
     
     if not active_or_available:
-        # Generate 3 new adventures
         new_adventures: list[models.Adventure] = []
         for _ in range(3):
             diff = random.choice(["easy", "easy", "medium", "medium", "hard"])
@@ -40,7 +35,6 @@ def get_adventures(db: Session, hero_id: int) -> list[models.Adventure]:
             db.add(adv)
             new_adventures.append(adv)
         db.commit()
-        # Refresh all new adventures to ensure they have IDs and other DB-generated fields
         for adv in new_adventures:
             db.refresh(adv)
         return new_adventures
@@ -91,12 +85,7 @@ def claim_adventure(db: Session, adventure_id: int, hero: models.Hero) -> dict[s
     if now < end_time:
         raise ValueError("Adventure not finished yet")
         
-    # Resolve
     config = DIFFICULTY_CONFIG[adv.difficulty]
-    
-    # Damage calculation
-    # Hero defense reduces damage?
-    # Let's say every 10 defense points reduce damage by 1, min 1 damage.
     raw_damage = random.randint(config["damage_min"], config["damage_max"])
     defense_reduction = hero.defense_points // 10
     damage = max(1, raw_damage - defense_reduction)
@@ -104,7 +93,7 @@ def claim_adventure(db: Session, adventure_id: int, hero: models.Hero) -> dict[s
     hero.health = max(0, hero.health - damage)
     if hero.health == 0:
         hero.status = "dead"
-        adv.status = "failed" # Or completed but dead?
+        adv.status = "failed"
         db.commit()
         return {"status": "dead", "damage": damage, "xp": 0, "loot": None}
     
@@ -112,26 +101,22 @@ def claim_adventure(db: Session, adventure_id: int, hero: models.Hero) -> dict[s
     adv.status = "completed"
     adv.completed_at = now
     
-    # XP
     xp_gained = config["xp"]
     hero_service.add_xp(db, hero, xp_gained)
     
-    # Loot
     loot: dict[str, Any] | None = None
     roll = random.random()
-    if roll < 0.10: # 10% chance of item
-        # Get random item template
+    if roll < 0.10:
         templates = db.query(models.ItemTemplate).all()
         if templates:
             item_tmpl = random.choice(templates)
             hero_item = models.HeroItem(hero_id=hero.id, template_id=item_tmpl.id)
             db.add(hero_item)
             loot = {"type": "item", "name": item_tmpl.name, "rarity": item_tmpl.rarity}
-    elif roll < 0.40: # 30% chance of resources (10-40 range)
-        # Give resources to hero's city
+    elif roll < 0.40:
         if hero.city:
             amount = random.randint(100, 500) * (1 if adv.difficulty == "easy" else 3 if adv.difficulty == "medium" else 10)
-            res_type = random.choice(["wood", "clay", "iron"])
+            res_type = random.choice(list(balance.RESOURCE_FIELDS))
             setattr(hero.city, res_type, getattr(hero.city, res_type) + amount)
             loot = {"type": "resource", "resource": res_type, "amount": amount}
             
