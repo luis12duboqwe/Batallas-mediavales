@@ -50,7 +50,7 @@ const buildResourceSnapshot = (city) => {
     iron: city.iron ?? 0,
     gold: city.gold ?? 0,
     population,
-    populationMax: city.population_max ?? 0,
+    populationMax: city.population_capacity ?? city.population_max ?? 0,
     loyalty: city.loyalty ?? 0,
   };
 };
@@ -108,10 +108,11 @@ export const api = {
       }
     }
 
-    let queueData = { building_queues: [], troop_queues: [] };
+    let queueData = { building_queues: [], research_queues: [], troop_queues: [] };
     if (statusData) {
       queueData = {
         building_queues: statusData.building_queue || [],
+        research_queues: statusData.research_queue || [],
         troop_queues: statusData.troop_queue || [],
       };
     } else if (resolvedWorldId) {
@@ -144,6 +145,7 @@ export const api = {
         balance_version: balanceResult?.version ?? null,
         queues: {
           buildings: queueData?.building_queues ?? [],
+          research: queueData?.research_queues ?? [],
           troops: queueData?.troop_queues ?? [],
         },
       },
