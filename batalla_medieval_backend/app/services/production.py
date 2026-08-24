@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..utils import utc_now
-from . import balance, event as event_service
+from . import balance, event as event_service, upkeep as upkeep_service
 
 # Compatibility aliases. The objects and values are owned by ``balance``.
 PRODUCTION_RATES = balance.PRODUCTION_RATES_PER_HOUR
@@ -30,8 +30,8 @@ def get_storage_limit(city: models.City) -> float:
     return balance.get_storage_capacity(warehouse_level)
 
 
-def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
-    """Return resource rates expressed strictly in units per hour."""
+def get_gross_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
+    """Return resource income before troop upkeep, in units per hour."""
 
     modifiers = event_service.get_active_modifiers(db, world_id=city.world_id)
     rate_multiplier = modifiers.get("production_speed", 1.0)
@@ -55,6 +55,21 @@ def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
         bonus = oasis_bonuses.get(resource, 0.0)
         production[resource] = rate * total_multiplier * (1.0 + bonus)
 
+    return production
+
+
+def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
+    """Return net resource rates after committed troop upkeep.
+
+    Upkeep is paid only in gold and follows troops while they are deployed or
+    returning. Training queues reserve future upkeep for admission control but
+    do not consume gold until their troops actually finish training.
+    """
+
+    production = get_gross_production_per_hour(db, city)
+    production[upkeep_service.UPKEEP_RESOURCE] -= (
+        upkeep_service.get_committed_upkeep_per_hour(db, city)
+    )
     return production
 
 
@@ -87,7 +102,13 @@ def recalculate_resources(
     *,
     commit: bool = True,
 ) -> models.City | tuple[models.City, Dict[str, float]]:
-    """Accrue passive resources from an hourly rate.
+    """Accrue passive resources and continuously pay troop upkeep.
+
+    Positive production remains capped by storage. Net gold may become negative
+    when an existing army is no longer economically sustainable (for example,
+    after losing a gold oasis); in that case gold drains to zero but never
+    becomes debt. The elapsed interval is still consumed, preventing backlog
+    exploits when resources are capped or depleted.
 
     ``commit=False`` is used inside larger economic transactions so callers can
     keep a PostgreSQL row lock until validation, payment and the domain record
@@ -109,12 +130,16 @@ def recalculate_resources(
         produced = rate * elapsed_hours
         current_value = float(getattr(city, resource))
 
-        if current_value >= storage_limit:
-            new_value = current_value
-            actual_gain = 0.0
+        if produced >= 0:
+            if current_value >= storage_limit:
+                new_value = current_value
+                actual_gain = 0.0
+            else:
+                new_value = min(current_value + produced, storage_limit)
+                actual_gain = max(new_value - current_value, 0.0)
         else:
-            new_value = min(current_value + produced, storage_limit)
-            actual_gain = max(new_value - current_value, 0.0)
+            new_value = max(current_value + produced, 0.0)
+            actual_gain = 0.0
 
         gains[resource] = actual_gain
         setattr(city, resource, new_value)
@@ -122,8 +147,8 @@ def recalculate_resources(
     loyalty_gain = LOYALTY_RECOVERY_PER_HOUR * elapsed_hours
     city.loyalty = min(100.0, city.loyalty + loyalty_gain)
 
-    # Always consume elapsed time, including while storage is full. Otherwise a
-    # player could spend after being capped and receive an artificial backlog.
+    # Always consume elapsed time, including while storage is full or gold is
+    # depleted. Otherwise spending later could mint an artificial backlog.
     city.last_production = now
 
     db.add(city)
