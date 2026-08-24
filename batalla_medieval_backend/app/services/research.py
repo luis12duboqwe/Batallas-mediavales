@@ -1,7 +1,22 @@
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import production, unit_catalog
+from ..utils import utc_now
+from . import balance, production, unit_catalog
+
+logger = logging.getLogger(__name__)
+REFUND_FACTOR = balance.QUEUE_REFUND_FACTOR
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def get_researched_techs(db: Session, city_id: int):
@@ -35,8 +50,12 @@ def _sync_city_researched_units(db: Session, city: models.City) -> None:
     db.add(city)
 
 
-def research_tech(db: Session, city: models.City, tech_name: str) -> models.Research:
-    """Research a unit using the same server catalog exposed to the client."""
+def queue_research(
+    db: Session,
+    city: models.City,
+    tech_name: str,
+) -> models.ResearchQueue:
+    """Charge and queue one technology without unlocking it early."""
 
     definition = unit_catalog.get_unit(tech_name)
     if not definition["researchable"]:
@@ -48,6 +67,18 @@ def research_tech(db: Session, city: models.City, tech_name: str) -> models.Rese
     if is_researched(db, city.id, tech_name):
         db.rollback()
         raise ValueError("Technology already researched")
+
+    active_queue = (
+        db.query(models.ResearchQueue)
+        .filter(models.ResearchQueue.city_id == city.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if active_queue is not None:
+        db.rollback()
+        if active_queue.tech_name == tech_name:
+            raise ValueError("Technology research already queued")
+        raise ValueError("Research queue is already occupied")
 
     missing = unit_catalog.first_missing_requirement(
         city, definition["research_requirements"]
@@ -64,13 +95,153 @@ def research_tech(db: Session, city: models.City, tech_name: str) -> models.Rese
         db.rollback()
         raise ValueError("Insufficient resources")
 
-    production.pay_cost(city, cost)
+    duration = int(definition.get("research_time_seconds", 0))
+    if duration <= 0:
+        db.rollback()
+        raise ValueError("Research duration is not configured")
 
-    research = models.Research(city_id=city.id, tech_name=tech_name, level=1)
-    db.add(research)
-    db.flush()
-    _sync_city_researched_units(db, city)
+    production.pay_cost(city, cost)
+    queue_entry = models.ResearchQueue(
+        city_id=city.id,
+        tech_name=tech_name,
+        finish_time=utc_now() + timedelta(seconds=duration),
+        paid_cost={resource: float(amount) for resource, amount in cost.items()},
+    )
+    db.add(queue_entry)
     db.commit()
-    db.refresh(research)
+    db.refresh(queue_entry)
     production.record_resource_gains(db, city, production_gains)
-    return research
+    logger.info(
+        "research_queued",
+        extra={
+            "city_id": city.id,
+            "tech_name": tech_name,
+            "finish_time": queue_entry.finish_time.isoformat(),
+            "paid_cost": queue_entry.paid_cost,
+        },
+    )
+    return queue_entry
+
+
+def process_research_queues(db: Session) -> list[dict]:
+    """Complete each due research queue at most once."""
+
+    now = utc_now()
+    due = (
+        db.query(models.ResearchQueue)
+        .filter(models.ResearchQueue.finish_time <= now)
+        .order_by(models.ResearchQueue.id.asc())
+        .with_for_update(skip_locked=True)
+        .all()
+    )
+    if not due:
+        return []
+
+    completed: list[dict] = []
+    for queue_entry in due:
+        city = (
+            db.query(models.City)
+            .filter(models.City.id == queue_entry.city_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if city is None:
+            db.delete(queue_entry)
+            continue
+
+        existing = (
+            db.query(models.Research)
+            .filter(
+                models.Research.city_id == city.id,
+                models.Research.tech_name == queue_entry.tech_name,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if existing is None:
+            db.add(
+                models.Research(
+                    city_id=city.id,
+                    tech_name=queue_entry.tech_name,
+                    level=1,
+                )
+            )
+            db.flush()
+            _sync_city_researched_units(db, city)
+
+        completed.append(
+            {
+                "city_id": city.id,
+                "tech_name": queue_entry.tech_name,
+                "owner_id": city.owner_id,
+                "world_id": city.world_id,
+            }
+        )
+        db.delete(queue_entry)
+
+    db.commit()
+    logger.info(
+        "research_queues_completed",
+        extra={
+            "count": len(completed),
+            "cities": [item["city_id"] for item in completed],
+        },
+    )
+    return completed
+
+
+def cancel_research_queue(db: Session, queue_id: int, user_id: int) -> bool:
+    """Cancel future research and refund 80% of the exact recorded cost."""
+
+    queue_entry = (
+        db.query(models.ResearchQueue)
+        .join(models.City)
+        .filter(
+            models.ResearchQueue.id == queue_id,
+            models.City.owner_id == user_id,
+        )
+        .with_for_update()
+        .one_or_none()
+    )
+    if queue_entry is None:
+        return False
+
+    if _as_utc(queue_entry.finish_time) <= _as_utc(utc_now()):
+        db.rollback()
+        raise ValueError("Completed research queue can no longer be cancelled")
+
+    city, production_gains = production.lock_and_recalculate_resources(
+        db, queue_entry.city_id
+    )
+    definition = unit_catalog.get_unit(queue_entry.tech_name)
+    paid_cost = queue_entry.paid_cost or definition["research_cost"]
+    storage_limit = production.get_storage_limit(city)
+
+    for resource, amount in paid_cost.items():
+        current = float(getattr(city, resource))
+        if current >= storage_limit:
+            continue
+        setattr(
+            city,
+            resource,
+            min(current + float(amount) * REFUND_FACTOR, storage_limit),
+        )
+
+    db.delete(queue_entry)
+    db.commit()
+    production.record_resource_gains(db, city, production_gains)
+    logger.info(
+        "research_cancelled",
+        extra={
+            "city_id": city.id,
+            "tech_name": queue_entry.tech_name,
+            "queue_id": queue_id,
+        },
+    )
+    return True
+
+
+def research_tech(db: Session, city: models.City, tech_name: str) -> models.ResearchQueue:
+    """Compatibility entrypoint: research now means queueing, never instant unlock."""
+
+    return queue_research(db, city, tech_name)
