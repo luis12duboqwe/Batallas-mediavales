@@ -5,6 +5,8 @@ import pytest
 
 from app import models
 from app.database import SessionLocal, engine
+from app.services import balance
+from app.services import premium as premium_service
 from app.services import research as research_service
 from app.services import troops as troop_service
 
@@ -122,6 +124,55 @@ def test_two_processors_complete_research_queue_once(db_session, city):
     refreshed = db_session.query(models.City).filter_by(id=city_id).one()
     assert "heavy_infantry" in refreshed.researched_units
     assert db_session.query(models.ResearchQueue).filter_by(city_id=city_id).count() == 0
+
+
+def test_two_training_requests_cannot_overbook_upkeep_capacity(db_session, city):
+    db_session.add(models.Building(city_id=city.id, name="barracks", level=1))
+    city.population_max = 1000
+    city.last_production = datetime.now(timezone.utc)
+    for resource in balance.RESOURCE_FIELDS:
+        setattr(city, resource, 100000.0)
+    status = premium_service.get_or_create_status(db_session, city.owner)
+    status.second_troop_queue = True
+    db_session.add(status)
+    db_session.add(city)
+    db_session.commit()
+    city_id = city.id
+
+    quantity = 250
+    per_unit = balance.UNIT_CATALOG["basic_infantry"]
+    assert per_unit["upkeep_per_hour"] * quantity < balance.PRODUCTION_RATES_PER_HOUR["gold"]
+    assert per_unit["upkeep_per_hour"] * quantity * 2 > balance.PRODUCTION_RATES_PER_HOUR["gold"]
+    before = {
+        resource: float(getattr(city, resource))
+        for resource in balance.RESOURCE_FIELDS
+    }
+
+    def train_once(session):
+        loaded_city = session.query(models.City).filter(models.City.id == city_id).one()
+        return troop_service.queue_training(
+            session,
+            loaded_city,
+            "basic_infantry",
+            quantity,
+        ).id
+
+    results, errors = _run_two(train_once)
+
+    assert len(results) == 1
+    assert len(errors) == 1
+    assert isinstance(errors[0], ValueError)
+    assert "sustainable gold income" in str(errors[0])
+
+    db_session.expire_all()
+    queues = db_session.query(models.TroopQueue).filter_by(city_id=city_id).all()
+    assert len(queues) == 1
+    assert queues[0].amount == quantity
+    refreshed = db_session.query(models.City).filter_by(id=city_id).one()
+    for resource, unit_cost in per_unit["training_cost"].items():
+        assert float(getattr(refreshed, resource)) == pytest.approx(
+            before[resource] - float(unit_cost) * quantity
+        )
 
 
 def test_two_processors_complete_troop_queue_once(db_session, city, monkeypatch):
