@@ -147,8 +147,28 @@ try {
   for (const label of ['Recursos', 'Tropas', 'Edificios']) {
     await page.getByText(label, { exact: true }).waitFor({ state: 'visible', timeout: 5000 });
   }
-  const reportText = (await reportHeading.locator('xpath=ancestor::*[contains(@class,"card")][1]').textContent()) || '';
-  for (const expected of ['Arquero Real', '9', 'wall', 'Nivel 3']) {
+
+  const auditPanel = page.getByTestId('spy-audit');
+  await auditPanel.waitFor({ state: 'visible', timeout: 5000 });
+  const uiSeed = await auditPanel.getAttribute('data-spy-seed');
+  if (uiSeed !== payload.seed) failures.push(`UI spy seed differs from API seed: ui=${uiSeed} api=${payload.seed}`);
+  const visibleSeed = ((await page.getByTestId('spy-seed').textContent()) || '').trim();
+  if (visibleSeed !== payload.seed) failures.push(`Visible spy seed differs from API seed: ${visibleSeed}`);
+  const intelText = ((await page.getByTestId('spy-intel-level').textContent()) || '').trim();
+  if (!intelText.includes('nivel 3')) failures.push(`UI intelligence level mismatch: ${intelText}`);
+
+  const reportCard = reportHeading.locator('xpath=ancestor::*[contains(@class,"card")][1]');
+  const reportText = (await reportCard.textContent()) || '';
+  for (const expected of [
+    'Arquero Real',
+    '9',
+    'wall',
+    'Nivel 3',
+    'Oculto',
+    'Misión no detectada',
+    ALGORITHM_VERSION,
+    payload.balance_version,
+  ]) {
     if (!reportText.includes(expected)) failures.push(`Spy report UI is missing ${expected}: ${reportText}`);
   }
   if (reportText.includes('undefined') || reportText.includes('NaN')) {
