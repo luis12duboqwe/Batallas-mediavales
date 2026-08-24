@@ -3,7 +3,7 @@ from .city import City
 from .building import Building
 from .troop import Troop
 from .movement import Movement
-from .queue import BuildingQueue, TroopQueue
+from .queue import BuildingQueue, TroopQueue, ResearchQueue
 from .report import Report
 from .achievement import Achievement
 from .achievement_progress import AchievementProgress
@@ -44,6 +44,7 @@ __all__ = [
     "Movement",
     "BuildingQueue",
     "TroopQueue",
+    "ResearchQueue",
     "Report",
     "SpyReport",
     "Achievement",
