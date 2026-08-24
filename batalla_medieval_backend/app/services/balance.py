@@ -15,7 +15,12 @@ reduced-capacity logistics settlement and cannot recursively generate points.
 BM-0062 finalizes the building/research progression contract. Every building has
 one canonical maximum level, base construction time, four-resource cost and
 real gameplay effect. Academy is a real building and is the gateway for timed
-research; BM-0063 still owns final unit combat/training/upkeep values.
+research.
+
+BM-0063 finalizes the nine-unit military catalog: training cost/time, population,
+hourly gold upkeep, movement speed, carrying capacity and baseline attack/
+defense values are versioned here. BM-0064 may change how those baseline stats
+are resolved into combat rounds, but it must not introduce a second unit catalog.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, Tuple
 
-BALANCE_VERSION = "2026.08.23-bm0062.2"
+BALANCE_VERSION = "2026.08.23-bm0063.1"
 
 RESOURCE_FIELDS = ("wood", "stone", "iron", "gold")
 CITY_STARTING_RESOURCES: Dict[str, float] = {
@@ -268,12 +273,11 @@ UNIT_DISPLAY_NAMES = {
     "noble": "Noble",
 }
 
-# BM-0062 owns research costs, requirements and duration. BM-0063 owns final
-# training/combat/upkeep values and may tune those fields without creating a
-# second research system.
+# BM-0062 owns research costs, requirements and duration. BM-0063 fixes the
+# final training/population/upkeep values that sit beside that research data.
 UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
     "basic_infantry": {
-        "training_cost": {"wood": 50.0, "stone": 30.0, "iron": 20.0},
+        "training_cost": {"wood": 50.0, "stone": 30.0, "iron": 20.0, "gold": 2.0},
         "training_time_seconds": 45,
         "training_requirements": {"barracks": 1},
         "research_cost": {},
@@ -281,10 +285,10 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "research_requirements": {},
         "researchable": False,
         "population": 1,
-        "upkeep_per_hour": 0.0,
+        "upkeep_per_hour": 0.02,
     },
     "heavy_infantry": {
-        "training_cost": {"wood": 70.0, "stone": 60.0, "iron": 50.0},
+        "training_cost": {"wood": 70.0, "stone": 60.0, "iron": 50.0, "gold": 4.0},
         "training_time_seconds": 60,
         "training_requirements": {"barracks": 3, "smithy": 1},
         "research_cost": {"wood": 500.0, "stone": 400.0, "iron": 300.0, "gold": 50.0},
@@ -292,10 +296,10 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "research_requirements": {"academy": 1, "barracks": 3},
         "researchable": True,
         "population": 1,
-        "upkeep_per_hour": 0.0,
+        "upkeep_per_hour": 0.03,
     },
     "archer": {
-        "training_cost": {"wood": 80.0, "stone": 40.0, "iron": 40.0},
+        "training_cost": {"wood": 80.0, "stone": 40.0, "iron": 40.0, "gold": 4.0},
         "training_time_seconds": 50,
         "training_requirements": {"barracks": 5, "smithy": 3},
         "research_cost": {"wood": 600.0, "stone": 300.0, "iron": 300.0, "gold": 60.0},
@@ -303,32 +307,32 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "research_requirements": {"academy": 2, "barracks": 5},
         "researchable": True,
         "population": 1,
-        "upkeep_per_hour": 0.0,
+        "upkeep_per_hour": 0.03,
     },
     "fast_cavalry": {
-        "training_cost": {"wood": 120.0, "stone": 80.0, "iron": 100.0},
+        "training_cost": {"wood": 120.0, "stone": 80.0, "iron": 100.0, "gold": 8.0},
         "training_time_seconds": 70,
         "training_requirements": {"stable": 1},
         "research_cost": {"wood": 1000.0, "stone": 800.0, "iron": 600.0, "gold": 100.0},
         "research_time_seconds": 480,
         "research_requirements": {"academy": 3, "stable": 3},
         "researchable": True,
-        "population": 1,
-        "upkeep_per_hour": 0.0,
+        "population": 2,
+        "upkeep_per_hour": 0.05,
     },
     "heavy_cavalry": {
-        "training_cost": {"wood": 200.0, "stone": 150.0, "iron": 200.0},
+        "training_cost": {"wood": 200.0, "stone": 150.0, "iron": 200.0, "gold": 15.0},
         "training_time_seconds": 80,
         "training_requirements": {"stable": 5, "smithy": 5},
         "research_cost": {"wood": 2000.0, "stone": 1500.0, "iron": 1500.0, "gold": 250.0},
         "research_time_seconds": 900,
         "research_requirements": {"academy": 6, "stable": 10},
         "researchable": True,
-        "population": 1,
-        "upkeep_per_hour": 0.0,
+        "population": 3,
+        "upkeep_per_hour": 0.08,
     },
     "spy": {
-        "training_cost": {"wood": 40.0, "stone": 40.0, "iron": 40.0},
+        "training_cost": {"wood": 40.0, "stone": 40.0, "iron": 40.0, "gold": 4.0},
         "training_time_seconds": 30,
         "training_requirements": {"stable": 1},
         "research_cost": {"wood": 200.0, "stone": 200.0, "iron": 200.0, "gold": 40.0},
@@ -336,43 +340,46 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "research_requirements": {"academy": 2, "stable": 1},
         "researchable": True,
         "population": 1,
-        "upkeep_per_hour": 0.0,
+        "upkeep_per_hour": 0.04,
     },
     "ram": {
-        "training_cost": {"wood": 300.0, "stone": 200.0, "iron": 150.0},
+        "training_cost": {"wood": 300.0, "stone": 200.0, "iron": 150.0, "gold": 12.0},
         "training_time_seconds": 90,
         "training_requirements": {"workshop": 1},
         "research_cost": {"wood": 1500.0, "stone": 1000.0, "iron": 1000.0, "gold": 150.0},
         "research_time_seconds": 600,
         "research_requirements": {"academy": 5, "workshop": 1},
         "researchable": True,
-        "population": 1,
-        "upkeep_per_hour": 0.0,
+        "population": 3,
+        "upkeep_per_hour": 0.06,
     },
     "catapult": {
-        "training_cost": {"wood": 350.0, "stone": 250.0, "iron": 300.0},
+        "training_cost": {"wood": 350.0, "stone": 250.0, "iron": 300.0, "gold": 20.0},
         "training_time_seconds": 120,
         "training_requirements": {"workshop": 5},
         "research_cost": {"wood": 2000.0, "stone": 1500.0, "iron": 1500.0, "gold": 300.0},
         "research_time_seconds": 1200,
         "research_requirements": {"academy": 8, "workshop": 5},
         "researchable": True,
-        "population": 1,
-        "upkeep_per_hour": 0.0,
+        "population": 5,
+        "upkeep_per_hour": 0.10,
     },
     "noble": {
-        "training_cost": {"wood": 1000.0, "stone": 1000.0, "iron": 1000.0},
-        "training_time_seconds": 45,
+        "training_cost": {"wood": 1000.0, "stone": 1000.0, "iron": 1000.0, "gold": 100.0},
+        "training_time_seconds": 600,
         "training_requirements": {"town_hall": 20, "workshop": 10},
         "research_cost": {"wood": 10000.0, "stone": 10000.0, "iron": 10000.0, "gold": 1500.0},
         "research_time_seconds": 3600,
         "research_requirements": {"academy": 12, "town_hall": 20, "workshop": 10},
         "researchable": True,
-        "population": 1,
-        "upkeep_per_hour": 0.0,
+        "population": 5,
+        "upkeep_per_hour": 0.50,
     },
 }
 
+# Movement/carry/defense values are the final BM-0063 unit baselines. BM-0064
+# may change the round algorithm but must consume these values rather than copy
+# or redefine them.
 UNIT_SPEED: Dict[str, float] = {
     "basic_infantry": 0.60,
     "heavy_infantry": 0.55,
@@ -586,6 +593,7 @@ def snapshot() -> Dict[str, Any]:
             "catalog": units,
             "order": list(UNIT_ORDER),
             "maintenance_resource": "gold",
+            "sustainable_capacity_uses_temporary_events": False,
             "research_queue_slots_per_city": RESEARCH_QUEUE_SLOTS_PER_CITY,
         },
         "production": {
