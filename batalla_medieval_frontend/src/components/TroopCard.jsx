@@ -57,7 +57,7 @@ const TroopCard = ({ troop, onTrain }) => {
       className="card p-5 flex flex-col gap-4 relative overflow-hidden group transition hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(0,0,0,0.45)]"
       data-testid={`troop-card-${troop.unit_type}`}
     >
-      <div className="absolute inset-0 bg-gradient-to-br from-amber-400/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-amber-400/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition" />
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <div className="h-11 w-11 shrink-0 rounded-lg bg-gray-800/80 border border-yellow-800/40 flex items-center justify-center text-xl" aria-hidden>⚔️</div>
