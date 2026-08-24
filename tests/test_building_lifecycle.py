@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app import models
-from app.services import balance, building, production
+from app.services import balance, building, production, unit_catalog
 
 
 FIXED_NOW = datetime(2026, 8, 18, 19, 0, tzinfo=timezone.utc)
@@ -12,6 +12,10 @@ FIXED_NOW = datetime(2026, 8, 18, 19, 0, tzinfo=timezone.utc)
 def _freeze_time(monkeypatch):
     monkeypatch.setattr(building, "utc_now", lambda: FIXED_NOW)
     monkeypatch.setattr(production, "utc_now", lambda: FIXED_NOW)
+
+
+def _aware(value):
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def _set_resources(city, amount: float) -> None:
@@ -47,7 +51,7 @@ def test_level_two_quote_matches_exact_payment(db_session, city, monkeypatch):
 
     assert queue_entry.target_level == 2
     assert queue_entry.paid_cost == pytest.approx(expected)
-    assert queue_entry.finish_time == FIXED_NOW + timedelta(
+    assert _aware(queue_entry.finish_time) == FIXED_NOW + timedelta(
         seconds=balance.get_building_build_time("town_hall", 2)
     )
     for resource in balance.RESOURCE_FIELDS:
@@ -70,7 +74,10 @@ def test_catalog_exposes_academy_effects_and_four_resource_costs(db_session, cit
     academy = catalog["academy"]
     assert academy["display_name"] == "Academia Militar"
     assert academy["requirements_met"] is True
-    assert academy["effect"] == {"type": "research_access"}
+    assert academy["effect"] == {
+        "type": "research_access",
+        "queue_slots": balance.RESEARCH_QUEUE_SLOTS_PER_CITY,
+    }
     assert set(academy["cost"]) == set(balance.RESOURCE_FIELDS)
     assert academy["build_time"] == balance.get_building_build_time("academy", 1)
 
@@ -99,8 +106,11 @@ def test_max_level_building_cannot_be_queued(db_session, city):
         building.queue_upgrade(db_session, city, "wall")
 
 
-def test_farm_completion_updates_population_capacity(db_session, city, monkeypatch):
+def test_farm_completion_adds_effective_capacity_without_overwriting_base(
+    db_session, city, monkeypatch
+):
     _freeze_time(monkeypatch)
+    city.population_max = 120
     farm = models.Building(city_id=city.id, name="farm", level=0)
     queue_entry = models.BuildingQueue(
         city_id=city.id,
@@ -114,8 +124,11 @@ def test_farm_completion_updates_population_capacity(db_session, city, monkeypat
 
     building.process_building_queues(db_session)
     db_session.refresh(city)
-    assert city.population_max == (
-        balance.CITY_POPULATION_MAX + balance.POPULATION_PER_FARM_LEVEL
+    db_session.expire(city, ["buildings"])
+
+    assert city.population_max == 120
+    assert unit_catalog.get_population_capacity(city) == (
+        120 + balance.POPULATION_PER_FARM_LEVEL
     )
 
 
