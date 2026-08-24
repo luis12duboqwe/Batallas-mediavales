@@ -24,16 +24,16 @@ export const TROOP_TYPES = {
 export const troopList = Object.keys(TROOP_TYPES);
 
 export const buildingList = [
-  'Casa Central',
-  'Aserradero',
-  'Cantera de Piedra',
-  'Mina Profunda',
-  'Hacienda',
-  'Gran Depósito',
-  'Barracas',
-  'Establos Imperiales',
-  'Forja Bélica',
-  'Muralla de Guardia',
-  'Plaza Comercial',
-  'Comandancia Militar',
+  'town_hall',
+  'barracks',
+  'stable',
+  'wall',
+  'market',
+  'farm',
+  'warehouse',
+  'smithy',
+  'workshop',
+  'church',
+  'cathedral',
+  'world_wonder',
 ];

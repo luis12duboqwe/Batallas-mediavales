@@ -97,6 +97,7 @@ jobs:
           tests/test_unit_concurrency.py
           tests/test_movement_concurrency.py
           tests/test_market_concurrency.py
+          tests/test_expansion_concurrency.py
           tests/test_g3_24h_simulation.py
           tests/test_tutorial_concurrency.py
 
@@ -174,6 +175,7 @@ jobs:
           alembic -c batalla_medieval_backend/alembic.ini upgrade head
           python -m app.seed
           python scripts/prepare_g2_e2e.py
+          python scripts/prepare_g6_expansion_e2e.py
 
       - name: Start backend and frontend
         run: |
@@ -189,6 +191,7 @@ jobs:
         run: |
           node e2e/g2-alpha.mjs
           node e2e/g4-ux.mjs
+          node e2e/g6-expansion.mjs
 
       - name: Show service logs
         if: always()

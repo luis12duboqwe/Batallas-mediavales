@@ -44,6 +44,7 @@ from .spy_report import SpyReportCreate, SpyReportRead
 from .item import ItemTemplateRead, HeroItemRead
 from .message import MessageCreate, MessageRead
 from .conquest import ConquestRequest, ConquestResult, FoundCityRequest
+from .expansion import ExpansionStatus, FoundSettlementRequest, SettlementType
 from .protection import ProtectionStatus
 from .ranking import AllianceRanking, PlayerRanking
 from .log import LogCreate, LogRead
@@ -123,6 +124,9 @@ __all__ = [
     "ConquestRequest",
     "ConquestResult",
     "FoundCityRequest",
+    "ExpansionStatus",
+    "FoundSettlementRequest",
+    "SettlementType",
     "ProtectionStatus",
     "PlayerRanking",
     "AllianceRanking",

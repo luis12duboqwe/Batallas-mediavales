@@ -45,7 +45,7 @@ def get_map_tiles(
         .selectinload(models.AllianceMember.alliance)
     )
 
-    # Fetch cities in range with everything needed for labels and canonical score.
+    # Fetch settlements in range with everything needed for labels and score.
     cities = (
         db.query(models.City)
         .options(
@@ -63,10 +63,8 @@ def get_map_tiles(
         .all()
     )
 
-    # Map cities by coordinate for O(1) lookup
     city_map = {(c.x, c.y): c for c in cities}
 
-    # Fetch oases in range
     oases = (
         db.query(models.Oasis)
         .options(
@@ -96,6 +94,7 @@ def get_map_tiles(
 
             city_id = city.id if city else None
             city_name = city.name if city else None
+            settlement_type = city.settlement_type if city else None
             points = ranking.calculate_city_points(city) if city else 0
             owner_id = None
             owner_name = None
@@ -133,6 +132,7 @@ def get_map_tiles(
                     type=tile_type,
                     city_id=city_id,
                     city_name=city_name,
+                    settlement_type=settlement_type,
                     owner_id=owner_id,
                     owner_name=owner_name,
                     alliance_name=alliance_name,

@@ -13,6 +13,7 @@ from .. import models
 from ..utils import utc_now
 from . import achievement as achievement_service
 from . import balance
+from . import expansion as expansion_service
 from . import notification as notification_service
 from . import premium as premium_service
 from . import production, quest as quest_service, ranking
@@ -39,6 +40,12 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _building_allowed(city: models.City, building_name: str) -> bool:
+    if getattr(city, "settlement_type", "city") != "camp":
+        return True
+    return building_name in balance.CAMP_ALLOWED_BUILDINGS
+
+
 def calculate_upgrade_cost(building_name: str, target_level: int) -> Dict[str, float]:
     """Return the canonical cost for reaching ``target_level``."""
 
@@ -52,12 +59,14 @@ def calculate_build_time(target_level: int) -> int:
 
 
 def get_available_buildings(db: Session, city: models.City) -> List[dict]:
-    """Return server-authoritative quotes for every supported building."""
+    """Return server-authoritative quotes for buildings valid for a settlement."""
 
     existing_map = {building.name: building for building in city.buildings}
     result = []
 
     for name in BUILDING_COSTS:
+        if not _building_allowed(city, name):
+            continue
         building = existing_map.get(name)
         current_level = building.level if building else 0
         target_level = current_level + 1
@@ -89,6 +98,8 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
 
     if building_name not in BUILDING_COSTS:
         raise ValueError(f"Unknown building type: {building_name}")
+    if not _building_allowed(city, building_name):
+        raise ValueError("Building is not available in camps")
 
     status = premium_service.get_or_create_status(db, city.owner)
 
@@ -268,7 +279,16 @@ def process_building_queues(db: Session) -> List[dict]:
             db.add(building)
             db.flush()
 
-        building.level = max(building.level, queue_entry.target_level)
+        previous_level = int(building.level)
+        building.level = max(previous_level, queue_entry.target_level)
+        expansion_points_awarded = 0
+        if building.level > previous_level:
+            expansion_points_awarded = expansion_service.award_expansion_points_for_building(
+                db,
+                city,
+                building.name,
+            )
+
         world_won = False
         if building.name == "world_wonder" and building.level >= 100:
             world = (
@@ -291,6 +311,7 @@ def process_building_queues(db: Session) -> List[dict]:
                 "owner_id": city.owner_id,
                 "world_id": city.world_id,
                 "world_won": world_won,
+                "expansion_points_awarded": expansion_points_awarded,
             }
         )
         db.delete(queue_entry)
@@ -306,6 +327,9 @@ def process_building_queues(db: Session) -> List[dict]:
             extra={
                 "count": len(finished_info),
                 "cities": [item["city_id"] for item in finished_info],
+                "expansion_points_awarded": sum(
+                    item["expansion_points_awarded"] for item in finished_info
+                ),
             },
         )
 

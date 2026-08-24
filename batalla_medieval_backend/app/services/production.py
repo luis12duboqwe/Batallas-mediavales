@@ -20,7 +20,7 @@ def _ensure_timezone(dt):
 
 
 def get_storage_limit(city: models.City) -> float:
-    """Return server-authoritative storage capacity for the city."""
+    """Return server-authoritative storage capacity for the settlement."""
 
     warehouse_level = 0
     for building in city.buildings or []:
@@ -36,6 +36,11 @@ def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
     modifiers = event_service.get_active_modifiers(db, world_id=city.world_id)
     rate_multiplier = modifiers.get("production_speed", 1.0)
     world_modifier = city.world.resource_modifier if city.world else 1.0
+    settlement_multiplier = (
+        balance.CAMP_PRODUCTION_MULTIPLIER
+        if getattr(city, "settlement_type", "city") == "camp"
+        else 1.0
+    )
 
     oasis_bonuses = {resource: 0.0 for resource in balance.RESOURCE_FIELDS}
     oases = getattr(city, "oases", [])
@@ -43,7 +48,7 @@ def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
         if oasis.resource_type in oasis_bonuses:
             oasis_bonuses[oasis.resource_type] += oasis.bonus_percent / 100.0
 
-    total_multiplier = rate_multiplier * world_modifier
+    total_multiplier = rate_multiplier * world_modifier * settlement_multiplier
 
     production = {}
     for resource, rate in PRODUCTION_RATES.items():

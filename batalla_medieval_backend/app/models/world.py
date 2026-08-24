@@ -52,6 +52,7 @@ class PlayerWorld(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     world_id = Column(Integer, ForeignKey("worlds.id"), nullable=False)
     starting_city_id = Column(Integer, ForeignKey("cities.id"), nullable=True)
+    expansion_points = Column(Integer, default=0, nullable=False)
     joined_at = Column(DateTime, default=get_utc_now)
 
     user = relationship("User", back_populates="world_memberships")

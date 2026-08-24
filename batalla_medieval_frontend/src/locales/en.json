@@ -7,6 +7,7 @@
   "nav": {
     "city": "City",
     "buildings": "Buildings",
+    "expansion": "Expansion",
     "troops": "Troops",
     "movements": "Movements",
     "map": "Map",
@@ -99,6 +100,8 @@
   "warehouse": "Grand Warehouse",
   "smithy": "War Smithy",
   "workshop": "Siege Workshop",
+  "church": "Church",
+  "cathedral": "Cathedral",
   "world_wonder": "World Wonder",
   "basic_infantry": "Spearman",
   "heavy_infantry": "Swordsman",

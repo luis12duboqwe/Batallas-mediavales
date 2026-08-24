@@ -11,12 +11,25 @@ const buildingIcons = {
   warehouse: '📦',
   smithy: '⚒️',
   workshop: '⚙️',
+  church: '⛪',
+  cathedral: '🕍',
   world_wonder: '🌟',
 };
+
+const resourceMeta = [
+  ['wood', '🪵'],
+  ['stone', '🪨'],
+  ['iron', '⛓️'],
+  ['gold', '🪙'],
+];
 
 const BuildingCard = ({ building, onUpgrade }) => {
   const displayName = building.display_name || building.name;
   const safeName = building.name.toLowerCase().replace(/\s+/g, '-');
+  const visibleCosts = resourceMeta.filter(
+    ([resource]) => Number(building.cost?.[resource] ?? 0) > 0,
+  );
+
   return (
     <article className={`card p-5 flex flex-col gap-4 relative overflow-hidden group transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(0,0,0,0.45)] building-card-${safeName}`}>
       <div className="absolute inset-0 bg-gradient-to-br from-yellow-500/5 via-transparent to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition" />
@@ -34,8 +47,13 @@ const BuildingCard = ({ building, onUpgrade }) => {
       </div>
 
       <div className="text-sm text-gray-300">
-        <p className="leading-relaxed">
-          Coste próximo nivel: 🪵 {formatNumber(building.cost?.wood ?? 0)} · 🪨 {formatNumber(building.cost?.stone ?? 0)} · ⛓️ {formatNumber(building.cost?.iron ?? 0)}
+        <p className="leading-relaxed flex flex-wrap gap-x-2 gap-y-1">
+          <span>Coste próximo nivel:</span>
+          {visibleCosts.map(([resource, icon], index) => (
+            <span key={resource}>
+              {index > 0 ? '· ' : ''}{icon} {formatNumber(building.cost?.[resource] ?? 0)}
+            </span>
+          ))}
         </p>
       </div>
 

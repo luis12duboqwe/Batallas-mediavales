@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
-from ..services import production, protection, quest as quest_service, world_gen
+from ..services import production, protection, quest as quest_service
 
 router = APIRouter(tags=["cities"])
 
@@ -15,55 +15,14 @@ def create_city(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    world = db.query(models.World).filter(models.World.id == city.world_id, models.World.is_active.is_(True)).first()
-    if not world:
-        raise HTTPException(status_code=404, detail="World not found or inactive")
-
-    # Automatic spawning if coordinates are not provided
-    if city.x is None or city.y is None:
-        try:
-            city.x, city.y = world_gen.find_spawn_location(db, city.world_id, world.map_size)
-        except ValueError:
-            raise HTTPException(status_code=500, detail="No valid spawn location found")
-    
-    if city.x < 0 or city.y < 0 or city.x >= world.map_size or city.y >= world.map_size:
-        raise HTTPException(status_code=400, detail="Invalid coordinates for this world")
-    occupied = (
-        db.query(models.City)
-        .filter(models.City.world_id == city.world_id, models.City.x == city.x, models.City.y == city.y)
-        .first()
+    del city, db, current_user
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "Direct city creation is disabled. Join a world for the initial capital "
+            "or use /expansion/found for additional settlements."
+        ),
     )
-    if occupied:
-        raise HTTPException(status_code=409, detail="Coordinates already occupied")
-    membership = (
-        db.query(models.PlayerWorld)
-        .filter(models.PlayerWorld.user_id == current_user.id, models.PlayerWorld.world_id == city.world_id)
-        .first()
-    )
-    if not membership:
-        membership = models.PlayerWorld(user_id=current_user.id, world_id=city.world_id)
-        db.add(membership)
-        db.commit()
-        db.refresh(membership)
-    current_user.world_id = city.world_id
-    db.add(current_user)
-    
-    # Determine tile type
-    tile_type = world_gen.get_tile_type(city.x, city.y)
-    
-    db_city = models.City(
-        name=city.name,
-        x=city.x,
-        y=city.y,
-        owner_id=current_user.id,
-        world_id=city.world_id,
-        tile_type=tile_type
-    )
-    db.add(db_city)
-    db.commit()
-    db.refresh(db_city)
-    production.recalculate_resources(db, db_city)
-    return db_city
 
 
 @router.get("/", response_model=list[schemas.CityRead])
@@ -142,6 +101,7 @@ def city_status(
     )
     return schemas.CityResourceStatus(
         city_id=city.id,
+        settlement_type=city.settlement_type,
         wood=city.wood,
         stone=city.stone,
         iron=city.iron,

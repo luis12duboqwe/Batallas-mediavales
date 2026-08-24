@@ -71,6 +71,7 @@ export const api = {
   getProfile: () => axiosClient.get('/auth/me'),
   updateProfile: (data) => axiosClient.patch('/auth/me', data),
   getBalance: () => loadBalanceSnapshot(),
+  getCities: (worldId) => axiosClient.get('/city/', { params: { world_id: worldId } }),
   getCity: async ({ worldId, cityId } = {}) => {
     const [profileResp, balanceResult] = await Promise.all([
       axiosClient.get('/auth/me'),

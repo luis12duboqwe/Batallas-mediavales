@@ -18,6 +18,7 @@ class City(Base):
     world_id: Mapped[int] = mapped_column(Integer, ForeignKey("worlds.id"), index=True, nullable=False)
     x: Mapped[int] = mapped_column(Integer, default=0)
     y: Mapped[int] = mapped_column(Integer, default=0)
+    settlement_type: Mapped[str] = mapped_column(String(16), default="city", nullable=False)
     wood: Mapped[float] = mapped_column(Float, default=500.0)
     stone: Mapped[float] = mapped_column(Float, default=500.0)
     iron: Mapped[float] = mapped_column(Float, default=500.0)
