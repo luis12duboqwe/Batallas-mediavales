@@ -5,6 +5,7 @@ import pytest
 from app import models, schemas
 from app.database import SessionLocal, engine
 from app.services import market
+from app.services import movement as movement_service
 from app.utils import utc_now
 
 
@@ -231,3 +232,90 @@ def test_two_transports_cannot_double_spend_stone_and_gold(db_session, city):
     assert origin_after.wood == pytest.approx(1000, abs=0.1)
     assert origin_after.iron == pytest.approx(1000, abs=0.1)
     assert origin_after.stone >= 0 and origin_after.gold >= 0
+
+
+def test_concurrent_arrivals_cannot_overfill_or_destroy_cargo(db_session, city):
+    """Target storage is a serialized all-or-return gate under PostgreSQL."""
+
+    world_id = city.world_id
+    target = _market_city(
+        db_session,
+        world_id,
+        username="delivery_target",
+        x=44,
+        y=44,
+    )
+    origin_a = _market_city(
+        db_session,
+        world_id,
+        username="delivery_origin_a",
+        x=45,
+        y=45,
+    )
+    origin_b = _market_city(
+        db_session,
+        world_id,
+        username="delivery_origin_b",
+        x=46,
+        y=46,
+    )
+    target.wood = 4900
+    target.last_production = utc_now()
+    db_session.add(target)
+    db_session.commit()
+
+    movement_a = market.send_resources(
+        db_session,
+        origin_a,
+        schemas.TransportRequest(target_city_id=target.id, wood=100),
+    )
+    movement_b = market.send_resources(
+        db_session,
+        origin_b,
+        schemas.TransportRequest(target_city_id=target.id, wood=100),
+    )
+    movement_ids = [movement_a.id, movement_b.id]
+
+    def resolve_one(movement_id):
+        def callback(session):
+            movement = (
+                session.query(models.Movement)
+                .filter(models.Movement.id == movement_id)
+                .with_for_update()
+                .one()
+            )
+            movement_service._resolve_transport_core(session, movement)
+            movement.status = "completed"
+            session.add(movement)
+            session.commit()
+
+        return callback
+
+    results = _run_parallel([resolve_one(movement_a.id), resolve_one(movement_b.id)])
+
+    db_session.expire_all()
+    target_after = db_session.query(models.City).filter_by(id=target.id).one()
+    source_movements = (
+        db_session.query(models.Movement)
+        .filter(models.Movement.id.in_(movement_ids))
+        .all()
+    )
+    returns = (
+        db_session.query(models.Movement)
+        .filter(
+            models.Movement.movement_type == "transport_return",
+            models.Movement.origin_city_id == target.id,
+        )
+        .all()
+    )
+
+    assert results == ["ok", "ok"]
+    assert target_after.wood == pytest.approx(5000, abs=0.1)
+    assert all(movement.status == "completed" for movement in source_movements)
+    assert len(returns) == 2
+    assert sorted((movement.resources or {}).get("wood", 0) for movement in returns) == [0, 100]
+    assert sorted((movement.resources or {}).get("capacity", 0) for movement in returns) == [100, 100]
+    # Exactly 100 wood was accepted and 100 is still conserved on the rejected return.
+    assert target_after.wood - 4900 + sum(
+        (movement.resources or {}).get("wood", 0) for movement in returns
+    ) == pytest.approx(200, abs=0.1)
