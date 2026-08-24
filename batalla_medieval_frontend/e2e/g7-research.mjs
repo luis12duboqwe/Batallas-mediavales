@@ -83,20 +83,17 @@ try {
   const primaryCard = page.getByTestId(`research-card-${PRIMARY_TECH}`);
   await primaryCard.waitFor({ state: 'visible' });
   await primaryCard.getByTestId(`research-action-${PRIMARY_TECH}`).click();
-  await page.getByText('Investigación de Soldado de Acero iniciada', { exact: true }).waitFor({ state: 'visible' });
-  await page.getByTestId('research-active-queue').waitFor({ state: 'visible' });
 
-  const activeText = await page.getByTestId('research-active-tech').textContent();
-  if (!activeText?.includes('Soldado de Acero')) {
-    failures.push(`Unexpected active research text: ${activeText}`);
+  // The durable queue/timer is the product contract. Do not depend on a
+  // localized transient success message or translated unit display name.
+  await page.getByTestId('research-active-queue').waitFor({ state: 'visible' });
+  const activeText = (await page.getByTestId('research-active-tech').textContent())?.trim();
+  if (!activeText) {
+    failures.push('Active research panel did not render a technology label');
   }
 
   const secondaryAction = page.getByTestId(`research-action-${SECONDARY_TECH}`);
   await secondaryAction.waitFor({ state: 'visible' });
-  const secondaryLabel = await secondaryAction.textContent();
-  if (!secondaryLabel?.includes('Cola de investigación ocupada')) {
-    failures.push(`Second eligible technology was not blocked by queue: ${secondaryLabel}`);
-  }
   if (!(await secondaryAction.isDisabled())) {
     failures.push('Second eligible research action remained enabled while queue was occupied');
   }
@@ -108,6 +105,9 @@ try {
   if (queued.primary.researched || !queued.primary.research_queued) {
     failures.push(`Queued research unlocked too early: ${JSON.stringify(queued.primary)}`);
   }
+  if (queued.secondary.can_research) {
+    failures.push(`Second eligible technology stayed researchable with occupied queue: ${JSON.stringify(queued.secondary)}`);
+  }
 
   for (const resource of RESOURCE_FIELDS) {
     const expected = initial.status[resource] - Number(initial.primary.research_cost?.[resource] || 0);
@@ -117,10 +117,6 @@ try {
   }
 
   await page.getByTestId('cancel-research').click();
-  await page.getByText(
-    'Investigación cancelada; se aplicó el reembolso correspondiente.',
-    { exact: true },
-  ).waitFor({ state: 'visible' });
   await page.getByTestId('research-active-queue').waitFor({ state: 'detached' });
 
   const finalSnapshot = await apiSnapshot();
@@ -129,6 +125,9 @@ try {
   }
   if (finalSnapshot.primary.researched || finalSnapshot.primary.research_queued) {
     failures.push(`Cancelled research changed unlock state: ${JSON.stringify(finalSnapshot.primary)}`);
+  }
+  if (!finalSnapshot.primary.can_research || !finalSnapshot.secondary.can_research) {
+    failures.push(`Research slot was not released after cancellation: ${JSON.stringify({ primary: finalSnapshot.primary, secondary: finalSnapshot.secondary })}`);
   }
 
   for (const resource of RESOURCE_FIELDS) {
