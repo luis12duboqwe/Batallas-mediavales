@@ -65,12 +65,19 @@ async function apiSnapshot() {
     const city = cities[0];
     if (!city) throw new Error('BM-0063 E2E user has no city');
 
-    const [statusResponse, catalogResponse] = await Promise.all([
-      fetch(`${apiUrl}/city/${city.id}/status?world_id=${profile.world_id}`, { headers }),
-      fetch(`${apiUrl}/troop/available?city_id=${city.id}&world_id=${profile.world_id}`, { headers }),
-    ]);
-    const status = await statusResponse.json();
+    // Keep authoritative reads sequential. Both endpoints may recalculate the
+    // city's live economy, so Promise.all would make a timing-sensitive
+    // snapshot on SQLite and can compare resources from different instants.
+    const catalogResponse = await fetch(
+      `${apiUrl}/troop/available?city_id=${city.id}&world_id=${profile.world_id}`,
+      { headers },
+    );
     const catalog = await catalogResponse.json();
+    const statusResponse = await fetch(
+      `${apiUrl}/city/${city.id}/status?world_id=${profile.world_id}`,
+      { headers },
+    );
+    const status = await statusResponse.json();
     return {
       profile,
       city,
@@ -149,7 +156,20 @@ try {
   await amountInput.fill(String(TRAIN_AMOUNT));
   if (await trainAction.isDisabled()) {
     failures.push('Training one Noble remained disabled despite valid resources/population/upkeep');
-  } else {
+  }
+
+  // Capture the live economy immediately before the authoritative write. The
+  // city keeps producing while the browser journey runs, so the startup
+  // snapshot is intentionally not used for resource-delta assertions.
+  const beforeTraining = await apiSnapshot();
+  const trainingCost = Object.fromEntries(
+    RESOURCE_FIELDS.map((resource) => [
+      resource,
+      Number(beforeTraining.unit.training_cost?.[resource] || 0),
+    ]),
+  );
+
+  if (!(await trainAction.isDisabled())) {
     await trainAction.click();
   }
 
@@ -172,12 +192,15 @@ try {
   }
 
   for (const resource of RESOURCE_FIELDS) {
-    const expected = Number(initial.status[resource]) - Number(initial.unit.training_cost?.[resource] || 0);
-    if (Math.abs(Number(queued.status[resource]) - expected) > 2) {
+    const expected = Number(beforeTraining.status[resource]) - trainingCost[resource];
+    if (Math.abs(Number(queued.status[resource]) - expected) > 3) {
       failures.push(`Unexpected ${resource} training charge: expected≈${expected}, got=${queued.status[resource]}`);
     }
   }
 
+  // Take another just-in-time snapshot so passive production between training
+  // and cancellation cannot be mistaken for an incorrect 80% refund.
+  const beforeCancel = await apiSnapshot();
   await page.getByTestId(`cancel-troop-${queue.id}`).click();
   const finalSnapshot = await waitForSnapshot(
     (snapshot) => snapshot.status.troop_queue.length === 0,
@@ -191,8 +214,7 @@ try {
   }
 
   for (const resource of RESOURCE_FIELDS) {
-    const cost = Number(initial.unit.training_cost?.[resource] || 0);
-    const expected = Number(initial.status[resource]) - cost * 0.2;
+    const expected = Number(beforeCancel.status[resource]) + trainingCost[resource] * 0.8;
     if (Math.abs(Number(finalSnapshot.status[resource]) - expected) > 3) {
       failures.push(`Unexpected ${resource} after 80% training refund: expected≈${expected}, got=${finalSnapshot.status[resource]}`);
     }
