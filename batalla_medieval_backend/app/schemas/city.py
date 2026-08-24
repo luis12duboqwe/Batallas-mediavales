@@ -51,6 +51,8 @@ class CityResourceStatus(BaseModel):
     stone: float
     iron: float
     gold: float
+    population: int
+    population_max: int
     loyalty: float
     storage_limit: float
     production_per_hour: dict
