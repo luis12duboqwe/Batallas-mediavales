@@ -19,6 +19,12 @@ const movementCategory = (movement, ownedCityIds) => {
   }
 };
 
+const normalizeResources = (resources = {}, city = null) => ({
+  ...resources,
+  population: resources.population ?? 0,
+  populationMax: resources.population_max ?? resources.populationMax ?? city?.population_max ?? 0,
+});
+
 export const useCityStore = create((set, get) => ({
   currentCity: null,
   cities: [],
@@ -36,7 +42,7 @@ export const useCityStore = create((set, get) => ({
     set({
       currentCity: data.city ? { ...data.city } : null,
       cities: data.cities || [],
-      resources: data.resources,
+      resources: normalizeResources(data.resources, data.city),
       storageLimit: data.storage_limit ?? 0,
       buildings: data.buildings,
       productionRates: data.production,
