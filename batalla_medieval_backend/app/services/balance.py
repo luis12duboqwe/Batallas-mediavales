@@ -21,6 +21,10 @@ BM-0063 finalizes the nine-unit military catalog: training cost/time, population
 hourly gold upkeep, movement speed, carrying capacity and baseline attack/
 defense values are versioned here. BM-0064 may change how those baseline stats
 are resolved into combat rounds, but it must not introduce a second unit catalog.
+
+BM-0066 finalizes the commerce numbers without changing ``BALANCE_VERSION``:
+combat and espionage historical seeds keep their previous balance identity while
+commerce publishes its own independently versioned rules contract.
 """
 
 from __future__ import annotations
@@ -439,9 +443,18 @@ SPY_REVEALS_BUILDINGS_ON_SUCCESS = True
 # Market / transport
 # ---------------------------------------------------------------------------
 
+COMMERCE_RULES_VERSION = "2026.08.24-bm0066-v1"
 MARKET_BUILDING_KEY = "market"
+BASE_MERCHANT_CAPACITY = 500
 MERCHANT_CAPACITY_PER_LEVEL = 1000
 TRANSPORT_BASE_SPEED = 1.0
+MIN_MARKET_OFFER_AMOUNT = 10
+MAX_ACTIVE_MARKET_OFFERS = 5
+MARKET_RATIO_MIN = 0.25
+MARKET_RATIO_MAX = 4.0
+NPC_TRADE_RATE = 0.80
+NPC_TRADE_MIN_AMOUNT = 10
+NPC_TRADE_MAX_AMOUNT = 250
 
 # ---------------------------------------------------------------------------
 # World events
@@ -536,7 +549,11 @@ def get_building_effect_definition(building_type: str) -> Dict[str, Any]:
     if building_type == "wall":
         return {"type": "defense_bonus", "per_level": WALL_BONUS_PER_LEVEL}
     if building_type == "market":
-        return {"type": "merchant_capacity", "per_level": MERCHANT_CAPACITY_PER_LEVEL}
+        return {
+            "type": "merchant_capacity",
+            "base": BASE_MERCHANT_CAPACITY,
+            "per_level": MERCHANT_CAPACITY_PER_LEVEL,
+        }
     if building_type == "farm":
         return {"type": "population_capacity", "per_level": POPULATION_PER_FARM_LEVEL}
     if building_type == "warehouse":
@@ -652,9 +669,21 @@ def snapshot() -> Dict[str, Any]:
             "reveals_buildings_on_success": SPY_REVEALS_BUILDINGS_ON_SUCCESS,
         },
         "market": {
+            "rules_version": COMMERCE_RULES_VERSION,
+            "available_from_start": True,
             "building": MARKET_BUILDING_KEY,
+            "base_merchant_capacity": BASE_MERCHANT_CAPACITY,
             "merchant_capacity_per_level": MERCHANT_CAPACITY_PER_LEVEL,
             "transport_base_speed": TRANSPORT_BASE_SPEED,
+            "merchant_capacity_released_on_return": True,
+            "overflow_returns_to_sender": True,
+            "min_offer_amount": MIN_MARKET_OFFER_AMOUNT,
+            "max_active_offers": MAX_ACTIVE_MARKET_OFFERS,
+            "market_ratio_min": MARKET_RATIO_MIN,
+            "market_ratio_max": MARKET_RATIO_MAX,
+            "npc_trade_rate": NPC_TRADE_RATE,
+            "npc_trade_min_amount": NPC_TRADE_MIN_AMOUNT,
+            "npc_trade_max_amount": NPC_TRADE_MAX_AMOUNT,
         },
         "events": {
             "default_modifiers": deepcopy(EVENT_DEFAULT_MODIFIERS),
