@@ -137,6 +137,21 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
         db.rollback()
         raise ValueError("Building upgrade already queued")
 
+    building = (
+        db.query(models.Building)
+        .options(selectinload(models.Building.city))
+        .filter(
+            models.Building.city_id == city.id,
+            models.Building.name == building_name,
+        )
+        .first()
+    )
+    current_level = int(building.level) if building else 0
+    max_level = balance.get_building_max_level(building_name)
+    if current_level >= max_level:
+        db.rollback()
+        raise ValueError(f"Maximum building level is {max_level}")
+
     prereqs = BUILDING_PREREQUISITES.get(building_name, {})
     if prereqs:
         existing_buildings = {b.name: b.level for b in city.buildings}
@@ -147,24 +162,10 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
                     f"Prerequisite not met: {req_name} level {req_level} required"
                 )
 
-    building = (
-        db.query(models.Building)
-        .options(selectinload(models.Building.city))
-        .filter(
-            models.Building.city_id == city.id,
-            models.Building.name == building_name,
-        )
-        .first()
-    )
     if not building:
         building = models.Building(city_id=city.id, name=building_name, level=0)
         db.add(building)
         db.flush()
-
-    max_level = balance.get_building_max_level(building_name)
-    if int(building.level) >= max_level:
-        db.rollback()
-        raise ValueError(f"Maximum building level is {max_level}")
 
     target_level = int(building.level) + 1
     cost = calculate_upgrade_cost(building_name, target_level)
@@ -251,19 +252,6 @@ def _run_completion_side_effects(db: Session, info: dict) -> None:
         )
 
 
-def _sync_population_capacity(city: models.City) -> None:
-    """Persist the effective population cap after farm progression."""
-
-    farm_level = next(
-        (int(building.level) for building in city.buildings if building.name == "farm"),
-        0,
-    )
-    city.population_max = balance.get_population_capacity(
-        getattr(city, "settlement_type", "city"),
-        farm_level,
-    )
-
-
 def process_building_queues(db: Session) -> List[dict]:
     """Finalize each due queue at most once across concurrent processors."""
 
@@ -319,11 +307,6 @@ def process_building_queues(db: Session) -> List[dict]:
                 city,
                 building.name,
             )
-            if building.name == "farm":
-                db.flush()
-                db.expire(city, ["buildings"])
-                _sync_population_capacity(city)
-                db.add(city)
 
         world_won = False
         if building.name == "world_wonder" and building.level >= maximum:
