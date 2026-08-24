@@ -4,7 +4,7 @@ import pytest
 
 from app import models
 from app.routers.auth import create_access_token
-from app.services import balance, production, troops, upkeep
+from app.services import balance, movement, production, queue as queue_service, troops, upkeep
 
 
 FIXED_NOW = datetime(2026, 8, 23, 22, 0, tzinfo=timezone.utc)
@@ -33,6 +33,13 @@ def _target_city(db_session, city, x=20, y=20):
     db_session.commit()
     db_session.refresh(target)
     return target
+
+
+def _freeze_queue_time(monkeypatch):
+    monkeypatch.setattr(queue_service, "utc_now", lambda: FIXED_NOW)
+    monkeypatch.setattr(production, "utc_now", lambda: FIXED_NOW)
+    monkeypatch.setattr(troops, "utc_now", lambda: FIXED_NOW)
+    monkeypatch.setattr(movement, "utc_now", lambda: FIXED_NOW)
 
 
 def test_committed_upkeep_counts_home_outgoing_spy_and_returning_armies(
@@ -184,6 +191,83 @@ def test_training_rejects_upkeep_overbooking_before_spending(
     assert db_session.query(models.TroopQueue).filter_by(city_id=city.id).count() == 0
     for resource, amount in before.items():
         assert getattr(city, resource) == pytest.approx(amount)
+
+
+def test_due_training_settles_economy_before_upkeep_starts(
+    db_session, city, monkeypatch
+):
+    _freeze_queue_time(monkeypatch)
+    city.gold = 100.0
+    city.last_production = FIXED_NOW - timedelta(hours=1)
+    db_session.add(
+        models.TroopQueue(
+            city_id=city.id,
+            troop_type="basic_infantry",
+            amount=1,
+            finish_time=FIXED_NOW - timedelta(seconds=1),
+            paid_cost={"wood": 50.0, "stone": 30.0, "iron": 20.0, "gold": 2.0},
+        )
+    )
+    db_session.commit()
+
+    result = queue_service.process_all_queues(db_session)
+    assert result["troops"] == [
+        {"city_id": city.id, "troop_type": "basic_infantry", "amount": 1}
+    ]
+
+    db_session.expire_all()
+    refreshed = db_session.query(models.City).filter_by(id=city.id).one()
+    troop = db_session.query(models.Troop).filter_by(
+        city_id=city.id, unit_type="basic_infantry"
+    ).one()
+    assert troop.quantity == 1
+    # The troop did not exist during the elapsed hour, so that hour receives
+    # the full gross gold production. Upkeep begins only after completion.
+    assert refreshed.gold == pytest.approx(108.0)
+    assert refreshed.last_production.replace(tzinfo=timezone.utc) == FIXED_NOW
+
+
+def test_reinforcement_arrival_settles_sender_and_receiver_before_upkeep_moves(
+    db_session, city, second_city, monkeypatch
+):
+    _freeze_queue_time(monkeypatch)
+    for settlement in (city, second_city):
+        settlement.gold = 100.0
+        settlement.last_production = FIXED_NOW - timedelta(hours=1)
+        db_session.add(settlement)
+
+    reinforce = models.Movement(
+        origin_city_id=city.id,
+        target_city_id=second_city.id,
+        world_id=city.world_id,
+        movement_type="reinforce",
+        troops={"basic_infantry": 2},
+        resources={},
+        spy_count=0,
+        arrival_time=FIXED_NOW - timedelta(seconds=1),
+        speed_used=1.0,
+        status="ongoing",
+    )
+    db_session.add(reinforce)
+    db_session.commit()
+
+    result = queue_service.process_all_queues(db_session)
+    assert [row.id for row in result["movements"]] == [reinforce.id]
+
+    db_session.expire_all()
+    sender = db_session.query(models.City).filter_by(id=city.id).one()
+    receiver = db_session.query(models.City).filter_by(id=second_city.id).one()
+    received = db_session.query(models.Troop).filter_by(
+        city_id=second_city.id, unit_type="basic_infantry"
+    ).one()
+    assert received.quantity == 2
+    assert db_session.query(models.Movement).filter_by(id=reinforce.id).one().status == "completed"
+
+    upkeep_rate = 2 * balance.UNIT_CATALOG["basic_infantry"]["upkeep_per_hour"]
+    assert sender.gold == pytest.approx(100.0 + 8.0 - upkeep_rate)
+    assert receiver.gold == pytest.approx(108.0)
+    assert sender.last_production.replace(tzinfo=timezone.utc) == FIXED_NOW
+    assert receiver.last_production.replace(tzinfo=timezone.utc) == FIXED_NOW
 
 
 def test_city_status_exposes_gross_net_and_upkeep_contract(
