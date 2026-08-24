@@ -147,8 +147,15 @@ def test_successful_undetected_spy_returns_and_only_reveals_allowed_tier(
     assert content["luck"] == pytest.approx(expected["luck"])
 
 
-def test_spy_world_boundary_is_rejected(db_session, city, second_city, second_world):
-    second_city.world_id = second_world.id
+def test_spy_world_boundary_is_rejected(db_session, city, second_city):
+    other_world = models.World(
+        name="OtherWorld",
+        speed_modifier=1.0,
+        resource_modifier=1.0,
+    )
+    db_session.add(other_world)
+    db_session.flush()
+    second_city.world_id = other_world.id
     db_session.add(second_city)
     db_session.commit()
 
