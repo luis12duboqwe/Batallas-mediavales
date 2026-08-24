@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/axiosClient';
+import { researchApi } from '../api/researchApi';
+import Timer from '../components/Timer';
 import { useCityStore } from '../store/cityStore';
 
 const resourceCostMeta = [
@@ -10,19 +12,34 @@ const resourceCostMeta = [
   ['gold', '🪙'],
 ];
 
+const formatSeconds = (seconds) => {
+  const total = Number(seconds || 0);
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+};
+
 const AcademyView = () => {
   const { t } = useTranslation();
   const { loadCity } = useCityStore();
   const [city, setCity] = useState(null);
   const [units, setUnits] = useState([]);
+  const [activeQueue, setActiveQueue] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  const loadCatalog = useCallback(async (targetCity) => {
-    if (!targetCity?.id || !targetCity?.world_id) return [];
-    const { data } = await api.getAvailableUnits(targetCity.id, targetCity.world_id);
-    setUnits(data || []);
-    return data || [];
+  const loadCatalogAndQueue = useCallback(async (targetCity) => {
+    if (!targetCity?.id || !targetCity?.world_id) return;
+    const [catalogResponse, queueResponse] = await Promise.all([
+      api.getAvailableUnits(targetCity.id, targetCity.world_id),
+      researchApi.getQueue(targetCity.world_id),
+    ]);
+    setUnits(catalogResponse.data || []);
+    const queue = (queueResponse.data || []).find(
+      (entry) => entry.city_id === targetCity.id,
+    ) || null;
+    setActiveQueue(queue);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -30,30 +47,61 @@ const AcademyView = () => {
     const refreshedCity = data?.city || null;
     setCity(refreshedCity);
     if (refreshedCity) {
-      await loadCatalog(refreshedCity);
+      await loadCatalogAndQueue(refreshedCity);
+    } else {
+      setUnits([]);
+      setActiveQueue(null);
     }
     return refreshedCity;
-  }, [loadCity, loadCatalog]);
+  }, [loadCity, loadCatalogAndQueue]);
 
   useEffect(() => {
+    let mounted = true;
     setLoading(true);
     refresh()
       .catch((error) => {
-        setMessage(error.response?.data?.detail || 'No se pudo cargar la academia');
+        if (mounted) {
+          setMessage(error.response?.data?.detail || 'No se pudo cargar la academia');
+        }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    const interval = setInterval(() => {
+      refresh().catch(() => {});
+    }, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
   }, [refresh]);
 
   const handleResearch = async (unitType) => {
-    if (!city) return;
+    if (!city || activeQueue) return;
     setLoading(true);
     setMessage('');
     try {
-      await api.researchUnit(city.id, city.world_id, unitType);
+      await researchApi.queue(city.id, city.world_id, unitType);
       await refresh();
-      setMessage(`Investigación de ${t(unitType)} completada`);
+      setMessage(`Investigación de ${t(unitType)} iniciada`);
     } catch (error) {
-      setMessage(error.response?.data?.detail || 'Error en investigación');
+      setMessage(error.response?.data?.detail || 'Error al iniciar la investigación');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelResearch = async () => {
+    if (!activeQueue) return;
+    setLoading(true);
+    setMessage('');
+    try {
+      await researchApi.cancel(activeQueue.id);
+      await refresh();
+      setMessage('Investigación cancelada; se aplicó el reembolso correspondiente.');
+    } catch (error) {
+      setMessage(error.response?.data?.detail || 'No se pudo cancelar la investigación');
     } finally {
       setLoading(false);
     }
@@ -61,15 +109,46 @@ const AcademyView = () => {
 
   const formatRequirements = (requirements) =>
     Object.entries(requirements || {}).map(
-      ([buildingName, level]) => `${t(buildingName)} Nv. ${level}`
+      ([buildingName, level]) => `${t(buildingName)} Nv. ${level}`,
     );
 
   return (
-    <div className="p-4 max-w-6xl mx-auto">
-      <h2 className="text-3xl font-bold mb-6 text-amber-500">Academia Militar</h2>
+    <div className="p-4 max-w-6xl mx-auto" data-testid="academy-view">
+      <h2 className="text-3xl font-bold mb-2 text-amber-500">Academia Militar</h2>
+      <p className="text-sm text-gray-400 mb-6">
+        Investiga una tecnología a la vez. El desbloqueo se aplica cuando termina el temporizador.
+      </p>
 
       {message && (
-        <div className="glass-panel p-3 mb-4 text-sm text-amber-100">{message}</div>
+        <div className="glass-panel p-3 mb-4 text-sm text-amber-100" data-testid="academy-message">
+          {message}
+        </div>
+      )}
+
+      {activeQueue && (
+        <div
+          className="glass-panel p-4 mb-6 border border-amber-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+          data-testid="research-active-queue"
+        >
+          <div>
+            <div className="text-xs uppercase tracking-wide text-gray-400">Investigación activa</div>
+            <div className="font-bold text-amber-100" data-testid="research-active-tech">
+              {t(activeQueue.tech_name)}
+            </div>
+            <div className="text-sm text-gray-300 mt-1">
+              Tiempo restante: <Timer endTime={activeQueue.finish_time} />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleCancelResearch}
+            disabled={loading}
+            className="px-4 py-2 rounded bg-red-900/70 hover:bg-red-800 text-red-100 disabled:opacity-50"
+            data-testid="cancel-research"
+          >
+            Cancelar investigación
+          </button>
+        </div>
       )}
 
       {loading && units.length === 0 && <div className="skeleton h-40 w-full" />}
@@ -80,12 +159,23 @@ const AcademyView = () => {
             ? []
             : formatRequirements(unit.research_requirements);
           const cost = unit.research_cost || {};
-          const visibleCosts = resourceCostMeta.filter(([resource]) => (cost[resource] || 0) > 0);
+          const visibleCosts = resourceCostMeta.filter(
+            ([resource]) => Number(cost[resource] || 0) > 0,
+          );
+          const queuedForUnit = activeQueue?.tech_name === unit.unit_type || unit.research_queued;
+          const queueOccupied = Boolean(activeQueue) && !queuedForUnit;
+
+          let actionLabel = 'Investigar';
+          if (!unit.research_requirements_met) actionLabel = 'Requisitos no cumplidos';
+          else if (queuedForUnit) actionLabel = 'Investigando';
+          else if (queueOccupied) actionLabel = 'Cola de investigación ocupada';
+          else if (!unit.can_research) actionLabel = 'Recursos insuficientes';
 
           return (
             <div
               key={unit.unit_type}
-              className={`bg-gray-800 border ${unit.researched ? 'border-green-600' : 'border-gray-600'} p-5 rounded-lg shadow-lg relative overflow-hidden`}
+              data-testid={`research-card-${unit.unit_type}`}
+              className={`bg-gray-800 border ${unit.researched ? 'border-green-600' : queuedForUnit ? 'border-amber-500' : 'border-gray-600'} p-5 rounded-lg shadow-lg relative overflow-hidden`}
             >
               {unit.researched && (
                 <div className="absolute top-0 right-0 bg-green-600 text-white text-xs px-2 py-1 rounded-bl">
@@ -95,15 +185,18 @@ const AcademyView = () => {
 
               <h3 className="font-bold text-xl text-amber-100 mb-2">{t(unit.unit_type)}</h3>
 
-              <div className="text-sm text-gray-400 mb-4">
+              <div className="text-sm text-gray-400 mb-4 space-y-2">
                 {visibleCosts.length > 0 ? (
-                  <div className="flex gap-2 mb-1 flex-wrap">
+                  <div className="flex gap-2 flex-wrap">
                     {visibleCosts.map(([resource, icon]) => (
                       <span key={resource}>{icon} {cost[resource]}</span>
                     ))}
                   </div>
                 ) : (
                   <span className="text-green-300">Disponible desde el inicio</span>
+                )}
+                {unit.research_time_seconds > 0 && (
+                  <div>⏱️ {formatSeconds(unit.research_time_seconds)}</div>
                 )}
               </div>
 
@@ -127,19 +220,17 @@ const AcademyView = () => {
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={() => handleResearch(unit.unit_type)}
-                  disabled={loading || !unit.can_research}
+                  disabled={loading || !unit.can_research || Boolean(activeQueue)}
+                  data-testid={`research-action-${unit.unit_type}`}
                   className={`w-full py-2 rounded font-bold transition ${
-                    !unit.can_research
+                    !unit.can_research || activeQueue
                       ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                       : 'bg-amber-600 hover:bg-amber-500 text-white'
                   }`}
                 >
-                  {!unit.research_requirements_met
-                    ? 'Requisitos no cumplidos'
-                    : !unit.can_research
-                      ? 'Recursos insuficientes'
-                      : 'Investigar'}
+                  {actionLabel}
                 </button>
               )}
             </div>
