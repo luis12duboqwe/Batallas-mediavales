@@ -3,7 +3,7 @@
 from app import models
 from app.database import SessionLocal
 from app.routers.auth import get_password_hash
-from app.services import balance, world_membership
+from app.services import balance, tutorial, world_membership
 from app.utils import utc_now
 
 
@@ -74,6 +74,13 @@ def main() -> None:
             .filter_by(id=membership.starting_city_id, owner_id=user.id)
             .one()
         )
+
+        # G8 validates the final military economy, not first-session onboarding.
+        # Mark this dedicated fixture as already completed so TutorialOverlay
+        # cannot cover the troop controls or make the journey depend on G2 state.
+        user.tutorial_step = tutorial.FINAL_STEP
+        user.tutorial_reward_claimed = True
+        db.add(user)
 
         # The journey must begin with no population/upkeep reservations so the
         # observed headroom comes entirely from the canonical BM-0063 balance.
