@@ -10,6 +10,7 @@ from app.services import (
     market,
     movement,
     production,
+    research,
     troops,
     tutorial,
     unit_catalog,
@@ -27,6 +28,7 @@ def test_live_services_reference_canonical_balance_objects():
     assert tutorial.TUTORIAL_REWARD is balance.TUTORIAL_REWARD
 
     assert building.REFUND_FACTOR == balance.QUEUE_REFUND_FACTOR
+    assert research.REFUND_FACTOR == balance.QUEUE_REFUND_FACTOR
     assert troops.REFUND_FACTOR == balance.QUEUE_REFUND_FACTOR
     assert market.MARKET_BUILDING_NAME == balance.MARKET_BUILDING_KEY
     assert market.MERCHANT_CAPACITY == balance.MERCHANT_CAPACITY_PER_LEVEL
@@ -71,11 +73,26 @@ def test_balance_snapshot_is_mounted_and_versioned(client):
 
     assert payload["version"] == balance.BALANCE_VERSION
     assert payload["buildings"]["cost_growth"] == balance.BUILDING_COST_GROWTH
+    assert payload["buildings"]["catalog"]["academy"]["max_level"] == (
+        balance.BUILDING_MAX_LEVELS["academy"]
+    )
+    assert payload["buildings"]["catalog"]["academy"]["effect"] == (
+        balance.get_building_effect_definition("academy")
+    )
     assert payload["production"]["base_rates_per_hour"] == (
         balance.PRODUCTION_RATES_PER_HOUR
     )
+    assert payload["production"]["population_per_farm_level"] == (
+        balance.POPULATION_PER_FARM_LEVEL
+    )
     assert payload["units"]["catalog"]["archer"]["training_cost"] == (
         balance.UNIT_CATALOG["archer"]["training_cost"]
+    )
+    assert payload["units"]["catalog"]["archer"]["research_time_seconds"] == (
+        balance.UNIT_CATALOG["archer"]["research_time_seconds"]
+    )
+    assert payload["units"]["research_queue_slots_per_city"] == (
+        balance.RESEARCH_QUEUE_SLOTS_PER_CITY
     )
     assert payload["units"]["catalog"]["spy"]["movement_speed"] == (
         movement.UNIT_SPEED["spy"]
@@ -100,11 +117,16 @@ def test_public_balance_views_use_same_version(client):
     assert troops_response.json()["catalog"]["spy"]["movement_speed"] == (
         balance.UNIT_SPEED["spy"]
     )
+    assert troops_response.json()["catalog"]["heavy_infantry"]["research_cost"]["gold"] > 0
     assert buildings_response.json()["cost_growth"] == balance.BUILDING_COST_GROWTH
+    assert buildings_response.json()["catalog"]["academy"]["display_name"] == (
+        balance.BUILDING_DISPLAY_NAMES["academy"]
+    )
 
 
 def test_builtin_help_is_generated_from_current_balance():
     troop_article = wiki._build_troop_article()
+    research_article = wiki._build_research_article()
     building_article = wiki._build_building_article()
     economy_article = wiki._build_economy_article()
     combat_article = wiki._build_combat_article()
@@ -115,6 +137,7 @@ def test_builtin_help_is_generated_from_current_balance():
     combined = "\n".join(
         [
             troop_article,
+            research_article,
             building_article,
             economy_article,
             combat_article,
@@ -125,6 +148,12 @@ def test_builtin_help_is_generated_from_current_balance():
     )
 
     assert balance.BALANCE_VERSION in combined
+    assert "Madera/Piedra/Hierro/Oro" in combined
+    assert "Academia Militar" in research_article
+    assert str(balance.UNIT_CATALOG["heavy_infantry"]["research_time_seconds"]) in research_article
+    assert f"{balance.QUEUE_REFUND_FACTOR * 100:.0f}%" in research_article
+    assert "tiempo_base_del_edificio * nivel_objetivo" in building_article
+    assert str(balance.POPULATION_PER_FARM_LEVEL) in building_article
     assert "1.26" not in combined
     assert "1.18" not in combined
     assert "Aserradero" not in beginner_article
