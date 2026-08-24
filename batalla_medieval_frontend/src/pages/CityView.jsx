@@ -14,6 +14,7 @@ const buildingIcons = {
   town_hall: '🏛️',
   barracks: '🛡️',
   stable: '🐎',
+  academy: '📚',
   wall: '🧱',
   market: '⚖️',
   farm: '🌾',
