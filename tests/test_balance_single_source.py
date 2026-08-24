@@ -97,6 +97,13 @@ def test_balance_snapshot_is_mounted_and_versioned(client):
     assert payload["units"]["catalog"]["spy"]["movement_speed"] == (
         movement.UNIT_SPEED["spy"]
     )
+    noble = payload["units"]["catalog"]["noble"]
+    assert noble["population"] == balance.UNIT_CATALOG["noble"]["population"] == 5
+    assert noble["upkeep_per_hour"] == pytest.approx(
+        balance.UNIT_CATALOG["noble"]["upkeep_per_hour"]
+    )
+    assert noble["movement_speed"] == balance.UNIT_SPEED["noble"]
+    assert noble["combat"] == balance.UNIT_COMBAT_STATS["noble"]
     assert payload["market"]["merchant_capacity_per_level"] == (
         market.MERCHANT_CAPACITY
     )
@@ -118,6 +125,9 @@ def test_public_balance_views_use_same_version(client):
         balance.UNIT_SPEED["spy"]
     )
     assert troops_response.json()["catalog"]["heavy_infantry"]["research_cost"]["gold"] > 0
+    assert troops_response.json()["catalog"]["noble"]["upkeep_per_hour"] == pytest.approx(
+        balance.UNIT_CATALOG["noble"]["upkeep_per_hour"]
+    )
     assert buildings_response.json()["cost_growth"] == balance.BUILDING_COST_GROWTH
     assert buildings_response.json()["catalog"]["academy"]["display_name"] == (
         balance.BUILDING_DISPLAY_NAMES["academy"]
@@ -149,6 +159,12 @@ def test_builtin_help_is_generated_from_current_balance():
 
     assert balance.BALANCE_VERSION in combined
     assert "Madera/Piedra/Hierro/Oro" in combined
+    assert "Mant. oro/h" in troop_article
+    assert "Pobl." in troop_article
+    noble = balance.UNIT_CATALOG["noble"]
+    assert f"| {int(noble['population'])} | {float(noble['upkeep_per_hour']):g} |" in troop_article
+    assert "Las tropas consumen oro por hora incluso mientras viajan o regresan" in troop_article
+    assert "eventos temporales no autorizan un ejército permanente mayor" in troop_article
     assert "Academia Militar" in research_article
     assert str(balance.UNIT_CATALOG["heavy_infantry"]["research_time_seconds"]) in research_article
     assert f"{balance.QUEUE_REFUND_FACTOR * 100:.0f}%" in research_article
