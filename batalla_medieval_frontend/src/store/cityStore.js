@@ -31,6 +31,15 @@ const normalizeResources = (resources = {}, city = null) => ({
     ?? 0,
 });
 
+const normalizeMilitaryEconomy = (resources = {}) => ({
+  upkeepUsedPerHour: Number(resources.upkeep_used_per_hour ?? 0),
+  upkeepReservedPerHour: Number(resources.upkeep_reserved_per_hour ?? 0),
+  upkeepCapacityPerHour: Number(resources.upkeep_capacity_per_hour ?? 0),
+  upkeepAvailablePerHour: Number(resources.upkeep_available_per_hour ?? 0),
+  netGoldPerHour: Number(resources.net_gold_per_hour ?? resources.production_per_hour?.gold ?? 0),
+  sustainable: resources.upkeep_sustainable ?? true,
+});
+
 export const useCityStore = create((set, get) => ({
   currentCity: null,
   cities: [],
@@ -38,6 +47,7 @@ export const useCityStore = create((set, get) => ({
   storageLimit: 0,
   buildings: [],
   productionRates: { wood: 0, stone: 0, iron: 0, gold: 0 },
+  militaryEconomy: normalizeMilitaryEconomy(),
   queues: { buildings: [], research: [], troops: [] },
   movements: [],
   reports: [],
@@ -52,6 +62,7 @@ export const useCityStore = create((set, get) => ({
       storageLimit: data.storage_limit ?? 0,
       buildings: data.buildings,
       productionRates: data.production,
+      militaryEconomy: normalizeMilitaryEconomy(data.resources),
       queues: data.queues || { buildings: [], research: [], troops: [] },
     });
     return data;
@@ -61,9 +72,10 @@ export const useCityStore = create((set, get) => ({
     const updated = { ...resources };
     RESOURCE_FIELDS.forEach(res => {
       const produced = ((productionRates[res] || 0) / 3600) * elapsedSeconds;
+      const rawValue = (updated[res] || 0) + produced;
       updated[res] = storageLimit > 0
-        ? Math.min((updated[res] || 0) + produced, storageLimit)
-        : (updated[res] || 0) + produced;
+        ? Math.max(0, Math.min(rawValue, storageLimit))
+        : Math.max(0, rawValue);
     });
     set({ resources: updated });
   },
