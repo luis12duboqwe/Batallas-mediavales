@@ -29,8 +29,24 @@ page.on('response', async (response) => {
   }
 });
 
+async function waitForExperienceReady() {
+  const intro = page.getByTestId('intro-animation');
+  if (await intro.count()) {
+    await intro.waitFor({ state: 'detached', timeout: 10000 });
+  }
+
+  // LoadingScreen is mounted immediately after IntroAnimation completes. Give
+  // React one short window to attach it, then wait for its real completion.
+  const loading = page.getByTestId('loading-screen');
+  await loading.waitFor({ state: 'attached', timeout: 2000 }).catch(() => {});
+  if (await loading.count()) {
+    await loading.waitFor({ state: 'detached', timeout: 10000 });
+  }
+}
+
 async function login() {
   await page.goto(`${BASE_URL}/login`, { waitUntil: 'networkidle' });
+  await waitForExperienceReady();
   const inputs = page.locator('form input');
   await inputs.nth(0).fill(USERNAME);
   await inputs.nth(1).fill(PASSWORD);
@@ -99,6 +115,7 @@ try {
   }
 
   await page.goto(`${BASE_URL}/troops`, { waitUntil: 'networkidle' });
+  await waitForExperienceReady();
   const card = page.getByTestId(`troop-card-${UNIT_TYPE}`);
   await card.waitFor({ state: 'visible' });
   const statsText = (await page.getByTestId(`troop-stats-${UNIT_TYPE}`).textContent()) || '';
