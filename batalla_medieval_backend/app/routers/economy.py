@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ..services import balance, espionage
+from ..services import balance, espionage, market
 
 router = APIRouter(prefix="/economy", tags=["economy"])
 
@@ -42,4 +42,7 @@ def balance_preview():
     # spy rules cannot silently change combat seeds/results. Replace the legacy
     # snapshot block with the exact live espionage contract.
     payload["espionage"] = _espionage_rules_snapshot()
+    # BM-0066 follows the same exact-contract discipline for commerce while
+    # preserving the historical BALANCE_VERSION used by prior military seeds.
+    payload["market"] = market.commerce_rules_snapshot()
     return payload
