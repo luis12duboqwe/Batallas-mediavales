@@ -1,3 +1,4 @@
+import json
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -133,7 +134,6 @@ def test_two_workers_resolve_one_attack_exactly_once(db_session, city, monkeypat
     attack_id = attack.id
     barbarian_id = barbarian.id
 
-    monkeypatch.setattr(combat, "_luck", lambda: 0.0)
     monkeypatch.setattr(
         movement_service,
         "_run_resolution_effect",
@@ -150,18 +150,32 @@ def test_two_workers_resolve_one_attack_exactly_once(db_session, city, monkeypat
     db_session.expire_all()
     completed = db_session.query(models.Movement).filter_by(id=attack_id).one()
     assert completed.status == "completed"
-    assert (
+
+    battle_reports = (
         db_session.query(models.Report)
         .filter_by(attacker_city_id=city.id, defender_city_id=barbarian_id)
-        .count()
-        == 2
+        .order_by(models.Report.id.asc())
+        .all()
     )
+    assert len(battle_reports) == 2
+    report_payloads = [json.loads(str(report.content)) for report in battle_reports]
+    assert report_payloads[0]["combat"] == report_payloads[1]["combat"]
+    assert report_payloads[0]["combat"]["seed"]
     assert (
+        report_payloads[0]["combat"]["algorithm_version"]
+        == combat.COMBAT_ALGORITHM_VERSION
+    )
+    assert report_payloads[0]["combat"]["round_count"] <= combat.COMBAT_MAX_ROUNDS
+
+    return_movements = (
         db_session.query(models.Movement)
         .filter_by(target_city_id=city.id, movement_type="return", status="ongoing")
-        .count()
-        == 1
+        .all()
     )
+    assert len(return_movements) == 1
+    return_payload = return_movements[0]
+    first_return_troops = dict(return_payload.troops or {})
+    first_return_resources = dict(return_payload.resources or {})
 
     refreshed_barbarian = db_session.query(models.City).filter_by(id=barbarian_id).one()
     first_balances = (
@@ -170,7 +184,10 @@ def test_two_workers_resolve_one_attack_exactly_once(db_session, city, monkeypat
         refreshed_barbarian.iron,
         refreshed_barbarian.gold,
     )
-    movement_service.resolve_due_movements(db_session)
+
+    # A retry after the movement was committed is a no-op: no second roll,
+    # report, loot debit or return march is allowed.
+    assert movement_service.resolve_due_movements(db_session) == []
     db_session.expire_all()
     refreshed_barbarian = db_session.query(models.City).filter_by(id=barbarian_id).one()
     assert (
@@ -179,3 +196,17 @@ def test_two_workers_resolve_one_attack_exactly_once(db_session, city, monkeypat
         refreshed_barbarian.iron,
         refreshed_barbarian.gold,
     ) == pytest.approx(first_balances)
+    assert (
+        db_session.query(models.Report)
+        .filter_by(attacker_city_id=city.id, defender_city_id=barbarian_id)
+        .count()
+        == 2
+    )
+    retried_returns = (
+        db_session.query(models.Movement)
+        .filter_by(target_city_id=city.id, movement_type="return", status="ongoing")
+        .all()
+    )
+    assert len(retried_returns) == 1
+    assert dict(retried_returns[0].troops or {}) == first_return_troops
+    assert dict(retried_returns[0].resources or {}) == first_return_resources

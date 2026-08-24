@@ -4,7 +4,6 @@ import pytest
 
 from app import models
 from app.routers.auth import create_access_token
-from app.services import combat
 from app.services import conquest as conquest_service
 
 
@@ -108,16 +107,14 @@ def test_cross_world_barbarian_conquest_is_rejected(db_session, city):
         conquest_service.resolve_conquest(db_session, city, target, {"noble": 1})
 
 
-def test_barbarian_city_can_still_be_conquered(db_session, city, monkeypatch):
-    target = _barbarian_city(db_session, city.world_id, x=9, y=9, loyalty=25.0)
+def test_barbarian_city_can_still_be_conquered(db_session, city):
+    # Any canonical Noble roll (20-35) must conquer this target, even after the
+    # tiny continuous loyalty recovery that occurs just before resolution. The
+    # combat engine now owns its local seeded RNG, so tests no longer patch the
+    # process-global random module.
+    target = _barbarian_city(db_session, city.world_id, x=9, y=9, loyalty=19.0)
     db_session.add(models.Troop(city_id=city.id, unit_type="noble", quantity=1))
     db_session.commit()
-
-    # Keep the canonical combat engine, but make its luck and loyalty roll deterministic.
-    # Loyalty recovers continuously, so use the maximum roll rather than an exact
-    # 25-point boundary that can become 25.000x before combat resolves.
-    monkeypatch.setattr(combat, "_luck", lambda: 0.0)
-    monkeypatch.setattr(combat.random, "randint", lambda low, high: 35)
 
     victory, conquered = conquest_service.resolve_conquest(
         db_session,

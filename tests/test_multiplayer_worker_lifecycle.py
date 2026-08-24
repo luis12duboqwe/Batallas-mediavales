@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -86,7 +87,6 @@ def test_two_player_attack_resolves_reports_and_returns_without_conquest(
     db_session.commit()
 
     _disable_resolution_side_effects(monkeypatch)
-    monkeypatch.setattr(combat, "_luck", lambda: 0.0)
 
     outgoing = _due_movement(
         db_session,
@@ -102,7 +102,21 @@ def test_two_player_attack_resolves_reports_and_returns_without_conquest(
     db_session.expire_all()
     target_after = db_session.query(models.City).filter_by(id=target.id).one()
     assert target_after.owner_id == peer.id
-    assert db_session.query(models.Report).filter_by(report_type="battle").count() == 2
+
+    battle_reports = (
+        db_session.query(models.Report)
+        .filter_by(report_type="battle")
+        .order_by(models.Report.id.asc())
+        .all()
+    )
+    assert len(battle_reports) == 2
+    report_payloads = [json.loads(str(report.content)) for report in battle_reports]
+    assert report_payloads[0]["combat"] == report_payloads[1]["combat"]
+    assert report_payloads[0]["combat"]["seed"]
+    assert report_payloads[0]["combat"]["algorithm_version"] == combat.COMBAT_ALGORITHM_VERSION
+    assert report_payloads[0]["combat"]["round_count"] <= combat.COMBAT_MAX_ROUNDS
+    assert report_payloads[0]["conquest"] is False
+    assert report_payloads[1]["conquest"] is False
 
     return_move = (
         db_session.query(models.Movement)
