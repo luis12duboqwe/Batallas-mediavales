@@ -148,7 +148,7 @@ const TroopCard = ({ troop, onTrain }) => {
         </button>
       </div>
 
-      <div className="floating-panel">
+      <div className="floating-panel pointer-events-none" aria-hidden="true">
         <span className="text-yellow-200">Servidor autoritativo</span>
         <span className="text-[11px] text-gray-200">
           {requirementText || 'Sin requisitos de edificio'}
