@@ -163,8 +163,9 @@ export const useCityStore = create((set, get) => ({
     const city = get().currentCity;
     if (!city || !city.world_id) return { reports: [] };
     const { data } = await api.getReports({ worldId: city.world_id });
-    set({ reports: data.reports });
-    return data;
+    const reportList = Array.isArray(data) ? data : data?.reports || [];
+    set({ reports: reportList });
+    return { reports: reportList };
   },
   async loadAlliance() {
     const city = get().currentCity;
