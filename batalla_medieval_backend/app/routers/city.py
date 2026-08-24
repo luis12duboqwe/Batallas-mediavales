@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
-from ..services import production, protection, quest as quest_service
+from ..services import production, protection, quest as quest_service, unit_catalog
 
 router = APIRouter(tags=["cities"])
 
@@ -39,6 +39,7 @@ def list_cities(
     for city in cities:
         city, gains = production.recalculate_resources(db, city, return_gains=True)
         quest_service.handle_event(db, current_user, "resources_collected", gains)
+        city.population_max = unit_catalog.get_population_capacity(city)
         city.is_protected = protection.is_user_protected(city.owner)
     return cities
 
@@ -63,6 +64,7 @@ def get_city(
         raise HTTPException(status_code=404, detail="City not found")
     city, gains = production.recalculate_resources(db, city, return_gains=True)
     quest_service.handle_event(db, current_user, "resources_collected", gains)
+    city.population_max = unit_catalog.get_population_capacity(city)
     city.is_protected = protection.is_user_protected(city.owner)
     return city
 
@@ -89,6 +91,8 @@ def city_status(
     city, _ = production.recalculate_resources(db, city, return_gains=True)
     storage_limit = production.get_storage_limit(city)
     production_per_hour = production.get_production_per_hour(db, city)
+    population = unit_catalog.get_population_used(db, city)
+    population_max = unit_catalog.get_population_capacity(city)
     building_queue = (
         db.query(models.BuildingQueue)
         .filter(models.BuildingQueue.city_id == city.id)
@@ -106,6 +110,8 @@ def city_status(
         stone=city.stone,
         iron=city.iron,
         gold=city.gold,
+        population=population,
+        population_max=population_max,
         loyalty=city.loyalty,
         storage_limit=storage_limit,
         production_per_hour=production_per_hour,
