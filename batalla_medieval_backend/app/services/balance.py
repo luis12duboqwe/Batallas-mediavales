@@ -5,15 +5,17 @@ numbers are defined. Domain services may expose compatibility aliases, but
 those aliases must point back to the objects in this module.
 
 BM-0060 promotes the live resource model to wood, stone, iron and gold. The
-legacy clay values are preserved 1:1 as stone by migration 0007. Gold is live
-for production, storage, trade, transport and loot; final gold upkeep/costs are
-owned by BM-0062/BM-0063 so this migration does not introduce a first-session
-economic dead end.
+legacy clay values are preserved 1:1 as stone by migration 0007.
 
 BM-0061 adds the canonical territorial expansion contract. Church and cathedral
 completions mint expansion points for the owning player/world membership. Those
 points are consumed to found cities/camps or promote a camp; camps remain a
 reduced-capacity logistics settlement and cannot recursively generate points.
+
+BM-0062 finalizes the building/research progression contract. Every building has
+one canonical maximum level, base construction time, four-resource cost and
+real gameplay effect. Academy is a real building and is the gateway for timed
+research; BM-0063 still owns final unit combat/training/upkeep values.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, Tuple
 
-BALANCE_VERSION = "2026.08.23-bm0061.1"
+BALANCE_VERSION = "2026.08.23-bm0062.1"
 
 RESOURCE_FIELDS = ("wood", "stone", "iron", "gold")
 CITY_STARTING_RESOURCES: Dict[str, float] = {
@@ -39,6 +41,7 @@ BUILDING_ORDER = [
     "town_hall",
     "barracks",
     "stable",
+    "academy",
     "wall",
     "market",
     "farm",
@@ -54,6 +57,7 @@ BUILDING_DISPLAY_NAMES = {
     "town_hall": "Casa Central",
     "barracks": "Barracas",
     "stable": "Establos Imperiales",
+    "academy": "Academia Militar",
     "wall": "Muralla de Guardia",
     "market": "Plaza Comercial",
     "farm": "Hacienda",
@@ -65,23 +69,41 @@ BUILDING_DISPLAY_NAMES = {
     "world_wonder": "Maravilla del Mundo",
 }
 
+BUILDING_DESCRIPTIONS = {
+    "town_hall": "Centro de progreso y requisito para estructuras avanzadas.",
+    "barracks": "Desbloquea y permite entrenar fuerzas de infantería.",
+    "stable": "Desbloquea caballería y unidades de espionaje.",
+    "academy": "Habilita la investigación militar temporizada de nuevas unidades.",
+    "wall": "Aumenta la defensa total del asentamiento en combate.",
+    "market": "Aumenta la capacidad comercial y de transporte de recursos.",
+    "farm": "Aumenta la capacidad máxima de población de la ciudad.",
+    "warehouse": "Aumenta el almacenamiento máximo de cada recurso.",
+    "smithy": "Requisito para tropas militares avanzadas.",
+    "workshop": "Desbloquea y permite entrenar maquinaria de asedio.",
+    "church": "Cada nivel realmente completado genera puntos de expansión.",
+    "cathedral": "Genera más puntos de expansión por nivel completado.",
+    "world_wonder": "Alcanza el nivel 100 para cerrar el mundo con un vencedor.",
+}
+
 BUILDING_COSTS: Dict[str, Dict[str, float]] = {
-    "town_hall": {"wood": 260.0, "stone": 200.0, "iron": 150.0},
-    "barracks": {"wood": 200.0, "stone": 160.0, "iron": 170.0},
-    "stable": {"wood": 320.0, "stone": 260.0, "iron": 260.0},
-    "wall": {"wood": 100.0, "stone": 100.0, "iron": 50.0},
-    "market": {"wood": 100.0, "stone": 100.0, "iron": 100.0},
-    "farm": {"wood": 80.0, "stone": 80.0, "iron": 60.0},
-    "warehouse": {"wood": 130.0, "stone": 100.0, "iron": 90.0},
-    "smithy": {"wood": 220.0, "stone": 180.0, "iron": 240.0},
-    "workshop": {"wood": 460.0, "stone": 510.0, "iron": 600.0},
+    "town_hall": {"wood": 260.0, "stone": 200.0, "iron": 150.0, "gold": 20.0},
+    "barracks": {"wood": 200.0, "stone": 160.0, "iron": 170.0, "gold": 15.0},
+    "stable": {"wood": 320.0, "stone": 260.0, "iron": 260.0, "gold": 35.0},
+    "academy": {"wood": 400.0, "stone": 350.0, "iron": 300.0, "gold": 80.0},
+    "wall": {"wood": 100.0, "stone": 100.0, "iron": 50.0, "gold": 5.0},
+    "market": {"wood": 100.0, "stone": 100.0, "iron": 100.0, "gold": 30.0},
+    "farm": {"wood": 80.0, "stone": 80.0, "iron": 60.0, "gold": 5.0},
+    "warehouse": {"wood": 130.0, "stone": 100.0, "iron": 90.0, "gold": 10.0},
+    "smithy": {"wood": 220.0, "stone": 180.0, "iron": 240.0, "gold": 40.0},
+    "workshop": {"wood": 460.0, "stone": 510.0, "iron": 600.0, "gold": 60.0},
     "church": {"wood": 300.0, "stone": 350.0, "iron": 180.0, "gold": 100.0},
     "cathedral": {"wood": 1200.0, "stone": 1400.0, "iron": 800.0, "gold": 500.0},
-    "world_wonder": {"wood": 10000.0, "stone": 10000.0, "iron": 10000.0},
+    "world_wonder": {"wood": 10000.0, "stone": 10000.0, "iron": 10000.0, "gold": 2500.0},
 }
 
 BUILDING_PREREQUISITES: Dict[str, Dict[str, int]] = {
     "stable": {"barracks": 5, "town_hall": 3},
+    "academy": {"town_hall": 4, "barracks": 3},
     "market": {"warehouse": 1, "town_hall": 2},
     "wall": {"barracks": 1},
     "smithy": {"town_hall": 5, "barracks": 1},
@@ -91,7 +113,41 @@ BUILDING_PREREQUISITES: Dict[str, Dict[str, int]] = {
     "world_wonder": {"town_hall": 20, "warehouse": 20, "cathedral": 10},
 }
 
+BUILDING_MAX_LEVELS: Dict[str, int] = {
+    "town_hall": 20,
+    "barracks": 20,
+    "stable": 20,
+    "academy": 20,
+    "wall": 20,
+    "market": 20,
+    "farm": 20,
+    "warehouse": 20,
+    "smithy": 20,
+    "workshop": 20,
+    "church": 10,
+    "cathedral": 10,
+    "world_wonder": 100,
+}
+
+BUILDING_BASE_BUILD_TIME_SECONDS: Dict[str, int] = {
+    "town_hall": 300,
+    "barracks": 240,
+    "stable": 360,
+    "academy": 480,
+    "wall": 180,
+    "market": 300,
+    "farm": 180,
+    "warehouse": 240,
+    "smithy": 360,
+    "workshop": 600,
+    "church": 600,
+    "cathedral": 1200,
+    "world_wonder": 1800,
+}
+
 BUILDING_COST_GROWTH = 1.20
+# Compatibility value retained for old callers. New gameplay uses the
+# per-building table above through ``get_building_build_time``.
 BASE_BUILD_TIME_SECONDS = 420
 QUEUE_REFUND_FACTOR = 0.80
 
@@ -108,6 +164,7 @@ PRODUCTION_RATES_PER_HOUR: Dict[str, float] = {
 
 STORAGE_BASE_CAPACITY = 5000.0
 STORAGE_PER_WAREHOUSE_LEVEL = 2000.0
+POPULATION_PER_FARM_LEVEL = 25
 LOYALTY_MAX = 100.0
 LOYALTY_RECOVERY_PER_HOUR = 2.0
 
@@ -492,14 +549,65 @@ def get_storage_capacity(warehouse_level: int) -> float:
     return STORAGE_BASE_CAPACITY + STORAGE_PER_WAREHOUSE_LEVEL * level
 
 
+def get_population_capacity(settlement_type: str, farm_level: int) -> int:
+    """Return the canonical population cap for a settlement."""
+
+    base = CAMP_POPULATION_MAX if settlement_type == "camp" else CITY_POPULATION_MAX
+    if settlement_type == "camp":
+        return base
+    return base + max(int(farm_level), 0) * POPULATION_PER_FARM_LEVEL
+
+
+def get_building_max_level(building_type: str) -> int:
+    maximum = BUILDING_MAX_LEVELS.get(building_type)
+    if maximum is None:
+        raise ValueError(f"Unknown building type: {building_type}")
+    return int(maximum)
+
+
+def get_building_build_time(building_type: str, target_level: int) -> int:
+    if target_level < 1:
+        raise ValueError("Target building level must be at least 1")
+    maximum = get_building_max_level(building_type)
+    if target_level > maximum:
+        raise ValueError(f"Maximum building level is {maximum}")
+    base = BUILDING_BASE_BUILD_TIME_SECONDS[building_type]
+    return int(base * target_level)
+
+
 def get_building_cost(building_type: str, target_level: int) -> Dict[str, float]:
     if target_level < 1:
         raise ValueError("Target building level must be at least 1")
+    maximum = get_building_max_level(building_type)
+    if target_level > maximum:
+        raise ValueError(f"Maximum building level is {maximum}")
     base = BUILDING_COSTS.get(building_type)
     if base is None:
         raise ValueError(f"Unknown building type: {building_type}")
     multiplier = BUILDING_COST_GROWTH ** (target_level - 1)
     return {resource: float(value * multiplier) for resource, value in base.items()}
+
+
+def get_building_effect_definition(building_type: str) -> Dict[str, Any]:
+    """Return machine-readable effects backed by live gameplay constants."""
+
+    if building_type == "wall":
+        return {"type": "defense_bonus", "per_level": WALL_BONUS_PER_LEVEL}
+    if building_type == "market":
+        return {"type": "merchant_capacity", "per_level": MERCHANT_CAPACITY_PER_LEVEL}
+    if building_type == "farm":
+        return {"type": "population_capacity", "per_level": POPULATION_PER_FARM_LEVEL}
+    if building_type == "warehouse":
+        return {"type": "storage_capacity", "per_level": STORAGE_PER_WAREHOUSE_LEVEL}
+    if building_type == "academy":
+        return {"type": "research_access"}
+    if building_type == "church":
+        return {"type": "expansion_points", "per_completion": EXPANSION_POINTS_PER_COMPLETION["church"]}
+    if building_type == "cathedral":
+        return {"type": "expansion_points", "per_completion": EXPANSION_POINTS_PER_COMPLETION["cathedral"]}
+    if building_type == "world_wonder":
+        return {"type": "world_victory", "target_level": BUILDING_MAX_LEVELS["world_wonder"]}
+    return {"type": "prerequisite_unlock"}
 
 
 def snapshot() -> Dict[str, Any]:
@@ -518,8 +626,12 @@ def snapshot() -> Dict[str, Any]:
     for building_type in BUILDING_ORDER:
         buildings[building_type] = {
             "display_name": BUILDING_DISPLAY_NAMES[building_type],
+            "description": BUILDING_DESCRIPTIONS[building_type],
             "base_cost": deepcopy(BUILDING_COSTS[building_type]),
             "requirements": deepcopy(BUILDING_PREREQUISITES.get(building_type, {})),
+            "max_level": BUILDING_MAX_LEVELS[building_type],
+            "base_build_time_seconds": BUILDING_BASE_BUILD_TIME_SECONDS[building_type],
+            "effect": get_building_effect_definition(building_type),
         }
 
     events = {
@@ -537,8 +649,8 @@ def snapshot() -> Dict[str, Any]:
         "starting_resources": deepcopy(CITY_STARTING_RESOURCES),
         "buildings": {
             "catalog": buildings,
+            "order": list(BUILDING_ORDER),
             "cost_growth": BUILDING_COST_GROWTH,
-            "base_build_time_seconds": BASE_BUILD_TIME_SECONDS,
             "refund_factor": QUEUE_REFUND_FACTOR,
         },
         "units": {
@@ -550,6 +662,9 @@ def snapshot() -> Dict[str, Any]:
             "base_rates_per_hour": deepcopy(PRODUCTION_RATES_PER_HOUR),
             "storage_base_capacity": STORAGE_BASE_CAPACITY,
             "storage_per_warehouse_level": STORAGE_PER_WAREHOUSE_LEVEL,
+            "city_population_base": CITY_POPULATION_MAX,
+            "camp_population_base": CAMP_POPULATION_MAX,
+            "population_per_farm_level": POPULATION_PER_FARM_LEVEL,
             "loyalty_max": LOYALTY_MAX,
             "loyalty_recovery_per_hour": LOYALTY_RECOVERY_PER_HOUR,
         },
