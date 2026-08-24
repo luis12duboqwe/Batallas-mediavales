@@ -40,5 +40,17 @@ class UnitAvailability(BaseModel):
     population_available: int
     population_capacity_met: bool
     upkeep_per_hour: float
+    upkeep_used_per_hour: float
+    upkeep_reserved_per_hour: float
+    upkeep_capacity_per_hour: float
+    upkeep_available_per_hour: float
+    upkeep_capacity_met: bool
+    movement_speed: float
+    carry_capacity: int
+    attack: int
+    defense_infantry: int
+    defense_cavalry: int
+    defense_siege: int
+    combat_type: str
     can_train: bool
     can_research: bool
