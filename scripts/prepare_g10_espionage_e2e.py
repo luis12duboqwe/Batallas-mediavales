@@ -95,6 +95,11 @@ def main() -> None:
             email="g10-spy-target@example.com",
             password="G10-Target-Only-2026!",
         )
+        # The movement worker settles target economics immediately before spy
+        # resolution. Pin the target clock slightly ahead so that settlement
+        # consumes zero elapsed time and cannot mutate the target snapshot after
+        # we derive its deterministic SHA-256 seed.
+        frozen_target_clock = utc_now() + timedelta(minutes=5)
         target = (
             db.query(models.City)
             .filter_by(name="G10 Intelligence Target", world_id=world.id)
@@ -112,7 +117,7 @@ def main() -> None:
                 stone=987.0,
                 iron=765.0,
                 gold=543.0,
-                last_production=utc_now(),
+                last_production=frozen_target_clock,
             )
             db.add(target)
             db.flush()
@@ -122,7 +127,7 @@ def main() -> None:
             target.stone = 987.0
             target.iron = 765.0
             target.gold = 543.0
-            target.last_production = utc_now()
+            target.last_production = frozen_target_clock
 
         # Keep the fixture idempotent when rerun manually.
         db.query(models.Report).filter(
