@@ -35,11 +35,15 @@ def test_loot_modifier_increases_effective_carry_without_overdrawing(
     second_city.wood = second_city.clay = second_city.iron = 1000.0
     db_session.commit()
 
+    # Keep combat luck identical so this test isolates the event's loot modifier
+    # instead of comparing two different deterministic battle streams.
+    seed = "loot-modifier-comparison"
     base_result = combat.resolve_battle(
         city,
         second_city,
         {"basic_infantry": 10},
         modifiers={**balance.EVENT_DEFAULT_MODIFIERS, "loot_modifier": 1.0},
+        seed=seed,
     )
     base_loot = sum(base_result["loot"].values())
 
@@ -52,6 +56,7 @@ def test_loot_modifier_increases_effective_carry_without_overdrawing(
         second_city,
         {"basic_infantry": 10},
         modifiers={**balance.EVENT_DEFAULT_MODIFIERS, "loot_modifier": 1.2},
+        seed=seed,
     )
     boosted_loot = sum(boosted_result["loot"].values())
 
