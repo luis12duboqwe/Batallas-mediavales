@@ -153,8 +153,11 @@ def main() -> None:
         db.commit()
 
         processed = movement.resolve_due_movements(db)
-        if attack.id not in processed:
-            raise RuntimeError(f"G9 attack was not resolved exactly once: {processed}")
+        processed_ids = [item.id for item in processed]
+        if processed_ids != [attack.id]:
+            raise RuntimeError(
+                f"G9 attack was not resolved exactly once: {processed_ids}"
+            )
 
         report = (
             db.query(models.Report)
