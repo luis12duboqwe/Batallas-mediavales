@@ -17,12 +17,19 @@ const ResourceItem = ({ label, value, icon, tip }) => (
 
 const ResourceBar = () => {
   const { t } = useTranslation();
-  const { resources, storageLimit, tickResources } = useCityStore();
+  const { resources, storageLimit, militaryEconomy, tickResources } = useCityStore();
 
   useEffect(() => {
     const interval = setInterval(() => tickResources(1), 1000);
     return () => clearInterval(interval);
   }, [tickResources]);
+
+  const upkeepCommitted = militaryEconomy.upkeepUsedPerHour + militaryEconomy.upkeepReservedPerHour;
+  const upkeepTip = t('resources.upkeep_tip', {
+    used: militaryEconomy.upkeepUsedPerHour.toFixed(2),
+    reserved: militaryEconomy.upkeepReservedPerHour.toFixed(2),
+    net: militaryEconomy.netGoldPerHour.toFixed(2),
+  });
 
   return (
     <div
@@ -52,13 +59,19 @@ const ResourceBar = () => {
         label={t('resources.gold')}
         value={`${formatNumber(resources.gold)}/${formatNumber(storageLimit)}`}
         icon="🪙"
-        tip={t('resources.gold_tip')}
+        tip={t('resources.gold_tip_net', { rate: militaryEconomy.netGoldPerHour.toFixed(2) })}
       />
       <ResourceItem
         label={t('resources.population')}
         value={`${formatNumber(resources.population)}/${formatNumber(resources.populationMax)}`}
         icon="👥"
         tip={t('resources.population_tip')}
+      />
+      <ResourceItem
+        label={t('resources.upkeep')}
+        value={`${upkeepCommitted.toFixed(2)}/${militaryEconomy.upkeepCapacityPerHour.toFixed(2)}/h`}
+        icon={militaryEconomy.sustainable ? '🛡️' : '⚠️'}
+        tip={upkeepTip}
       />
     </div>
   );
