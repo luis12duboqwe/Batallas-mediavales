@@ -62,6 +62,16 @@ def _unit_population(unit_type: str, quantity: int) -> int:
     return max(int(quantity), 0) * int(definition.get("population", 1))
 
 
+def get_population_capacity(city: models.City) -> int:
+    """Return the same farm-backed population cap used by gameplay and UI."""
+
+    farm_level = _building_levels(city).get("farm", 0)
+    return balance.get_population_capacity(
+        getattr(city, "settlement_type", "city"),
+        farm_level,
+    )
+
+
 def get_population_used(db: Session, city: models.City) -> int:
     """Return committed population, including troops temporarily away."""
 
@@ -117,7 +127,7 @@ def get_population_reserved_for_training(db: Session, city_id: int) -> int:
 def get_population_available(db: Session, city: models.City) -> int:
     committed = get_population_used(db, city)
     reserved = get_population_reserved_for_training(db, city.id)
-    return max(int(city.population_max) - committed - reserved, 0)
+    return max(get_population_capacity(city) - committed - reserved, 0)
 
 
 def has_population_capacity(
@@ -138,6 +148,7 @@ def get_availability(db: Session, city: models.City) -> list[dict]:
 
     result = []
     population_available = get_population_available(db, city)
+    population_capacity = get_population_capacity(city)
     for unit_type in UNIT_ORDER:
         definition = get_unit(unit_type)
         researched = is_researched(db, city.id, unit_type)
@@ -163,6 +174,7 @@ def get_availability(db: Session, city: models.City) -> list[dict]:
                 "training_requirements_met": train_requirements_met,
                 "research_requirements_met": research_requirements_met,
                 "population_cost": population_cost,
+                "population_capacity": population_capacity,
                 "population_available": population_available,
                 "population_capacity_met": population_capacity_met,
                 "upkeep_per_hour": float(definition.get("upkeep_per_hour", 0.0)),
