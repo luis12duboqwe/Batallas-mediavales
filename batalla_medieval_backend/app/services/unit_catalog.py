@@ -63,13 +63,19 @@ def _unit_population(unit_type: str, quantity: int) -> int:
 
 
 def get_population_capacity(city: models.City) -> int:
-    """Return the same farm-backed population cap used by gameplay and UI."""
+    """Return persisted base capacity plus the live farm bonus.
 
+    ``population_max`` remains the settlement's persisted base. This preserves
+    custom/test/world values and prevents a farm completion from overwriting
+    them with a hard-coded city default. Camps cannot build farms, so their base
+    capacity is returned unchanged.
+    """
+
+    base_capacity = max(int(city.population_max), 0)
+    if getattr(city, "settlement_type", "city") == "camp":
+        return base_capacity
     farm_level = _building_levels(city).get("farm", 0)
-    return balance.get_population_capacity(
-        getattr(city, "settlement_type", "city"),
-        farm_level,
-    )
+    return base_capacity + farm_level * balance.POPULATION_PER_FARM_LEVEL
 
 
 def get_population_used(db: Session, city: models.City) -> int:
@@ -144,11 +150,18 @@ def _can_afford(city: models.City, cost: Dict[str, float]) -> bool:
 
 
 def get_availability(db: Session, city: models.City) -> list[dict]:
-    """Return the complete server-authoritative unit catalog for one city."""
+    """Return the complete server-authoritative unit/research catalog for a city."""
 
     result = []
     population_available = get_population_available(db, city)
     population_capacity = get_population_capacity(city)
+    active_research = (
+        db.query(models.ResearchQueue)
+        .filter(models.ResearchQueue.city_id == city.id)
+        .one_or_none()
+    )
+    research_queue_available = active_research is None
+
     for unit_type in UNIT_ORDER:
         definition = get_unit(unit_type)
         researched = is_researched(db, city.id, unit_type)
@@ -161,6 +174,9 @@ def get_availability(db: Session, city: models.City) -> list[dict]:
         researchable = bool(definition["researchable"])
         population_cost = int(definition.get("population", 1))
         population_capacity_met = population_cost <= population_available
+        research_queued = bool(
+            active_research is not None and active_research.tech_name == unit_type
+        )
 
         result.append(
             {
@@ -169,8 +185,10 @@ def get_availability(db: Session, city: models.City) -> list[dict]:
                 "training_time_seconds": definition["training_time_seconds"],
                 "training_requirements": definition["training_requirements"],
                 "research_cost": definition["research_cost"],
+                "research_time_seconds": int(definition.get("research_time_seconds", 0)),
                 "research_requirements": definition["research_requirements"],
                 "researched": researched,
+                "research_queued": research_queued,
                 "training_requirements_met": train_requirements_met,
                 "research_requirements_met": research_requirements_met,
                 "population_cost": population_cost,
@@ -187,6 +205,7 @@ def get_availability(db: Session, city: models.City) -> list[dict]:
                 "can_research": (
                     researchable
                     and not researched
+                    and research_queue_available
                     and research_requirements_met
                     and _can_afford(city, definition["research_cost"])
                 ),
