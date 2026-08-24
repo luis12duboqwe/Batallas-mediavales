@@ -19,6 +19,18 @@ const movementCategory = (movement, ownedCityIds) => {
   }
 };
 
+const normalizeResources = (resources = {}, city = null) => ({
+  ...resources,
+  population: resources.population_used ?? resources.population ?? 0,
+  populationMax:
+    resources.population_capacity
+    ?? resources.population_max
+    ?? resources.populationMax
+    ?? city?.population_capacity
+    ?? city?.population_max
+    ?? 0,
+});
+
 export const useCityStore = create((set, get) => ({
   currentCity: null,
   cities: [],
@@ -26,7 +38,7 @@ export const useCityStore = create((set, get) => ({
   storageLimit: 0,
   buildings: [],
   productionRates: { wood: 0, stone: 0, iron: 0, gold: 0 },
-  queues: { buildings: [], troops: [] },
+  queues: { buildings: [], research: [], troops: [] },
   movements: [],
   reports: [],
   alliance: null,
@@ -36,11 +48,11 @@ export const useCityStore = create((set, get) => ({
     set({
       currentCity: data.city ? { ...data.city } : null,
       cities: data.cities || [],
-      resources: data.resources,
+      resources: normalizeResources(data.resources, data.city),
       storageLimit: data.storage_limit ?? 0,
       buildings: data.buildings,
       productionRates: data.production,
-      queues: data.queues || { buildings: [], troops: [] },
+      queues: data.queues || { buildings: [], research: [], troops: [] },
     });
     return data;
   },

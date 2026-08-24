@@ -80,13 +80,15 @@ def cancel_queue(
     return None
 
 
-@router.post("/research")
+@router.post("/research", response_model=schemas.ResearchQueueRead, status_code=201)
 def research_unit(
     payload: schemas.ResearchRequest,
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    """Pay and queue research. The unit unlocks only after queue completion."""
+
     city = (
         db.query(models.City)
         .options(selectinload(models.City.buildings))
@@ -100,11 +102,6 @@ def research_unit(
     if not city:
         raise HTTPException(status_code=404, detail="City not found")
     try:
-        research = troops.research_unit(db, city, payload.unit_type)
+        return troops.research_unit(db, city, payload.unit_type)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {
-        "message": "Unit researched",
-        "unit_type": research.tech_name,
-        "level": research.level,
-    }

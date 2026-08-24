@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .building import BuildingRead
 from .troop import TroopRead
-from .queue import BuildingQueueRead, TroopQueueRead
+from .queue import BuildingQueueRead, ResearchQueueRead, TroopQueueRead
 from .oasis import OasisRead
 
 
@@ -34,6 +34,7 @@ class CityRead(CityBase):
     gold: float
     loyalty: float
     population_max: int
+    population_capacity: int | None = None
     last_production: datetime
     is_protected: bool = False
     researched_units: List[str] = Field(default_factory=list)
@@ -51,11 +52,19 @@ class CityResourceStatus(BaseModel):
     stone: float
     iron: float
     gold: float
+    # Compatibility fields retained for existing clients.
+    population: int
+    population_max: int
+    # Explicit authoritative fields for new consumers.
+    population_used: int
+    population_capacity: int
+    population_available: int
     loyalty: float
     storage_limit: float
     production_per_hour: dict
     last_production: datetime
     is_protected: bool = False
     building_queue: list[BuildingQueueRead] = Field(default_factory=list)
+    research_queue: list[ResearchQueueRead] = Field(default_factory=list)
     troop_queue: list[TroopQueueRead] = Field(default_factory=list)
     oases: List[OasisRead] = Field(default_factory=list)

@@ -171,6 +171,24 @@ def test_camp_promotion_api(client, db_session, user, city):
     assert membership.expansion_points == 0
 
 
+def test_map_tiles_are_clamped_to_world_boundaries(client, db_session, user, city):
+    _prepare_membership(db_session, user, city, 0)
+    world = db_session.query(models.World).filter(models.World.id == city.world_id).one()
+    map_size = int(world.map_size)
+
+    for x, y in ((0, 0), (map_size - 1, map_size - 1)):
+        response = client.get(
+            "/map/tiles",
+            params={"world_id": city.world_id, "x": x, "y": y, "radius": 8},
+            headers=_headers(user),
+        )
+        assert response.status_code == 200, response.text
+        tiles = response.json()["tiles"]
+        assert tiles
+        assert all(0 <= tile["x"] < map_size for tile in tiles)
+        assert all(0 <= tile["y"] < map_size for tile in tiles)
+
+
 def test_legacy_conquest_found_route_is_not_exposed(
     client,
     db_session,

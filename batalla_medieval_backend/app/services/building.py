@@ -52,10 +52,10 @@ def calculate_upgrade_cost(building_name: str, target_level: int) -> Dict[str, f
     return balance.get_building_cost(building_name, target_level)
 
 
-def calculate_build_time(target_level: int) -> int:
-    if target_level < 1:
-        raise ValueError("Target building level must be at least 1")
-    return BASE_BUILD_TIME_SECONDS * target_level
+def calculate_build_time(building_name: str, target_level: int) -> int:
+    """Return the canonical duration for one target building level."""
+
+    return balance.get_building_build_time(building_name, target_level)
 
 
 def get_available_buildings(db: Session, city: models.City) -> List[dict]:
@@ -64,13 +64,16 @@ def get_available_buildings(db: Session, city: models.City) -> List[dict]:
     existing_map = {building.name: building for building in city.buildings}
     result = []
 
-    for name in BUILDING_COSTS:
+    for name in balance.BUILDING_ORDER:
         if not _building_allowed(city, name):
             continue
         building = existing_map.get(name)
-        current_level = building.level if building else 0
+        current_level = int(building.level) if building else 0
+        max_level = balance.get_building_max_level(name)
         target_level = current_level + 1
-        cost = calculate_upgrade_cost(name, target_level)
+        is_max_level = current_level >= max_level
+        cost = {} if is_max_level else calculate_upgrade_cost(name, target_level)
+        build_time = 0 if is_max_level else calculate_build_time(name, target_level)
 
         prereqs = BUILDING_PREREQUISITES.get(name, {})
         requirements_met = all(
@@ -82,11 +85,17 @@ def get_available_buildings(db: Session, city: models.City) -> List[dict]:
         result.append(
             {
                 "name": name,
+                "display_name": balance.BUILDING_DISPLAY_NAMES[name],
+                "description": balance.BUILDING_DESCRIPTIONS[name],
                 "level": current_level,
+                "max_level": max_level,
+                "is_max_level": is_max_level,
+                "can_upgrade": requirements_met and not is_max_level,
                 "cost": cost,
                 "requirements_met": requirements_met,
                 "requirements": prereqs,
-                "build_time": calculate_build_time(target_level),
+                "build_time": build_time,
+                "effect": balance.get_building_effect_definition(name),
             }
         )
 
@@ -128,6 +137,21 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
         db.rollback()
         raise ValueError("Building upgrade already queued")
 
+    building = (
+        db.query(models.Building)
+        .options(selectinload(models.Building.city))
+        .filter(
+            models.Building.city_id == city.id,
+            models.Building.name == building_name,
+        )
+        .first()
+    )
+    current_level = int(building.level) if building else 0
+    max_level = balance.get_building_max_level(building_name)
+    if current_level >= max_level:
+        db.rollback()
+        raise ValueError(f"Maximum building level is {max_level}")
+
     prereqs = BUILDING_PREREQUISITES.get(building_name, {})
     if prereqs:
         existing_buildings = {b.name: b.level for b in city.buildings}
@@ -138,21 +162,12 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
                     f"Prerequisite not met: {req_name} level {req_level} required"
                 )
 
-    building = (
-        db.query(models.Building)
-        .options(selectinload(models.Building.city))
-        .filter(
-            models.Building.city_id == city.id,
-            models.Building.name == building_name,
-        )
-        .first()
-    )
     if not building:
         building = models.Building(city_id=city.id, name=building_name, level=0)
         db.add(building)
         db.flush()
 
-    target_level = building.level + 1
+    target_level = int(building.level) + 1
     cost = calculate_upgrade_cost(building_name, target_level)
     if not production.check_cost(city, cost):
         db.rollback()
@@ -160,7 +175,9 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
 
     production.pay_cost(city, cost)
 
-    finish_time = utc_now() + timedelta(seconds=calculate_build_time(target_level))
+    finish_time = utc_now() + timedelta(
+        seconds=calculate_build_time(building_name, target_level)
+    )
     queue_entry = models.BuildingQueue(
         city_id=city.id,
         building_type=building_name,
@@ -279,8 +296,10 @@ def process_building_queues(db: Session) -> List[dict]:
             db.add(building)
             db.flush()
 
+        maximum = balance.get_building_max_level(queue_entry.building_type)
         previous_level = int(building.level)
-        building.level = max(previous_level, queue_entry.target_level)
+        target_level = min(int(queue_entry.target_level), maximum)
+        building.level = max(previous_level, target_level)
         expansion_points_awarded = 0
         if building.level > previous_level:
             expansion_points_awarded = expansion_service.award_expansion_points_for_building(
@@ -290,7 +309,7 @@ def process_building_queues(db: Session) -> List[dict]:
             )
 
         world_won = False
-        if building.name == "world_wonder" and building.level >= 100:
+        if building.name == "world_wonder" and building.level >= maximum:
             world = (
                 db.query(models.World)
                 .filter(models.World.id == city.world_id)
@@ -307,7 +326,7 @@ def process_building_queues(db: Session) -> List[dict]:
             {
                 "city_id": queue_entry.city_id,
                 "building_type": queue_entry.building_type,
-                "target_level": queue_entry.target_level,
+                "target_level": building.level,
                 "owner_id": city.owner_id,
                 "world_id": city.world_id,
                 "world_won": world_won,

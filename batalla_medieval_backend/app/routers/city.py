@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
-from ..services import production, protection, quest as quest_service
+from ..services import production, protection, quest as quest_service, unit_catalog
 
 router = APIRouter(tags=["cities"])
 
@@ -25,6 +25,12 @@ def create_city(
     )
 
 
+def _decorate_population_capacity(city: models.City) -> None:
+    """Expose effective capacity without mutating the persisted base column."""
+
+    city.population_capacity = unit_catalog.get_population_capacity(city)
+
+
 @router.get("/", response_model=list[schemas.CityRead])
 def list_cities(
     world_id: int,
@@ -39,6 +45,7 @@ def list_cities(
     for city in cities:
         city, gains = production.recalculate_resources(db, city, return_gains=True)
         quest_service.handle_event(db, current_user, "resources_collected", gains)
+        _decorate_population_capacity(city)
         city.is_protected = protection.is_user_protected(city.owner)
     return cities
 
@@ -63,6 +70,7 @@ def get_city(
         raise HTTPException(status_code=404, detail="City not found")
     city, gains = production.recalculate_resources(db, city, return_gains=True)
     quest_service.handle_event(db, current_user, "resources_collected", gains)
+    _decorate_population_capacity(city)
     city.is_protected = protection.is_user_protected(city.owner)
     return city
 
@@ -89,9 +97,22 @@ def city_status(
     city, _ = production.recalculate_resources(db, city, return_gains=True)
     storage_limit = production.get_storage_limit(city)
     production_per_hour = production.get_production_per_hour(db, city)
+    population_used = unit_catalog.get_population_used(db, city)
+    population_capacity = unit_catalog.get_population_capacity(city)
+    population_available = max(
+        population_capacity
+        - population_used
+        - unit_catalog.get_population_reserved_for_training(db, city.id),
+        0,
+    )
     building_queue = (
         db.query(models.BuildingQueue)
         .filter(models.BuildingQueue.city_id == city.id)
+        .all()
+    )
+    research_queue = (
+        db.query(models.ResearchQueue)
+        .filter(models.ResearchQueue.city_id == city.id)
         .all()
     )
     troop_queue = (
@@ -106,11 +127,17 @@ def city_status(
         stone=city.stone,
         iron=city.iron,
         gold=city.gold,
+        population=population_used,
+        population_max=population_capacity,
+        population_used=population_used,
+        population_capacity=population_capacity,
+        population_available=population_available,
         loyalty=city.loyalty,
         storage_limit=storage_limit,
         production_per_hour=production_per_hour,
         last_production=city.last_production,
         is_protected=protection.is_user_protected(city.owner),
         building_queue=building_queue,
+        research_queue=research_queue,
         troop_queue=troop_queue,
     )

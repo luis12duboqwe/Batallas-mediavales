@@ -12,6 +12,7 @@ FIXED_NOW = datetime(2026, 8, 18, 20, 0, tzinfo=timezone.utc)
 
 def _freeze_time(monkeypatch):
     monkeypatch.setattr(production, "utc_now", lambda: FIXED_NOW)
+    monkeypatch.setattr(research, "utc_now", lambda: FIXED_NOW)
     monkeypatch.setattr(troops, "utc_now", lambda: FIXED_NOW)
 
 
@@ -38,6 +39,7 @@ def _set_resources(city: models.City, amount: float) -> None:
 def _prepare_heavy_infantry_city(db_session, city):
     db_session.add_all(
         [
+            models.Building(city_id=city.id, name="academy", level=1),
             models.Building(city_id=city.id, name="barracks", level=3),
             models.Building(city_id=city.id, name="smithy", level=1),
         ]
@@ -48,7 +50,7 @@ def _prepare_heavy_infantry_city(db_session, city):
     db_session.refresh(city)
 
 
-def test_available_catalog_matches_research_and_training_payment(
+def test_available_catalog_matches_timed_research_and_training_payment(
     db_session, city, monkeypatch
 ):
     _freeze_time(monkeypatch)
@@ -57,22 +59,56 @@ def test_available_catalog_matches_research_and_training_payment(
     before_catalog = unit_catalog.get_availability(db_session, city)
     heavy = next(unit for unit in before_catalog if unit["unit_type"] == "heavy_infantry")
     assert heavy["research_cost"] == pytest.approx(
-        {"wood": 500.0, "stone": 400.0, "iron": 300.0}
+        {"wood": 500.0, "stone": 400.0, "iron": 300.0, "gold": 50.0}
     )
+    assert heavy["research_time_seconds"] == 300
+    assert heavy["research_queued"] is False
     assert heavy["can_research"] is True
 
     before_research = {
         resource: float(getattr(city, resource))
         for resource in balance.RESOURCE_FIELDS
     }
-    row = research.research_tech(db_session, city, "heavy_infantry")
-    assert row.tech_name == "heavy_infantry"
+    queued = research.research_tech(db_session, city, "heavy_infantry")
+    assert queued.tech_name == "heavy_infantry"
+    assert (_aware(queued.finish_time) - FIXED_NOW).total_seconds() == 300
 
     db_session.refresh(city)
     for resource in balance.RESOURCE_FIELDS:
         assert getattr(city, resource) == pytest.approx(
             before_research[resource] - heavy["research_cost"].get(resource, 0.0)
         )
+    assert "heavy_infantry" not in city.researched_units
+    assert (
+        db_session.query(models.Research)
+        .filter_by(city_id=city.id, tech_name="heavy_infantry")
+        .count()
+        == 0
+    )
+
+    during_catalog = unit_catalog.get_availability(db_session, city)
+    heavy_during = next(
+        unit for unit in during_catalog if unit["unit_type"] == "heavy_infantry"
+    )
+    archer_during = next(unit for unit in during_catalog if unit["unit_type"] == "archer")
+    assert heavy_during["research_queued"] is True
+    assert heavy_during["can_research"] is False
+    assert archer_during["can_research"] is False
+
+    queued.finish_time = FIXED_NOW - timedelta(seconds=1)
+    db_session.add(queued)
+    db_session.commit()
+    completed = research.process_research_queues(db_session)
+    assert completed == [
+        {
+            "city_id": city.id,
+            "tech_name": "heavy_infantry",
+            "owner_id": city.owner_id,
+            "world_id": city.world_id,
+        }
+    ]
+
+    db_session.refresh(city)
     assert "heavy_infantry" in city.researched_units
     assert (
         db_session.query(models.Research)
@@ -80,10 +116,12 @@ def test_available_catalog_matches_research_and_training_payment(
         .count()
         == 1
     )
+    assert db_session.query(models.ResearchQueue).filter_by(city_id=city.id).count() == 0
 
     after_catalog = unit_catalog.get_availability(db_session, city)
     heavy = next(unit for unit in after_catalog if unit["unit_type"] == "heavy_infantry")
     assert heavy["researched"] is True
+    assert heavy["research_queued"] is False
     assert heavy["training_cost"] == pytest.approx(
         {"wood": 70.0, "stone": 60.0, "iron": 50.0}
     )
@@ -119,7 +157,7 @@ def test_research_sync_preserves_legacy_json_progress(db_session, city):
     assert city.researched_units == ["basic_infantry", "spy", "heavy_infantry"]
 
 
-def test_unit_availability_endpoint_exposes_server_quote(
+def test_unit_availability_endpoint_exposes_server_research_quote(
     client, db_session, city, user, monkeypatch
 ):
     _freeze_time(monkeypatch)
@@ -138,14 +176,67 @@ def test_unit_availability_endpoint_exposes_server_quote(
         "wood": 500.0,
         "stone": 400.0,
         "iron": 300.0,
+        "gold": 50.0,
     }
+    assert heavy["research_time_seconds"] == 300
     assert heavy["training_cost"] == {
         "wood": 70.0,
         "stone": 60.0,
         "iron": 50.0,
     }
     assert heavy["research_requirements_met"] is True
+    assert heavy["research_queued"] is False
     assert heavy["can_research"] is True
+
+
+def test_research_endpoint_returns_queue_not_unlocked_technology(
+    client, db_session, city, user, monkeypatch
+):
+    _freeze_time(monkeypatch)
+    _prepare_heavy_infantry_city(db_session, city)
+
+    response = client.post(
+        "/troop/research",
+        params={"world_id": city.world_id},
+        json={"city_id": city.id, "unit_type": "heavy_infantry"},
+        headers=_auth_headers(user),
+    )
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["city_id"] == city.id
+    assert payload["tech_name"] == "heavy_infantry"
+
+    assert (
+        db_session.query(models.Research)
+        .filter_by(city_id=city.id, tech_name="heavy_infantry")
+        .count()
+        == 0
+    )
+    assert db_session.query(models.ResearchQueue).filter_by(city_id=city.id).count() == 1
+
+
+def test_cancel_research_refunds_exact_persisted_payment(db_session, city, monkeypatch):
+    _freeze_time(monkeypatch)
+    _set_resources(city, 100.0)
+    city.last_production = FIXED_NOW
+    paid_cost = {"wood": 111.0, "stone": 222.0, "iron": 333.0, "gold": 44.0}
+    queue = models.ResearchQueue(
+        city_id=city.id,
+        tech_name="heavy_infantry",
+        finish_time=FIXED_NOW + timedelta(hours=1),
+        paid_cost=paid_cost,
+    )
+    db_session.add(queue)
+    db_session.commit()
+    queue_id = queue.id
+
+    assert research.cancel_research_queue(db_session, queue_id, city.owner_id) is True
+
+    db_session.refresh(city)
+    for resource in balance.RESOURCE_FIELDS:
+        expected = 100.0 + paid_cost.get(resource, 0.0) * research.REFUND_FACTOR
+        assert getattr(city, resource) == pytest.approx(expected)
+    assert db_session.query(models.ResearchQueue).filter_by(id=queue_id).first() is None
 
 
 def test_cancel_training_refunds_exact_persisted_payment(db_session, city, monkeypatch):

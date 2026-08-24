@@ -176,6 +176,7 @@ jobs:
           python -m app.seed
           python scripts/prepare_g2_e2e.py
           python scripts/prepare_g6_expansion_e2e.py
+          python scripts/prepare_g7_research_e2e.py
 
       - name: Start backend and frontend
         run: |
@@ -192,6 +193,7 @@ jobs:
           node e2e/g2-alpha.mjs
           node e2e/g4-ux.mjs
           node e2e/g6-expansion.mjs
+          node e2e/g7-research.mjs
 
       - name: Show service logs
         if: always()

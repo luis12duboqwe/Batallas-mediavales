@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app import models
-from app.services import balance, building, production
+from app.services import balance, building, production, unit_catalog
 
 
 FIXED_NOW = datetime(2026, 8, 18, 19, 0, tzinfo=timezone.utc)
@@ -12,6 +12,10 @@ FIXED_NOW = datetime(2026, 8, 18, 19, 0, tzinfo=timezone.utc)
 def _freeze_time(monkeypatch):
     monkeypatch.setattr(building, "utc_now", lambda: FIXED_NOW)
     monkeypatch.setattr(production, "utc_now", lambda: FIXED_NOW)
+
+
+def _aware(value):
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def _set_resources(city, amount: float) -> None:
@@ -35,8 +39,9 @@ def test_level_two_quote_matches_exact_payment(db_session, city, monkeypatch):
     )
     expected = building.calculate_upgrade_cost("town_hall", 2)
     assert quote["level"] == 1
+    assert quote["max_level"] == balance.BUILDING_MAX_LEVELS["town_hall"]
     assert quote["cost"] == pytest.approx(expected)
-    assert quote["build_time"] == building.calculate_build_time(2)
+    assert quote["build_time"] == building.calculate_build_time("town_hall", 2)
 
     before = {
         resource: float(getattr(city, resource))
@@ -46,10 +51,85 @@ def test_level_two_quote_matches_exact_payment(db_session, city, monkeypatch):
 
     assert queue_entry.target_level == 2
     assert queue_entry.paid_cost == pytest.approx(expected)
+    assert _aware(queue_entry.finish_time) == FIXED_NOW + timedelta(
+        seconds=balance.get_building_build_time("town_hall", 2)
+    )
     for resource in balance.RESOURCE_FIELDS:
         assert getattr(city, resource) == pytest.approx(
             before[resource] - expected.get(resource, 0.0)
         )
+
+
+def test_catalog_exposes_academy_effects_and_four_resource_costs(db_session, city):
+    _set_resources(city, 10000.0)
+    db_session.add_all(
+        [
+            models.Building(city_id=city.id, name="town_hall", level=4),
+            models.Building(city_id=city.id, name="barracks", level=3),
+        ]
+    )
+    db_session.commit()
+
+    catalog = {entry["name"]: entry for entry in building.get_available_buildings(db_session, city)}
+    academy = catalog["academy"]
+    assert academy["display_name"] == "Academia Militar"
+    assert academy["requirements_met"] is True
+    assert academy["effect"] == {
+        "type": "research_access",
+        "queue_slots": balance.RESEARCH_QUEUE_SLOTS_PER_CITY,
+    }
+    assert set(academy["cost"]) == set(balance.RESOURCE_FIELDS)
+    assert academy["build_time"] == balance.get_building_build_time("academy", 1)
+
+    assert catalog["wall"]["effect"]["per_level"] == balance.WALL_BONUS_PER_LEVEL
+    assert catalog["market"]["effect"]["per_level"] == balance.MERCHANT_CAPACITY_PER_LEVEL
+    assert catalog["farm"]["effect"]["per_level"] == balance.POPULATION_PER_FARM_LEVEL
+    assert catalog["warehouse"]["effect"]["per_level"] == balance.STORAGE_PER_WAREHOUSE_LEVEL
+
+
+def test_max_level_building_cannot_be_queued(db_session, city):
+    maximum = balance.BUILDING_MAX_LEVELS["wall"]
+    db_session.add(models.Building(city_id=city.id, name="wall", level=maximum))
+    db_session.commit()
+
+    quote = next(
+        entry
+        for entry in building.get_available_buildings(db_session, city)
+        if entry["name"] == "wall"
+    )
+    assert quote["is_max_level"] is True
+    assert quote["can_upgrade"] is False
+    assert quote["cost"] == {}
+    assert quote["build_time"] == 0
+
+    with pytest.raises(ValueError, match="Maximum building level"):
+        building.queue_upgrade(db_session, city, "wall")
+
+
+def test_farm_completion_adds_effective_capacity_without_overwriting_base(
+    db_session, city, monkeypatch
+):
+    _freeze_time(monkeypatch)
+    city.population_max = 120
+    farm = models.Building(city_id=city.id, name="farm", level=0)
+    queue_entry = models.BuildingQueue(
+        city_id=city.id,
+        building_type="farm",
+        target_level=1,
+        finish_time=FIXED_NOW - timedelta(seconds=1),
+        paid_cost={},
+    )
+    db_session.add_all([farm, queue_entry])
+    db_session.commit()
+
+    building.process_building_queues(db_session)
+    db_session.refresh(city)
+    db_session.expire(city, ["buildings"])
+
+    assert city.population_max == 120
+    assert unit_catalog.get_population_capacity(city) == (
+        120 + balance.POPULATION_PER_FARM_LEVEL
+    )
 
 
 def test_cancel_refunds_persisted_payment_not_recomputed_cost(db_session, city, monkeypatch):

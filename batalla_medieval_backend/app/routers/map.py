@@ -30,14 +30,27 @@ def get_map_tiles(
     world_id: int,
     x: int,
     y: int,
-    radius: int = Query(10, le=20),  # Limit radius to avoid huge payloads
+    radius: int = Query(10, ge=0, le=20),
     db: Session = Depends(get_db),
     _membership: models.PlayerWorld = Depends(require_world_access),
 ):
-    min_x = x - radius
-    max_x = x + radius
-    min_y = y - radius
-    max_y = y + radius
+    """Return only coordinates that actually exist inside the selected world."""
+
+    world = _membership.world
+    if world is None:
+        world = db.query(models.World).filter(models.World.id == world_id).one()
+    map_size = int(world.map_size)
+
+    # A viewport may be centred on the first/last row of the map. Clamp the
+    # requested square so clients never receive negative or >= map_size tiles
+    # that server-authoritative expansion would correctly reject.
+    min_x = max(0, x - radius)
+    max_x = min(map_size - 1, x + radius)
+    min_y = max(0, y - radius)
+    max_y = min(map_size - 1, y + radius)
+
+    if min_x > max_x or min_y > max_y:
+        return schemas.MapResponse(tiles=[])
 
     owner_alliance = (
         selectinload(models.City.owner)

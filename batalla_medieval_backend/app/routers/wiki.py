@@ -35,13 +35,34 @@ def _fmt_requirements(requirements: dict) -> str:
     return ", ".join(f"{name} {level}" for name, level in requirements.items())
 
 
+def _fmt_effect(effect: dict) -> str:
+    effect_type = effect.get("type")
+    if effect_type == "defense_bonus":
+        return f"+{effect['per_level'] * 100:g}% defensa/nivel"
+    if effect_type == "merchant_capacity":
+        return f"+{effect['per_level']:g} capacidad comercial/nivel"
+    if effect_type == "population_capacity":
+        return f"+{effect['per_level']:g} población/nivel"
+    if effect_type == "storage_capacity":
+        return f"+{effect['per_level']:g} almacenamiento/nivel"
+    if effect_type == "research_access":
+        return f"Habilita investigación ({effect['queue_slots']} cola/ciudad)"
+    if effect_type == "expansion_points":
+        return f"+{effect['per_completion']} puntos de expansión/nivel completado"
+    if effect_type == "world_victory":
+        return f"Victoria al nivel {effect['target_level']}"
+    return "Desbloquea requisitos de progresión"
+
+
 def _build_troop_article() -> str:
     lines = [
         "# Tropas del reino",
         "",
         f"Versión de balance: `{balance.BALANCE_VERSION}`.",
         "",
-        "| Unidad | Ataque | Def. Inf. | Def. Cab. | Def. Asedio | Carga | Velocidad | Coste (M/A/H) | Tiempo (s) | Requisitos |",
+        "Orden de recursos en costes: **Madera/Piedra/Hierro/Oro**.",
+        "",
+        "| Unidad | Ataque | Def. Inf. | Def. Cab. | Def. Asedio | Carga | Velocidad | Coste (M/P/H/O) | Tiempo (s) | Requisitos |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |",
     ]
     for unit_type in balance.UNIT_ORDER:
@@ -67,39 +88,67 @@ def _build_troop_article() -> str:
             "- El coste total es el coste por unidad multiplicado por la cantidad.",
             "- El tiempo total es el tiempo por unidad multiplicado por la cantidad y por el modificador activo del mundo.",
             "- El nivel del edificio sirve como requisito; no aplica una fórmula de tiempo paralela.",
-            "- Investigación y entrenamiento usan el mismo catálogo mostrado arriba.",
+            "- Las unidades investigables solo pueden entrenarse después de completar su investigación.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_research_article() -> str:
+    lines = [
+        "# Investigación militar",
+        "",
+        f"Versión de balance: `{balance.BALANCE_VERSION}`.",
+        "",
+        "La Academia Militar es el edificio que habilita investigación. Una ciudad puede mantener una sola investigación activa.",
+        "",
+        "| Tecnología | Coste (M/P/H/O) | Tiempo (s) | Requisitos |",
+        "| --- | --- | ---: | --- |",
+    ]
+    for unit_type in balance.UNIT_ORDER:
+        definition = balance.UNIT_CATALOG[unit_type]
+        if not definition["researchable"]:
+            continue
+        lines.append(
+            f"| {balance.UNIT_DISPLAY_NAMES[unit_type]} "
+            f"| {_fmt_cost(definition['research_cost'])} "
+            f"| {int(definition['research_time_seconds'])} "
+            f"| {_fmt_requirements(definition['research_requirements'])} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Reglas de la cola",
+            f"- Slots de investigación por ciudad: `{balance.RESEARCH_QUEUE_SLOTS_PER_CITY}`.",
+            "- Los recursos se descuentan al iniciar la investigación.",
+            "- La tecnología no se desbloquea hasta que el worker completa la cola.",
+            f"- Una cancelación futura devuelve el {balance.QUEUE_REFUND_FACTOR * 100:.0f}% del pago registrado.",
+            "- El pago exacto queda guardado en la cola; el reembolso no se recalcula con un balance posterior.",
         ]
     )
     return "\n".join(lines)
 
 
 def _build_building_article() -> str:
-    descriptions = {
-        "town_hall": "Centro de progreso de la ciudad y requisito para estructuras avanzadas.",
-        "barracks": "Desbloquea y entrena infantería.",
-        "stable": "Desbloquea caballería y espionaje.",
-        "wall": "Aumenta la defensa de la ciudad.",
-        "market": "Habilita capacidad comercial y transportes.",
-        "farm": "Estructura económica básica de la ciudad.",
-        "warehouse": "Aumenta el almacenamiento máximo de recursos.",
-        "smithy": "Requisito para unidades militares avanzadas.",
-        "workshop": "Desbloquea maquinaria de asedio.",
-        "world_wonder": "Objetivo de mundo de alto nivel.",
-    }
     lines = [
         "# Edificios",
         "",
         f"Versión de balance: `{balance.BALANCE_VERSION}`.",
         "",
-        "| Edificio | Función | Coste base (M/A/H) | Requisitos |",
-        "| --- | --- | --- | --- |",
+        "Orden de recursos en costes: **Madera/Piedra/Hierro/Oro**.",
+        "",
+        "| Edificio | Función | Coste base (M/P/H/O) | Máx. | Tiempo base (s) | Requisitos |",
+        "| --- | --- | --- | ---: | ---: | --- |",
     ]
     for building_type in balance.BUILDING_ORDER:
-        costs = balance.BUILDING_COSTS[building_type]
+        effect = balance.get_building_effect_definition(building_type)
         lines.append(
             f"| {balance.BUILDING_DISPLAY_NAMES[building_type]} "
-            f"| {descriptions.get(building_type, 'Estructura del reino.')} "
-            f"| {_fmt_cost(costs)} "
+            f"| {balance.BUILDING_DESCRIPTIONS[building_type]} {_fmt_effect(effect)} "
+            f"| {_fmt_cost(balance.BUILDING_COSTS[building_type])} "
+            f"| {balance.BUILDING_MAX_LEVELS[building_type]} "
+            f"| {balance.BUILDING_BASE_BUILD_TIME_SECONDS[building_type]} "
             f"| {_fmt_requirements(balance.BUILDING_PREREQUISITES.get(building_type, {}))} |"
         )
 
@@ -108,9 +157,11 @@ def _build_building_article() -> str:
             "",
             "## Fórmulas live",
             f"- Coste de nivel: `coste_base * ({balance.BUILDING_COST_GROWTH} ** (nivel - 1))`.",
-            f"- Tiempo de construcción: `{balance.BASE_BUILD_TIME_SECONDS} * nivel` segundos antes de modificadores aplicables.",
+            "- Tiempo de construcción: `tiempo_base_del_edificio * nivel_objetivo`.",
             f"- Al cancelar una cola futura se devuelve el {balance.QUEUE_REFUND_FACTOR * 100:.0f}% del pago registrado.",
             f"- Almacén: `{balance.STORAGE_BASE_CAPACITY:g} + {balance.STORAGE_PER_WAREHOUSE_LEVEL:g} * nivel_warehouse`.",
+            f"- Hacienda: `population_max_base + {balance.POPULATION_PER_FARM_LEVEL} * nivel_farm` para ciudades.",
+            "- Los campamentos conservan su capacidad base y no pueden construir Hacienda ni Academia.",
         ]
     )
     return "\n".join(lines)
@@ -178,8 +229,11 @@ def _build_economy_article() -> str:
             f"Versión de balance: `{balance.BALANCE_VERSION}`.",
             f"- Producción base: `{rates}` antes de mundo, oasis y eventos.",
             f"- Coste de edificios: `coste_base * ({balance.BUILDING_COST_GROWTH} ** (nivel - 1))`.",
+            "- El tiempo de edificio usa su tiempo base canónico multiplicado por el nivel objetivo.",
             "- Coste y tiempo de tropas provienen del catálogo de unidades y escalan linealmente con la cantidad.",
+            "- Coste y tiempo de investigación provienen del mismo catálogo server-authoritative.",
             f"- Capacidad de almacén: `{balance.STORAGE_BASE_CAPACITY:g} + {balance.STORAGE_PER_WAREHOUSE_LEVEL:g} * nivel_warehouse`.",
+            f"- Capacidad de población de ciudad: `base_persistida + {balance.POPULATION_PER_FARM_LEVEL} * nivel_farm`.",
             f"- Recuperación de lealtad: `{balance.LOYALTY_RECOVERY_PER_HOUR:g}` puntos por hora hasta {balance.LOYALTY_MAX:g}.",
         ]
     )
@@ -200,13 +254,14 @@ def _build_beginner_article() -> str:
     return "\n".join(
         [
             "# Guía para principiantes",
-            "1. Usa el Ayuntamiento (`town_hall`) para desbloquear requisitos de progreso.",
-            "2. Mejora el Almacén (`warehouse`) cuando la capacidad empiece a limitar tus recursos.",
+            "1. Usa la Casa Central (`town_hall`) para desbloquear requisitos de progreso.",
+            "2. Mejora el Gran Depósito (`warehouse`) cuando la capacidad empiece a limitar tus recursos.",
             "3. Construye Barracas (`barracks`) para entrenar la infantería inicial.",
-            "4. Investiga unidades desde el catálogo que muestra el juego; los costes visibles son los que cobra el servidor.",
-            "5. Usa espionaje antes de una hostilidad y respeta la protección de novatos.",
-            "6. La Muralla (`wall`) mejora la defensa y puede recibir daño de asedio.",
-            "7. El mercado permite comercio y transporte dentro del mismo mundo.",
+            "4. Construye la Academia Militar (`academy`) para investigar nuevas unidades; las investigaciones tardan tiempo real y solo se desbloquean al completar la cola.",
+            "5. Mejora la Hacienda (`farm`) si necesitas aumentar la capacidad de población.",
+            "6. Usa espionaje antes de una hostilidad y respeta la protección de novatos.",
+            "7. La Muralla (`wall`) mejora la defensa y puede recibir daño de asedio.",
+            "8. El mercado permite comercio y transporte dentro del mismo mundo.",
         ]
     )
 
@@ -217,6 +272,11 @@ def _builtin_articles() -> List[dict]:
             "title": "Tropas y estadísticas base",
             "category": schemas.WIKI_CATEGORIES[1],
             "content_markdown": _build_troop_article(),
+        },
+        {
+            "title": "Investigación militar",
+            "category": schemas.WIKI_CATEGORIES[1],
+            "content_markdown": _build_research_article(),
         },
         {
             "title": "Edificios y progresión",
