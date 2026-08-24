@@ -28,5 +28,23 @@ _find_target_building = _impl._find_target_building
 
 resolve_battle = _impl.resolve_battle
 build_battle_report_content = _impl.build_battle_report_content
-resolve_oasis_battle = _impl.resolve_oasis_battle
+
+
+def resolve_oasis_battle(*args, **kwargs):
+    """Preserve the pre-BM-0064 oasis scoring contract.
+
+    BM-0064 changes combat determinism/rounds only. Oasis combat historically
+    returned ``xp_gained`` for the hero but did not award player attacker
+    ranking points, so keep that boundary stable here.
+    """
+
+    attacker_city = args[0] if args else kwargs.get("attacker_city")
+    owner = getattr(attacker_city, "owner", None)
+    previous_points = getattr(owner, "attacker_points", None) if owner else None
+    result = _impl.resolve_oasis_battle(*args, **kwargs)
+    if owner is not None and previous_points is not None:
+        owner.attacker_points = previous_points
+    return result
+
+
 build_oasis_report_content = _impl.build_oasis_report_content
