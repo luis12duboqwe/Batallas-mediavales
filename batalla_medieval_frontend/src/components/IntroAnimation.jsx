@@ -67,7 +67,6 @@ const IntroAnimation = ({ onComplete }) => {
       ctx.save();
       ctx.globalAlpha = layer.opacity;
       const width = canvas.clientWidth;
-      const height = canvas.clientHeight;
       const fogGradient = ctx.createLinearGradient(0, 0, width, 0);
       fogGradient.addColorStop(0, 'rgba(255,255,255,0)');
       fogGradient.addColorStop(0.5, 'rgba(255,255,255,0.7)');
@@ -163,6 +162,7 @@ const IntroAnimation = ({ onComplete }) => {
       className={`fixed inset-0 z-40 overflow-hidden transition-opacity duration-500 ${
         fadeOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
       }`}
+      data-testid="intro-animation"
     >
       <canvas ref={canvasRef} className="w-full h-full" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(255,214,153,0.06),transparent_45%)]" />
