@@ -180,6 +180,7 @@ jobs:
           python scripts/prepare_g8_unit_upkeep_e2e.py
           python scripts/prepare_g9_combat_e2e.py
           python scripts/prepare_g10_espionage_e2e.py
+          python scripts/prepare_g11_commerce_e2e.py
 
       - name: Start backend and frontend
         run: |
@@ -200,6 +201,7 @@ jobs:
           node e2e/g8-unit-upkeep.mjs
           node e2e/g9-combat.mjs
           node e2e/g10-espionage.mjs
+          node e2e/g11-commerce.mjs
 
       - name: Show service logs
         if: always()
