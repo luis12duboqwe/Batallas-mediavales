@@ -196,5 +196,16 @@ def test_builtin_help_is_generated_from_current_balance():
     assert "Mina Profunda" not in beginner_article
     assert "conquista PvP está deshabilitada" in conquest_article
     assert "loot_modifier" in combat_article
-    assert "≥5" not in espionage_article
-    assert "recursos, tropas y niveles de edificios" in espionage_article
+
+    assert espionage.ESPIONAGE_ALGORITHM_VERSION in espionage_article
+    assert f"{espionage.SPY_LUCK_MIN:+.0%}" in espionage_article
+    assert f"{espionage.SPY_LUCK_MAX:+.0%}" in espionage_article
+    assert f"{espionage.SPY_SUCCESS_CHANCE_MIN:.0%}" in espionage_article
+    assert f"{espionage.SPY_SUCCESS_CHANCE_MAX:.0%}" in espionage_article
+    assert f"≥ {espionage.SPY_TROOP_INTEL_THRESHOLD:g}" in espionage_article
+    assert f"≥ {espionage.SPY_BUILDING_INTEL_THRESHOLD:g}" in espionage_article
+    assert "nivel 1 revela recursos" in espionage_article
+    assert "nivel 2 revela además las tropas" in espionage_article
+    assert "nivel 3 revela además los edificios" in espionage_article
+    assert "no revela recursos, tropas, edificios" in espionage_article
+    assert "el defensor solo recibe informe si detectó la misión" in espionage_article
