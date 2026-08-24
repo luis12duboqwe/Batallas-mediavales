@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app import models
 from app.database import SessionLocal, engine
-from app.services import anticheat, combat
+from app.services import anticheat, combat, espionage
 from app.services import movement as movement_service
 
 
@@ -45,6 +45,20 @@ def _run_two(callback):
         assert not thread.is_alive(), "Concurrent movement transaction did not finish"
 
     return results, errors
+
+
+def _spy_seed_for(*, attacker_spies: int, defender_spies: int, predicate):
+    for value in range(10_000):
+        seed = f"{value:064x}"
+        outcome = espionage.resolve_outcome(
+            attacker_spies=attacker_spies,
+            defender_spies=defender_spies,
+            spy_modifier=1.0,
+            seed=seed,
+        )
+        if predicate(outcome):
+            return seed
+    raise AssertionError("Could not find deterministic espionage seed")
 
 
 def test_two_dispatches_cannot_reserve_the_same_troops_twice(
@@ -210,3 +224,113 @@ def test_two_workers_resolve_one_attack_exactly_once(db_session, city, monkeypat
     assert len(retried_returns) == 1
     assert dict(retried_returns[0].troops or {}) == first_return_troops
     assert dict(retried_returns[0].resources or {}) == first_return_resources
+
+
+def test_two_workers_resolve_one_spy_mission_exactly_once(db_session, city, monkeypatch):
+    defender = models.User(
+        username="concurrent_spy_defender",
+        email="concurrent-spy-defender@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(defender)
+    db_session.flush()
+    target = models.City(
+        name="Concurrent Spy Target",
+        owner_id=defender.id,
+        world_id=city.world_id,
+        x=9,
+        y=0,
+        wood=400.0,
+        stone=300.0,
+        iron=200.0,
+        gold=100.0,
+    )
+    db_session.add(target)
+    db_session.flush()
+    db_session.add_all(
+        [
+            models.Troop(city_id=target.id, unit_type="archer", quantity=7),
+            models.Building(city_id=target.id, name="wall", level=2),
+        ]
+    )
+    spy = models.Movement(
+        origin_city_id=city.id,
+        target_city_id=target.id,
+        world_id=city.world_id,
+        movement_type="spy",
+        troops={},
+        resources={},
+        spy_count=6,
+        arrival_time=datetime.now(timezone.utc) - timedelta(seconds=1),
+        speed_used=1.0,
+        status="ongoing",
+    )
+    db_session.add(spy)
+    db_session.commit()
+    spy_id = spy.id
+    target_id = target.id
+
+    seed = _spy_seed_for(
+        attacker_spies=6,
+        defender_spies=0,
+        predicate=lambda outcome: outcome["success"]
+        and not outcome["detected"]
+        and outcome["intel_level"] == 3,
+    )
+    monkeypatch.setattr(espionage, "derive_seed", lambda *args, **kwargs: seed)
+    monkeypatch.setattr(
+        movement_service,
+        "_run_resolution_effect",
+        lambda *args, **kwargs: None,
+    )
+
+    def resolve_once(session):
+        return len(movement_service.resolve_due_movements(session))
+
+    results, errors = _run_two(resolve_once)
+    assert errors == []
+    assert sorted(results) == [0, 1]
+
+    db_session.expire_all()
+    completed = db_session.query(models.Movement).filter_by(id=spy_id).one()
+    assert completed.status == "completed"
+
+    reports = (
+        db_session.query(models.Report)
+        .filter_by(attacker_city_id=city.id, defender_city_id=target_id, report_type="spy")
+        .all()
+    )
+    assert len(reports) == 1
+    payload = json.loads(str(reports[0].content))
+    assert payload["role"] == "attacker"
+    assert payload["algorithm_version"] == espionage.ESPIONAGE_ALGORITHM_VERSION
+    assert payload["seed"] == seed
+    assert payload["success"] is True
+    assert payload["detected"] is False
+    assert payload["intel_level"] == 3
+    assert payload["troops"]["archer"] == 7
+    assert payload["buildings"]["wall"] == 2
+
+    returns = (
+        db_session.query(models.Movement)
+        .filter_by(target_city_id=city.id, movement_type="return", status="ongoing")
+        .all()
+    )
+    assert len(returns) == 1
+    assert dict(returns[0].troops or {}) == {"spy": 6}
+
+    # A third pass after both concurrent workers settled is still a no-op.
+    assert movement_service.resolve_due_movements(db_session) == []
+    assert (
+        db_session.query(models.Report)
+        .filter_by(attacker_city_id=city.id, defender_city_id=target_id, report_type="spy")
+        .count()
+        == 1
+    )
+    assert (
+        db_session.query(models.Movement)
+        .filter_by(target_city_id=city.id, movement_type="return", status="ongoing")
+        .count()
+        == 1
+    )

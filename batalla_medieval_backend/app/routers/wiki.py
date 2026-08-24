@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
-from ..services import balance, event as event_service
+from ..services import balance, espionage, event as event_service
 from ..utils import utc_now
 
 router = APIRouter(tags=["wiki"])
@@ -194,19 +194,24 @@ def _build_combat_article() -> str:
 
 
 def _build_espionage_article() -> str:
-    reveal_line = (
-        "- Un espionaje exitoso revela recursos, tropas y niveles de edificios."
-        if balance.SPY_REVEALS_BUILDINGS_ON_SUCCESS
-        else "- Los edificios no se revelan en esta versión."
-    )
     return "\n".join(
         [
             "# Mecánicas de espionaje",
-            f"- Probabilidad base de éxito: `espias_atacantes / (espias_defensores + {balance.SPY_DEFENDER_OFFSET:g})`.",
-            f"- Los eventos aplican `spy_modifier` (base {balance.EVENT_DEFAULT_MODIFIERS['spy_modifier']:g}).",
-            f"- Si falla la misión hay {balance.SPY_UNKNOWN_ATTACKER_CHANCE * 100:.0f}% de probabilidad de que el atacante aparezca como 'Desconocido'.",
-            reveal_line,
-            "- Los informes se guardan para atacante y defensor y activan notificaciones.",
+            "",
+            f"Versión del algoritmo: `{espionage.ESPIONAGE_ALGORITHM_VERSION}`.",
+            f"- Probabilidad base: `espias_atacantes / (espias_defensores + {balance.SPY_DEFENDER_OFFSET:g})`.",
+            f"- La suerte de espionaje está limitada entre {espionage.SPY_LUCK_MIN:+.0%} y {espionage.SPY_LUCK_MAX:+.0%}.",
+            f"- La probabilidad final de éxito siempre queda entre {espionage.SPY_SUCCESS_CHANCE_MIN:.0%} y {espionage.SPY_SUCCESS_CHANCE_MAX:.0%}.",
+            f"- La detección usa una tirada independiente, limitada entre {espionage.SPY_DETECTION_CHANCE_MIN:.0%} y {espionage.SPY_DETECTION_CHANCE_MAX:.0%}; fallar añade {espionage.SPY_FAILURE_DETECTION_BONUS:.0%} puntos de riesgo de detección.",
+            f"- Los eventos aplican `spy_modifier` (base {balance.EVENT_DEFAULT_MODIFIERS['spy_modifier']:g}) al éxito y al nivel de inteligencia.",
+            "- Un éxito de nivel 1 revela recursos.",
+            f"- Con puntuación ≥ {espionage.SPY_TROOP_INTEL_THRESHOLD:g}, nivel 2 revela además las tropas.",
+            f"- Con puntuación ≥ {espionage.SPY_BUILDING_INTEL_THRESHOLD:g}, nivel 3 revela además los edificios y sus niveles.",
+            "- Una misión fallida no revela recursos, tropas, edificios ni la cantidad de espías defensores; los espías enviados se pierden.",
+            "- Una misión exitosa conserva todos los espías enviados y crea su marcha de retorno.",
+            "- El atacante siempre recibe su informe auditable con seed SHA-256; el defensor solo recibe informe si detectó la misión.",
+            f"- Cuando la misión es detectada, existe {balance.SPY_UNKNOWN_ATTACKER_CHANCE:.0%} de probabilidad de que el atacante figure como 'Desconocido'.",
+            "- Espionaje entre mundos, contra una ciudad propia o violando protección de novatos se rechaza antes de resolver la misión.",
         ]
     )
 

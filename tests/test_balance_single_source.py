@@ -7,6 +7,7 @@ from app.services import (
     building,
     combat,
     economy,
+    espionage,
     market,
     movement,
     production,
@@ -112,6 +113,24 @@ def test_balance_snapshot_is_mounted_and_versioned(client):
         balance.BARBARIAN_STARTING_RESOURCES
     )
 
+    spy_rules = payload["espionage"]
+    assert spy_rules["algorithm_version"] == espionage.ESPIONAGE_ALGORITHM_VERSION
+    assert spy_rules["luck_min"] == espionage.SPY_LUCK_MIN
+    assert spy_rules["luck_max"] == espionage.SPY_LUCK_MAX
+    assert spy_rules["success_chance_min"] == espionage.SPY_SUCCESS_CHANCE_MIN
+    assert spy_rules["success_chance_max"] == espionage.SPY_SUCCESS_CHANCE_MAX
+    assert spy_rules["detection_chance_min"] == espionage.SPY_DETECTION_CHANCE_MIN
+    assert spy_rules["detection_chance_max"] == espionage.SPY_DETECTION_CHANCE_MAX
+    assert spy_rules["failure_detection_bonus"] == espionage.SPY_FAILURE_DETECTION_BONUS
+    assert spy_rules["troop_intel_threshold"] == espionage.SPY_TROOP_INTEL_THRESHOLD
+    assert spy_rules["building_intel_threshold"] == espionage.SPY_BUILDING_INTEL_THRESHOLD
+    assert spy_rules["intel_levels"]["1"] == ["resources"]
+    assert spy_rules["intel_levels"]["2"] == ["resources", "troops"]
+    assert spy_rules["intel_levels"]["3"] == ["resources", "troops", "buildings"]
+    assert spy_rules["undetected_creates_defender_report"] is False
+    assert spy_rules["failed_mission_returns_spies"] is False
+    assert spy_rules["successful_mission_returns_spies"] is True
+
 
 def test_public_balance_views_use_same_version(client):
     troops_response = client.get("/public-api/troops")
@@ -177,5 +196,16 @@ def test_builtin_help_is_generated_from_current_balance():
     assert "Mina Profunda" not in beginner_article
     assert "conquista PvP está deshabilitada" in conquest_article
     assert "loot_modifier" in combat_article
-    assert "≥5" not in espionage_article
-    assert "recursos, tropas y niveles de edificios" in espionage_article
+
+    assert espionage.ESPIONAGE_ALGORITHM_VERSION in espionage_article
+    assert f"{espionage.SPY_LUCK_MIN:+.0%}" in espionage_article
+    assert f"{espionage.SPY_LUCK_MAX:+.0%}" in espionage_article
+    assert f"{espionage.SPY_SUCCESS_CHANCE_MIN:.0%}" in espionage_article
+    assert f"{espionage.SPY_SUCCESS_CHANCE_MAX:.0%}" in espionage_article
+    assert f"≥ {espionage.SPY_TROOP_INTEL_THRESHOLD:g}" in espionage_article
+    assert f"≥ {espionage.SPY_BUILDING_INTEL_THRESHOLD:g}" in espionage_article
+    assert "nivel 1 revela recursos" in espionage_article
+    assert "nivel 2 revela además las tropas" in espionage_article
+    assert "nivel 3 revela además los edificios" in espionage_article
+    assert "no revela recursos, tropas, edificios" in espionage_article
+    assert "el defensor solo recibe informe si detectó la misión" in espionage_article
