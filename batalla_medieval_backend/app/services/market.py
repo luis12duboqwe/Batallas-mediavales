@@ -1,4 +1,5 @@
 import logging
+import math
 from datetime import timedelta
 from typing import Dict, List
 
@@ -15,17 +16,52 @@ from . import production
 
 logger = logging.getLogger(__name__)
 
-# Compatibility aliases. Market balance lives only in ``balance``.
+# Compatibility aliases. Commerce numbers live only in ``balance``.
+COMMERCE_RULES_VERSION = balance.COMMERCE_RULES_VERSION
 MARKET_BUILDING_NAME = balance.MARKET_BUILDING_KEY
+BASE_MERCHANT_CAPACITY = balance.BASE_MERCHANT_CAPACITY
 MERCHANT_CAPACITY = balance.MERCHANT_CAPACITY_PER_LEVEL
 TRANSPORT_BASE_SPEED = balance.TRANSPORT_BASE_SPEED
+MIN_MARKET_OFFER_AMOUNT = balance.MIN_MARKET_OFFER_AMOUNT
+MAX_ACTIVE_MARKET_OFFERS = balance.MAX_ACTIVE_MARKET_OFFERS
+MARKET_RATIO_MIN = balance.MARKET_RATIO_MIN
+MARKET_RATIO_MAX = balance.MARKET_RATIO_MAX
+NPC_TRADE_RATE = balance.NPC_TRADE_RATE
+NPC_TRADE_MIN_AMOUNT = balance.NPC_TRADE_MIN_AMOUNT
+NPC_TRADE_MAX_AMOUNT = balance.NPC_TRADE_MAX_AMOUNT
+
+
+def commerce_rules_snapshot() -> Dict[str, object]:
+    """Expose the exact BM-0066 commerce contract consumed by this service."""
+
+    return {
+        "rules_version": COMMERCE_RULES_VERSION,
+        "available_from_start": True,
+        "building": MARKET_BUILDING_NAME,
+        "base_merchant_capacity": BASE_MERCHANT_CAPACITY,
+        "merchant_capacity_per_level": MERCHANT_CAPACITY,
+        "transport_base_speed": TRANSPORT_BASE_SPEED,
+        "merchant_capacity_released_on_return": True,
+        "overflow_returns_to_sender": True,
+        "min_offer_amount": MIN_MARKET_OFFER_AMOUNT,
+        "max_active_offers": MAX_ACTIVE_MARKET_OFFERS,
+        "market_ratio_min": MARKET_RATIO_MIN,
+        "market_ratio_max": MARKET_RATIO_MAX,
+        "npc_trade_rate": NPC_TRADE_RATE,
+        "npc_trade_min_amount": NPC_TRADE_MIN_AMOUNT,
+        "npc_trade_max_amount": NPC_TRADE_MAX_AMOUNT,
+    }
 
 
 def _get_market_capacity(city: models.City) -> int:
     market = next((b for b in city.buildings if b.name == MARKET_BUILDING_NAME), None)
-    if not market:
-        return 0
-    return market.level * MERCHANT_CAPACITY
+    market_level = max(int(market.level), 0) if market else 0
+    return BASE_MERCHANT_CAPACITY + market_level * MERCHANT_CAPACITY
+
+
+def _movement_resource_total(move: models.Movement) -> int:
+    resources = move.resources or {}
+    return sum(max(int(resources.get(resource, 0) or 0), 0) for resource in production.RESOURCE_FIELDS)
 
 
 def _get_available_merchants(db: Session, city: models.City) -> int:
@@ -40,12 +76,11 @@ def _get_available_merchants(db: Session, city: models.City) -> int:
         )
         .all()
     )
+    used_capacity = sum(_movement_resource_total(move) for move in ongoing_transports)
 
-    used_capacity = 0
-    for move in ongoing_transports:
-        res = move.resources or {}
-        used_capacity += sum(res.values())
-
+    # A merchant remains occupied until the empty/overflow return reaches the
+    # original sender. Return movements therefore point *to* this city and
+    # persist their reserved capacity as metadata in the movement JSON.
     returning_transports = (
         db.query(models.Movement)
         .filter(
@@ -55,17 +90,17 @@ def _get_available_merchants(db: Session, city: models.City) -> int:
         )
         .all()
     )
-    for move in returning_transports:
-        res = move.resources or {}
-        used_capacity += res.get("capacity", 0)
+    used_capacity += sum(
+        max(int((move.resources or {}).get("capacity", 0) or 0), 0)
+        for move in returning_transports
+    )
 
     active_offers = (
         db.query(models.MarketOffer)
         .filter(models.MarketOffer.city_id == city.id)
         .all()
     )
-    for offer in active_offers:
-        used_capacity += offer.offer_amount
+    used_capacity += sum(max(int(offer.offer_amount), 0) for offer in active_offers)
 
     return max(0, total_capacity - used_capacity)
 
@@ -83,6 +118,52 @@ def _normalize_transport_resources(resources: Dict[str, int]) -> Dict[str, int]:
     if not normalized:
         raise HTTPException(status_code=400, detail="Transport requires resources")
     return normalized
+
+
+def _validate_offer_contract(offer: schemas.MarketOfferCreate) -> None:
+    if offer.offer_type == offer.request_type:
+        raise HTTPException(status_code=400, detail="Offer and requested resources must be different")
+    if offer.offer_amount < MIN_MARKET_OFFER_AMOUNT or offer.request_amount < MIN_MARKET_OFFER_AMOUNT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Market offer amounts must be at least {MIN_MARKET_OFFER_AMOUNT}",
+        )
+    ratio = float(offer.request_amount) / float(offer.offer_amount)
+    if ratio < MARKET_RATIO_MIN or ratio > MARKET_RATIO_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Market ratio must stay between {MARKET_RATIO_MIN:g} and {MARKET_RATIO_MAX:g}",
+        )
+
+
+def _users_share_alliance(db: Session, *, seller_user_id: int, buyer_user_id: int, world_id: int) -> bool:
+    seller_alliances = {
+        row.alliance_id
+        for row in (
+            db.query(models.AllianceMember)
+            .join(models.Alliance)
+            .filter(
+                models.AllianceMember.user_id == seller_user_id,
+                models.Alliance.world_id == world_id,
+            )
+            .all()
+        )
+    }
+    if not seller_alliances:
+        return False
+    buyer_alliances = {
+        row.alliance_id
+        for row in (
+            db.query(models.AllianceMember)
+            .join(models.Alliance)
+            .filter(
+                models.AllianceMember.user_id == buyer_user_id,
+                models.Alliance.world_id == world_id,
+            )
+            .all()
+        )
+    }
+    return bool(seller_alliances & buyer_alliances)
 
 
 def _create_transport_uncommitted(
@@ -104,6 +185,8 @@ def _create_transport_uncommitted(
         raise HTTPException(status_code=400, detail="Target city is not in the same world")
     if origin_city.id == target_city.id:
         raise HTTPException(status_code=400, detail="Origin and target city must be different")
+    if target_city.owner_id is None:
+        raise HTTPException(status_code=400, detail="Resources can only be transported to player cities")
 
     modifiers = event_service.get_active_modifiers(db, world_id=origin_city.world_id)
     effective_speed = TRANSPORT_BASE_SPEED * modifiers.get("movement_speed", 1.0)
@@ -161,10 +244,23 @@ def _audit_transport_after_commit(
 def create_offer(
     db: Session, city: models.City, offer: schemas.MarketOfferCreate
 ) -> models.MarketOffer:
-    """Reserve resources for a market offer under the city row lock."""
+    """Reserve resources for one bounded market offer under the city row lock."""
 
+    _validate_offer_contract(offer)
     city, production_gains = production.lock_and_recalculate_resources(db, city)
     db.expire(city, ["buildings"])
+
+    active_offer_count = (
+        db.query(models.MarketOffer)
+        .filter(models.MarketOffer.city_id == city.id)
+        .count()
+    )
+    if active_offer_count >= MAX_ACTIVE_MARKET_OFFERS:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum active market offers reached ({MAX_ACTIVE_MARKET_OFFERS})",
+        )
 
     if getattr(city, offer.offer_type) < offer.offer_amount:
         db.rollback()
@@ -203,34 +299,51 @@ def npc_trade(
     offer_type: str,
     request_type: str,
     amount: int,
-):
-    """Instant 1:1 trade with NPC, serialized per city."""
+) -> Dict[str, object]:
+    """Bounded instant NPC conversion with an explicit resource sink."""
 
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be positive")
+    amount = int(amount)
+    if amount < NPC_TRADE_MIN_AMOUNT or amount > NPC_TRADE_MAX_AMOUNT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"NPC trade amount must be between {NPC_TRADE_MIN_AMOUNT} and {NPC_TRADE_MAX_AMOUNT}",
+        )
     if offer_type == request_type:
         raise HTTPException(status_code=400, detail="Resources must be different")
     if offer_type not in production.RESOURCE_FIELDS or request_type not in production.RESOURCE_FIELDS:
         raise HTTPException(status_code=400, detail="Invalid resource type")
 
     city, production_gains = production.lock_and_recalculate_resources(db, city)
+    db.expire(city, ["buildings"])
 
+    if _get_available_merchants(db, city) < amount:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Not enough merchant capacity")
     if getattr(city, offer_type) < amount:
         db.rollback()
         raise HTTPException(status_code=400, detail="Insufficient resources")
 
-    setattr(city, offer_type, getattr(city, offer_type) - amount)
+    received_amount = int(math.floor(amount * NPC_TRADE_RATE))
     storage_limit = production.get_storage_limit(city)
-    requested_balance = getattr(city, request_type) + amount
+    requested_balance = getattr(city, request_type) + received_amount
     if requested_balance > storage_limit:
         db.rollback()
         raise HTTPException(status_code=400, detail="Not enough storage capacity")
+
+    setattr(city, offer_type, getattr(city, offer_type) - amount)
     setattr(city, request_type, requested_balance)
 
     db.commit()
     db.refresh(city)
     production.record_resource_gains(db, city, production_gains)
-    return city
+    return {
+        "rules_version": COMMERCE_RULES_VERSION,
+        "offered_resource": offer_type,
+        "offered_amount": amount,
+        "received_resource": request_type,
+        "received_amount": received_amount,
+        "rate": NPC_TRADE_RATE,
+    }
 
 
 def get_offers(
@@ -241,6 +354,8 @@ def get_offers(
     skip: int = 0,
     limit: int = 100,
 ) -> List[models.MarketOffer]:
+    skip = max(int(skip), 0)
+    limit = min(max(int(limit), 1), 100)
     query = (
         db.query(models.MarketOffer)
         .join(models.City)
@@ -293,7 +408,7 @@ def get_offers(
 
 
 def accept_offer(db: Session, buyer_city: models.City, offer_id: int):
-    """Atomically consume one offer and create both resource transports."""
+    """Atomically consume one authorized offer and create both transports."""
 
     production_gains: Dict[str, float] = {}
     try:
@@ -325,8 +440,17 @@ def accept_offer(db: Session, buyer_city: models.City, offer_id: int):
             raise HTTPException(status_code=404, detail="Market city not found")
         if seller_city.world_id != locked_buyer.world_id:
             raise HTTPException(status_code=400, detail="Offer is not in the same world")
+        if seller_city.owner_id is None or locked_buyer.owner_id is None:
+            raise HTTPException(status_code=400, detail="Market offers require player cities")
         if seller_city.owner_id == locked_buyer.owner_id:
             raise HTTPException(status_code=400, detail="Cannot accept your own offer")
+        if offer.is_alliance_only and not _users_share_alliance(
+            db,
+            seller_user_id=seller_city.owner_id,
+            buyer_user_id=locked_buyer.owner_id,
+            world_id=locked_buyer.world_id,
+        ):
+            raise HTTPException(status_code=403, detail="Offer is restricted to the seller alliance")
 
         locked_buyer, production_gains = production.recalculate_resources(
             db,
@@ -417,7 +541,7 @@ def cancel_offer(db: Session, city: models.City, offer_id: int):
 def send_resources(
     db: Session, origin_city: models.City, request: schemas.TransportRequest
 ):
-    """Reserve resources and create one transport in one transaction.
+    """Reserve resources and create one bounded transport in one transaction.
 
     Both city rows are locked in deterministic id order. Reciprocal transports
     (A→B and B→A) therefore cannot deadlock while PostgreSQL checks the movement
@@ -455,6 +579,8 @@ def send_resources(
             raise HTTPException(status_code=404, detail="Target city not found")
         if target_city.world_id != locked_origin.world_id:
             raise HTTPException(status_code=400, detail="Target city is not in the same world")
+        if target_city.owner_id is None:
+            raise HTTPException(status_code=400, detail="Resources can only be transported to player cities")
 
         locked_origin, production_gains = production.recalculate_resources(
             db,
