@@ -68,6 +68,20 @@ def _disable_resolution_side_effects(monkeypatch):
     )
 
 
+def _spy_seed_for(*, attacker_spies: int, defender_spies: int, predicate):
+    for value in range(10_000):
+        seed = f"{value:064x}"
+        outcome = espionage.resolve_outcome(
+            attacker_spies=attacker_spies,
+            defender_spies=defender_spies,
+            spy_modifier=1.0,
+            seed=seed,
+        )
+        if predicate(outcome):
+            return seed
+    raise AssertionError("Could not find deterministic espionage seed")
+
+
 def test_two_player_attack_resolves_reports_and_returns_without_conquest(
     db_session,
     city,
@@ -140,7 +154,7 @@ def test_two_player_attack_resolves_reports_and_returns_without_conquest(
     assert returned.quantity == return_move.troops["basic_infantry"]
 
 
-def test_two_player_spy_success_creates_reports_and_returns_surviving_spies(
+def test_two_player_spy_success_creates_detected_reports_and_returns_surviving_spies(
     db_session,
     city,
     monkeypatch,
@@ -153,7 +167,12 @@ def test_two_player_spy_success_creates_reports_and_returns_surviving_spies(
         y=31,
     )
     _disable_resolution_side_effects(monkeypatch)
-    monkeypatch.setattr(espionage.random, "random", lambda: 0.0)
+    seed = _spy_seed_for(
+        attacker_spies=2,
+        defender_spies=0,
+        predicate=lambda outcome: outcome["success"] and outcome["detected"],
+    )
+    monkeypatch.setattr(espionage, "derive_seed", lambda *args, **kwargs: seed)
 
     outgoing = _due_movement(
         db_session,
@@ -165,7 +184,18 @@ def test_two_player_spy_success_creates_reports_and_returns_surviving_spies(
     movement_service.resolve_due_movements(db_session)
 
     db_session.expire_all()
-    assert db_session.query(models.Report).filter_by(report_type="spy").count() == 2
+    spy_reports = (
+        db_session.query(models.Report)
+        .filter_by(report_type="spy")
+        .order_by(models.Report.id.asc())
+        .all()
+    )
+    assert len(spy_reports) == 2
+    payloads = [json.loads(str(report.content)) for report in spy_reports]
+    assert {payload["role"] for payload in payloads} == {"attacker", "defender"}
+    assert all(payload["detected"] is True for payload in payloads)
+    assert all(payload["algorithm_version"] == espionage.ESPIONAGE_ALGORITHM_VERSION for payload in payloads)
+
     return_move = (
         db_session.query(models.Movement)
         .filter_by(target_city_id=city.id, movement_type="return", status="ongoing")
