@@ -39,6 +39,7 @@ class City(Base):
         "BuildingQueue", back_populates="city", cascade="all, delete-orphan", uselist=True
     )
     troop_queue = relationship("TroopQueue", back_populates="city", cascade="all, delete-orphan", uselist=True)
+    research_queue = relationship("ResearchQueue", back_populates="city", cascade="all, delete-orphan", uselist=True)
     reports = relationship("Report", back_populates="city", foreign_keys="Report.city_id", cascade="all, delete-orphan")
     attacker_reports = relationship(
         "Report",
