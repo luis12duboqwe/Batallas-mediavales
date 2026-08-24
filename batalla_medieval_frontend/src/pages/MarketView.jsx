@@ -19,14 +19,21 @@ const MarketView = () => {
   const { currentCity, loadCity } = useCityStore();
   const [activeTab, setActiveTab] = useState('send');
   const [offers, setOffers] = useState([]);
+  const [commerceRules, setCommerceRules] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageKind, setMessageKind] = useState('status');
   const [filterAlliance, setFilterAlliance] = useState(false);
 
   const [transport, setTransport] = useState({ ...EMPTY_TRANSPORT });
-  const [newOffer, setNewOffer] = useState({ offer_type: 'wood', offer_amount: 1000, request_type: 'stone', request_amount: 1000 });
-  const [npcTrade, setNpcTrade] = useState({ offer_type: 'wood', request_type: 'stone', amount: 1000 });
+  const [newOffer, setNewOffer] = useState({
+    offer_type: 'wood',
+    offer_amount: 100,
+    request_type: 'stone',
+    request_amount: 100,
+    is_alliance_only: false,
+  });
+  const [npcTrade, setNpcTrade] = useState({ offer_type: 'wood', request_type: 'stone', amount: 100 });
 
   const showSuccess = (text) => {
     setMessageKind('status');
@@ -37,6 +44,20 @@ const MarketView = () => {
     setMessageKind('error');
     setMessage(error.response?.data?.detail || fallback);
   };
+
+  useEffect(() => {
+    let mounted = true;
+    api.getBalance()
+      .then((snapshot) => {
+        if (mounted) setCommerceRules(snapshot?.market || null);
+      })
+      .catch((error) => {
+        console.warn('Unable to load commerce rules', error);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const fetchOffers = useCallback(async () => {
     if (!currentCity) return;
@@ -68,7 +89,7 @@ const MarketView = () => {
       await api.sendResources(currentCity.id, currentCity.world_id, transport);
       setTransport({ ...EMPTY_TRANSPORT });
       await refreshAfterMutation();
-      showSuccess('Recursos enviados correctamente.');
+      showSuccess('Recursos enviados. La capacidad del comerciante se libera cuando regrese.');
     } catch (error) {
       showError(error, 'Error al enviar recursos.');
     } finally {
@@ -99,7 +120,7 @@ const MarketView = () => {
     try {
       await api.acceptOffer(offerId, currentCity.id, currentCity.world_id);
       await refreshAfterMutation({ refreshOffers: true });
-      showSuccess('Oferta aceptada.');
+      showSuccess('Oferta aceptada. Ambos envíos viajan mediante comerciantes.');
     } catch (error) {
       showError(error, 'Error al aceptar oferta.');
     } finally {
@@ -128,7 +149,7 @@ const MarketView = () => {
     setLoading(true);
     setMessage('');
     try {
-      await api.npcTrade(
+      const response = await api.npcTrade(
         currentCity.id,
         currentCity.world_id,
         npcTrade.offer_type,
@@ -136,7 +157,9 @@ const MarketView = () => {
         npcTrade.amount,
       );
       await refreshAfterMutation();
-      showSuccess('Intercambio NPC realizado (1:1).');
+      showSuccess(
+        `Intercambio NPC: entregaste ${response.data.offered_amount} ${resourceLabel(response.data.offered_resource)} y recibiste ${response.data.received_amount} ${resourceLabel(response.data.received_resource)}.`,
+      );
     } catch (error) {
       showError(error, 'Error en intercambio NPC.');
     } finally {
@@ -148,6 +171,13 @@ const MarketView = () => {
 
   const otherOffers = offers.filter((offer) => offer.city_id !== currentCity.id);
   const myOffers = offers.filter((offer) => offer.city_id === currentCity.id);
+  const npcRate = commerceRules?.npc_trade_rate ?? null;
+  const npcReceivedPreview = npcRate === null
+    ? '—'
+    : Math.floor((Number(npcTrade.amount) || 0) * npcRate);
+  const minOfferAmount = commerceRules?.min_offer_amount ?? 1;
+  const npcMinAmount = commerceRules?.npc_trade_min_amount ?? 1;
+  const npcMaxAmount = commerceRules?.npc_trade_max_amount;
   const tabs = [
     ['send', 'Enviar Recursos'],
     ['offers', 'Mercado'],
@@ -157,7 +187,25 @@ const MarketView = () => {
 
   return (
     <div className="p-3 sm:p-6 max-w-4xl mx-auto pb-24 md:pb-20">
-      <h1 className="text-2xl sm:text-3xl font-bold text-amber-500 mb-6">Mercado</h1>
+      <h1 className="text-2xl sm:text-3xl font-bold text-amber-500 mb-4">Mercado</h1>
+
+      {commerceRules && (
+        <section
+          className="card bg-black/40 border border-amber-900/30 p-4 mb-6 text-sm text-amber-100"
+          data-testid="commerce-rules"
+          data-rules-version={commerceRules.rules_version}
+          aria-label="Reglas comerciales activas"
+        >
+          <div className="font-semibold">Comercio disponible desde el inicio</div>
+          <div className="text-gray-300 mt-1">
+            Capacidad base {commerceRules.base_merchant_capacity}; la Plaza Comercial añade {commerceRules.merchant_capacity_per_level} por nivel.
+            Los comerciantes permanecen ocupados hasta regresar y un envío que no cabe completo vuelve al remitente sin perder recursos.
+          </div>
+          <div className="text-gray-400 mt-1">
+            Máximo {commerceRules.max_active_offers} ofertas activas · ratio solicitado/ofrecido entre {commerceRules.market_ratio_min} y {commerceRules.market_ratio_max}.
+          </div>
+        </section>
+      )}
 
       <div className="flex gap-1 overflow-x-auto rounded-lg bg-black/40 p-1 mb-6" role="tablist" aria-label="Secciones del mercado">
         {tabs.map(([id, label]) => (
@@ -187,6 +235,9 @@ const MarketView = () => {
       {activeTab === 'send' && (
         <section className="card bg-black/40 border border-amber-900/30 p-4 sm:p-6" aria-labelledby="market-send-heading">
           <h2 id="market-send-heading" className="text-xl font-bold text-amber-100 mb-4">Enviar Recursos</h2>
+          <p className="text-sm text-gray-300 mb-4">
+            El envío es todo-o-devuelto: si el almacén destino no tiene espacio para el cargamento completo cuando llega, los recursos regresan contigo.
+          </p>
           <form onSubmit={handleSendResources} className="space-y-4">
             <div>
               <label htmlFor="market-target-city" className="label">ID Ciudad Destino</label>
@@ -248,6 +299,7 @@ const MarketView = () => {
                   <th>Ofrece</th>
                   <th>Pide</th>
                   <th>Ratio</th>
+                  <th>Acceso</th>
                   <th>Acción</th>
                 </tr>
               </thead>
@@ -256,7 +308,8 @@ const MarketView = () => {
                   <tr key={offer.id}>
                     <td className="text-green-400">{offer.offer_amount} {resourceLabel(offer.offer_type)}</td>
                     <td className="text-red-400">{offer.request_amount} {resourceLabel(offer.request_type)}</td>
-                    <td>{offer.request_amount > 0 ? (offer.offer_amount / offer.request_amount).toFixed(2) : '—'}</td>
+                    <td>{offer.offer_amount > 0 ? (offer.request_amount / offer.offer_amount).toFixed(2) : '—'}</td>
+                    <td>{offer.is_alliance_only ? 'Alianza' : 'Pública'}</td>
                     <td>
                       <button
                         type="button"
@@ -270,7 +323,7 @@ const MarketView = () => {
                   </tr>
                 ))}
                 {otherOffers.length === 0 && (
-                  <tr><td colSpan="4" className="text-center text-gray-400">No hay ofertas disponibles</td></tr>
+                  <tr><td colSpan="5" className="text-center text-gray-400">No hay ofertas disponibles</td></tr>
                 )}
               </tbody>
             </table>
@@ -281,7 +334,12 @@ const MarketView = () => {
       {activeTab === 'my_offers' && (
         <div className="space-y-6">
           <section className="card bg-black/40 border border-amber-900/30 p-4 sm:p-6" aria-labelledby="market-create-heading">
-            <h2 id="market-create-heading" className="text-xl font-bold text-amber-100 mb-4">Crear Oferta</h2>
+            <h2 id="market-create-heading" className="text-xl font-bold text-amber-100 mb-2">Crear Oferta</h2>
+            {commerceRules && (
+              <p className="text-sm text-gray-300 mb-4">
+                Mínimo {commerceRules.min_offer_amount} por lado; máximo {commerceRules.max_active_offers} ofertas activas.
+              </p>
+            )}
             <form onSubmit={handleCreateOffer} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
               <fieldset>
                 <legend className="label">Ofrezco</legend>
@@ -290,7 +348,7 @@ const MarketView = () => {
                   <input
                     id="market-offer-amount"
                     type="number"
-                    min="1"
+                    min={minOfferAmount}
                     inputMode="numeric"
                     className="input input-bordered w-full bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                     value={newOffer.offer_amount}
@@ -315,7 +373,7 @@ const MarketView = () => {
                   <input
                     id="market-request-amount"
                     type="number"
-                    min="1"
+                    min={minOfferAmount}
                     inputMode="numeric"
                     className="input input-bordered w-full bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                     value={newOffer.request_amount}
@@ -333,6 +391,15 @@ const MarketView = () => {
                   </select>
                 </div>
               </fieldset>
+              <label className="label cursor-pointer justify-start gap-3 md:col-span-2">
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-primary"
+                  checked={newOffer.is_alliance_only}
+                  onChange={(event) => setNewOffer({ ...newOffer, is_alliance_only: event.target.checked })}
+                />
+                <span className="label-text text-amber-200">Solo miembros de mi alianza pueden aceptar esta oferta</span>
+              </label>
               <button type="submit" className="btn btn-primary w-full md:col-span-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-200" disabled={loading}>
                 Crear Oferta
               </button>
@@ -347,6 +414,7 @@ const MarketView = () => {
                   <tr>
                     <th>Ofrezco</th>
                     <th>Pido</th>
+                    <th>Acceso</th>
                     <th>Acción</th>
                   </tr>
                 </thead>
@@ -355,6 +423,7 @@ const MarketView = () => {
                     <tr key={offer.id}>
                       <td className="text-green-400">{offer.offer_amount} {resourceLabel(offer.offer_type)}</td>
                       <td className="text-red-400">{offer.request_amount} {resourceLabel(offer.request_type)}</td>
+                      <td>{offer.is_alliance_only ? 'Alianza' : 'Pública'}</td>
                       <td>
                         <button
                           type="button"
@@ -368,7 +437,7 @@ const MarketView = () => {
                     </tr>
                   ))}
                   {myOffers.length === 0 && (
-                    <tr><td colSpan="3" className="text-center text-gray-400">No tienes ofertas activas</td></tr>
+                    <tr><td colSpan="4" className="text-center text-gray-400">No tienes ofertas activas</td></tr>
                   )}
                 </tbody>
               </table>
@@ -379,8 +448,13 @@ const MarketView = () => {
 
       {activeTab === 'npc' && (
         <section className="card bg-black/40 border border-amber-900/30 p-4 sm:p-6" aria-labelledby="market-npc-heading">
-          <h2 id="market-npc-heading" className="text-xl font-bold text-amber-100 mb-4">Comerciante NPC (Ratio 1:1)</h2>
-          <p className="text-gray-300 mb-4 text-sm">Intercambia recursos instantáneamente con el comerciante del juego.</p>
+          <h2 id="market-npc-heading" className="text-xl font-bold text-amber-100 mb-2">
+            Comerciante NPC {npcRate === null ? '' : `(${Math.round(npcRate * 100)}% de retorno)`}
+          </h2>
+          <p className="text-gray-300 mb-4 text-sm">
+            Conversión instantánea con pérdida controlada para evitar una fuente infinita de intercambio.
+            {commerceRules && ` Por operación puedes entregar entre ${commerceRules.npc_trade_min_amount} y ${commerceRules.npc_trade_max_amount}.`}
+          </p>
           <form onSubmit={handleNpcTrade} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
             <fieldset>
               <legend className="label">Dar</legend>
@@ -389,7 +463,8 @@ const MarketView = () => {
                 <input
                   id="market-npc-amount"
                   type="number"
-                  min="1"
+                  min={npcMinAmount}
+                  max={npcMaxAmount}
                   inputMode="numeric"
                   className="input input-bordered w-full bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                   value={npcTrade.amount}
@@ -413,9 +488,10 @@ const MarketView = () => {
                 <label htmlFor="market-npc-receive-amount" className="sr-only">Cantidad recibida</label>
                 <input
                   id="market-npc-receive-amount"
-                  type="number"
+                  data-testid="market-npc-received"
+                  type="text"
                   className="input input-bordered w-full bg-black/50"
-                  value={npcTrade.amount}
+                  value={npcReceivedPreview}
                   disabled
                 />
                 <label htmlFor="market-npc-request-resource" className="sr-only">Recurso recibido</label>
