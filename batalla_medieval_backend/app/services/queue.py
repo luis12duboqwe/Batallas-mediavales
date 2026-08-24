@@ -27,42 +27,10 @@ def _city_with_owner(db: Session, city_id: int):
     )
 
 
-def _settle_due_military_economy(db: Session) -> list[tuple[int, dict[str, float]]]:
-    """Accrue production/upkeep before due military state transitions.
-
-    A completed training queue starts consuming upkeep only after completion.
-    Likewise combat/spy losses or an arriving reinforcement must not change the
-    upkeep rate retroactively for the elapsed interval before the worker handles
-    that transition. We therefore lock every affected city in stable id order
-    and advance its resource clock using the pre-transition troop/movement state.
-
-    The enclosing movement resolver commits these settlements together with the
-    military mutations. Returned gains are recorded only after that commit.
-    """
-
-    now = utc_now()
-    due_training_city_ids = {
-        city_id
-        for (city_id,) in (
-            db.query(models.TroopQueue.city_id)
-            .filter(models.TroopQueue.finish_time <= now)
-            .all()
-        )
-    }
-    due_movements = (
-        db.query(models.Movement.origin_city_id, models.Movement.target_city_id)
-        .filter(
-            models.Movement.arrival_time <= now,
-            models.Movement.status == "ongoing",
-        )
-        .all()
-    )
-    city_ids = set(due_training_city_ids)
-    for origin_city_id, target_city_id in due_movements:
-        if origin_city_id is not None:
-            city_ids.add(origin_city_id)
-        if target_city_id is not None:
-            city_ids.add(target_city_id)
+def _settle_cities(
+    db: Session, city_ids: set[int]
+) -> list[tuple[int, dict[str, float]]]:
+    """Advance resource clocks under city locks using current military state."""
 
     settlements: list[tuple[int, dict[str, float]]] = []
     for city_id in sorted(city_ids):
@@ -85,10 +53,60 @@ def _settle_due_military_economy(db: Session) -> list[tuple[int, dict[str, float
     return settlements
 
 
+def _settle_due_training_economy(
+    db: Session,
+) -> list[tuple[int, dict[str, float]]]:
+    """Settle upkeep before due queues become permanent troops.
+
+    Cancellation already locks troop queue then city, so the worker follows the
+    same order to avoid a queue↔city lock inversion under PostgreSQL.
+    """
+
+    now = utc_now()
+    due_queues = (
+        db.query(models.TroopQueue)
+        .filter(models.TroopQueue.finish_time <= now)
+        .order_by(models.TroopQueue.id.asc())
+        .with_for_update(skip_locked=True)
+        .all()
+    )
+    return _settle_cities(db, {queue.city_id for queue in due_queues})
+
+
+def _settle_due_movement_economy(
+    db: Session,
+) -> list[tuple[int, dict[str, float]]]:
+    """Settle upkeep before due movements change troop ownership/counts.
+
+    Movement rows are locked before city rows, matching the resolver's existing
+    first lock. Stable city-id ordering prevents two overlapping movements from
+    taking city locks in opposite orders.
+    """
+
+    now = utc_now()
+    due_movements = (
+        db.query(models.Movement)
+        .filter(
+            models.Movement.arrival_time <= now,
+            models.Movement.status == "ongoing",
+        )
+        .order_by(models.Movement.id.asc())
+        .with_for_update(skip_locked=True)
+        .all()
+    )
+    city_ids: set[int] = set()
+    for due_movement in due_movements:
+        if due_movement.origin_city_id is not None:
+            city_ids.add(due_movement.origin_city_id)
+        if due_movement.target_city_id is not None:
+            city_ids.add(due_movement.target_city_id)
+    return _settle_cities(db, city_ids)
+
+
 def _record_settled_resource_gains(
     db: Session, settlements: list[tuple[int, dict[str, float]]]
 ) -> None:
-    """Record passive gains after the military transaction has committed."""
+    """Record passive gains only after the corresponding transition commits."""
 
     for city_id, gains in settlements:
         city = db.query(models.City).filter(models.City.id == city_id).one_or_none()
@@ -102,14 +120,18 @@ def process_all_queues(db: Session) -> dict:
     finished_buildings = building.process_building_queues(db)
     finished_research = research.process_research_queues(db)
 
-    # Settle the economic clock before troop completion, battle losses, spy
-    # losses, reinforcement arrival or any other due movement changes which
-    # units are responsible for upkeep. The city locks remain held until the
-    # military processors commit.
-    military_settlements = _settle_due_military_economy(db)
+    # Training completion changes when upkeep starts. Settle the city's clock
+    # while the troops are still only a reservation, then complete atomically.
+    training_settlements = _settle_due_training_economy(db)
     finished_troops = troops.process_troop_queues(db)
+    _record_settled_resource_gains(db, training_settlements)
+
+    # Combat/spy losses and reinforcement arrival can change troop counts or
+    # which city pays upkeep. Settle both endpoints while the movement is still
+    # ongoing, then resolve the transition under the held movement/city locks.
+    movement_settlements = _settle_due_movement_economy(db)
     finished_movements = movement.resolve_due_movements(db)
-    _record_settled_resource_gains(db, military_settlements)
+    _record_settled_resource_gains(db, movement_settlements)
 
     for finished in finished_buildings:
         city = _city_with_owner(db, finished["city_id"])
