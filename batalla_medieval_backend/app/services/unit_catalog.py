@@ -8,7 +8,7 @@ from typing import Any, Dict
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import balance
+from . import balance, upkeep as upkeep_service
 
 # Compatibility aliases: definitions live only in ``balance``.
 UNIT_ORDER = balance.UNIT_ORDER
@@ -145,6 +145,15 @@ def has_population_capacity(
     return _unit_population(unit_type, quantity) <= get_population_available(db, city)
 
 
+def has_upkeep_capacity(
+    db: Session,
+    city: models.City,
+    unit_type: str,
+    quantity: int,
+) -> bool:
+    return upkeep_service.can_reserve_upkeep(db, city, unit_type, quantity)
+
+
 def _can_afford(city: models.City, cost: Dict[str, float]) -> bool:
     return all(float(getattr(city, resource)) >= amount for resource, amount in cost.items())
 
@@ -155,6 +164,7 @@ def get_availability(db: Session, city: models.City) -> list[dict]:
     result = []
     population_available = get_population_available(db, city)
     population_capacity = get_population_capacity(city)
+    upkeep_status = upkeep_service.get_upkeep_status(db, city)
     active_research = (
         db.query(models.ResearchQueue)
         .filter(models.ResearchQueue.city_id == city.id)
@@ -174,9 +184,14 @@ def get_availability(db: Session, city: models.City) -> list[dict]:
         researchable = bool(definition["researchable"])
         population_cost = int(definition.get("population", 1))
         population_capacity_met = population_cost <= population_available
+        unit_upkeep = float(definition.get("upkeep_per_hour", 0.0))
+        upkeep_capacity_met = unit_upkeep <= float(
+            upkeep_status["available_per_hour"]
+        ) + 1e-9
         research_queued = bool(
             active_research is not None and active_research.tech_name == unit_type
         )
+        combat = balance.UNIT_COMBAT_STATS[unit_type]
 
         result.append(
             {
@@ -195,11 +210,24 @@ def get_availability(db: Session, city: models.City) -> list[dict]:
                 "population_capacity": population_capacity,
                 "population_available": population_available,
                 "population_capacity_met": population_capacity_met,
-                "upkeep_per_hour": float(definition.get("upkeep_per_hour", 0.0)),
+                "upkeep_per_hour": unit_upkeep,
+                "upkeep_used_per_hour": float(upkeep_status["used_per_hour"]),
+                "upkeep_reserved_per_hour": float(upkeep_status["reserved_per_hour"]),
+                "upkeep_capacity_per_hour": float(upkeep_status["capacity_per_hour"]),
+                "upkeep_available_per_hour": float(upkeep_status["available_per_hour"]),
+                "upkeep_capacity_met": upkeep_capacity_met,
+                "movement_speed": float(balance.UNIT_SPEED[unit_type]),
+                "carry_capacity": int(combat.get("carry", 0)),
+                "attack": int(combat.get("attack", 0)),
+                "defense_infantry": int(combat.get("def_inf", 0)),
+                "defense_cavalry": int(combat.get("def_cav", 0)),
+                "defense_siege": int(combat.get("def_siege", 0)),
+                "combat_type": str(combat.get("type", "infantry")),
                 "can_train": (
                     researched
                     and train_requirements_met
                     and population_capacity_met
+                    and upkeep_capacity_met
                     and _can_afford(city, definition["training_cost"])
                 ),
                 "can_research": (
