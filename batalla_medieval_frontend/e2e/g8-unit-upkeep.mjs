@@ -161,7 +161,7 @@ try {
     }
   }
 
-  await page.getByRole('button', { name: /Cancelar entrenamiento/i }).click();
+  await page.getByTestId(`cancel-troop-${queue.id}`).click();
   const finalSnapshot = await waitForSnapshot(
     (snapshot) => snapshot.status.troop_queue.length === 0,
     'Noble training cancellation',
