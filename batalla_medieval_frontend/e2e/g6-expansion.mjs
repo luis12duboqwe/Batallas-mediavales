@@ -80,14 +80,21 @@ try {
     (city) => city.name === PROMOTION_CAMP && city.settlement_type === 'camp',
   );
   if (!preparedCamp) {
-    failures.push('Prepared promotion camp is missing');
+    throw new Error('Prepared promotion camp is missing');
   }
 
   await page.goto(`${BASE_URL}/expansion`, { waitUntil: 'networkidle' });
   await page.getByTestId('expansion-view').waitFor({ state: 'visible' });
-  await page.getByText(PROMOTION_CAMP, { exact: true }).waitFor({ state: 'visible' });
 
-  const campCard = page.locator('article').filter({ hasText: PROMOTION_CAMP });
+  // Target the durable fixture identity rather than presentation text. The card
+  // intentionally decorates the name with a camp emoji, so exact visible text
+  // is not a stable selector for this accepted journey.
+  const campCard = page.getByTestId(`camp-${preparedCamp.id}`);
+  await campCard.waitFor({ state: 'visible' });
+  const renderedCampText = await campCard.textContent();
+  if (!renderedCampText?.includes(PROMOTION_CAMP)) {
+    failures.push(`Promotion camp card rendered unexpected text: ${renderedCampText}`);
+  }
   await campCard.getByRole('button', { name: 'Promover' }).click();
   await page.getByText('Campamento promovido a ciudad.', { exact: true }).waitFor({ state: 'visible' });
 
