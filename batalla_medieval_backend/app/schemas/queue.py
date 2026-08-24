@@ -39,7 +39,17 @@ class TroopQueueRead(TroopQueueBase):
     finish_time: datetime
 
 
+class ResearchQueueRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    city_id: int
+    tech_name: str
+    finish_time: datetime
+
+
 class QueueStatus(BaseModel):
     building_queues: list[BuildingQueueRead]
     troop_queues: list[TroopQueueRead]
+    research_queues: list[ResearchQueueRead]
     movements: list[MovementRead]
