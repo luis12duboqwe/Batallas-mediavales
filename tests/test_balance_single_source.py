@@ -7,6 +7,7 @@ from app.services import (
     building,
     combat,
     economy,
+    espionage,
     market,
     movement,
     production,
@@ -111,6 +112,24 @@ def test_balance_snapshot_is_mounted_and_versioned(client):
     assert payload["pve_alpha"]["barbarian_starting_resources"] == (
         balance.BARBARIAN_STARTING_RESOURCES
     )
+
+    spy_rules = payload["espionage"]
+    assert spy_rules["algorithm_version"] == espionage.ESPIONAGE_ALGORITHM_VERSION
+    assert spy_rules["luck_min"] == espionage.SPY_LUCK_MIN
+    assert spy_rules["luck_max"] == espionage.SPY_LUCK_MAX
+    assert spy_rules["success_chance_min"] == espionage.SPY_SUCCESS_CHANCE_MIN
+    assert spy_rules["success_chance_max"] == espionage.SPY_SUCCESS_CHANCE_MAX
+    assert spy_rules["detection_chance_min"] == espionage.SPY_DETECTION_CHANCE_MIN
+    assert spy_rules["detection_chance_max"] == espionage.SPY_DETECTION_CHANCE_MAX
+    assert spy_rules["failure_detection_bonus"] == espionage.SPY_FAILURE_DETECTION_BONUS
+    assert spy_rules["troop_intel_threshold"] == espionage.SPY_TROOP_INTEL_THRESHOLD
+    assert spy_rules["building_intel_threshold"] == espionage.SPY_BUILDING_INTEL_THRESHOLD
+    assert spy_rules["intel_levels"]["1"] == ["resources"]
+    assert spy_rules["intel_levels"]["2"] == ["resources", "troops"]
+    assert spy_rules["intel_levels"]["3"] == ["resources", "troops", "buildings"]
+    assert spy_rules["undetected_creates_defender_report"] is False
+    assert spy_rules["failed_mission_returns_spies"] is False
+    assert spy_rules["successful_mission_returns_spies"] is True
 
 
 def test_public_balance_views_use_same_version(client):
