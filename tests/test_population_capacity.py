@@ -3,24 +3,31 @@ from datetime import timedelta
 import pytest
 
 from app import models
-from app.services import troops, unit_catalog
+from app.services import balance, troops, unit_catalog
 from app.utils import utc_now
 
 
 def test_training_rejects_population_overflow_without_spending(db_session, city):
     city.population_max = 5
-    city.wood = city.clay = city.iron = 5000
+    for resource in balance.RESOURCE_FIELDS:
+        setattr(city, resource, 5000.0)
     db_session.add(models.Building(city_id=city.id, name="barracks", level=1))
     db_session.commit()
     db_session.refresh(city)
 
-    before = (city.wood, city.clay, city.iron)
+    before = {
+        resource: float(getattr(city, resource))
+        for resource in balance.RESOURCE_FIELDS
+    }
 
     with pytest.raises(ValueError, match="population capacity"):
         troops.queue_training(db_session, city, "basic_infantry", 6)
 
     db_session.refresh(city)
-    assert (city.wood, city.clay, city.iron) == before
+    assert {
+        resource: float(getattr(city, resource))
+        for resource in balance.RESOURCE_FIELDS
+    } == before
     assert db_session.query(models.TroopQueue).filter_by(city_id=city.id).count() == 0
 
 
@@ -94,5 +101,8 @@ def test_unit_availability_exposes_population_and_upkeep(db_session, city):
     assert infantry["population_cost"] == 1
     assert infantry["population_available"] == 0
     assert infantry["population_capacity_met"] is False
-    assert infantry["upkeep_per_hour"] == 0.0
+    assert infantry["upkeep_per_hour"] == pytest.approx(
+        balance.UNIT_CATALOG["basic_infantry"]["upkeep_per_hour"]
+    )
+    assert infantry["upkeep_per_hour"] > 0
     assert infantry["can_train"] is False

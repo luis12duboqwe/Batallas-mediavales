@@ -49,6 +49,7 @@ const LoadingScreen = ({ onComplete }) => {
         ready && visible ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}
       style={backgroundStyle}
+      data-testid="loading-screen"
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,215,128,0.08),transparent_55%)]" />
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />

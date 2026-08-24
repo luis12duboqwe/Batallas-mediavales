@@ -49,10 +49,13 @@
     "iron": "Hierro",
     "gold": "Oro",
     "population": "Población",
+    "upkeep": "Mant.",
     "wood_tip": "Producción base de madera de la ciudad",
     "stone_tip": "Producción base de piedra de la ciudad",
     "iron_tip": "Producción base de hierro de la ciudad",
     "gold_tip": "Producción base de oro de la ciudad",
+    "gold_tip_net": "Producción neta de oro después del mantenimiento: {{rate}} por hora",
+    "upkeep_tip": "Mantenimiento usado: {{used}}/h; reservado: {{reserved}}/h; oro neto: {{net}}/h",
     "population_tip": "Población utilizada y capacidad máxima para unidades"
   },
   "tutorial": {

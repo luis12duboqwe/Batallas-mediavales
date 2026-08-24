@@ -4,7 +4,13 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
-from ..services import production, protection, quest as quest_service, unit_catalog
+from ..services import (
+    production,
+    protection,
+    quest as quest_service,
+    unit_catalog,
+    upkeep as upkeep_service,
+)
 
 router = APIRouter(tags=["cities"])
 
@@ -96,7 +102,9 @@ def city_status(
 
     city, _ = production.recalculate_resources(db, city, return_gains=True)
     storage_limit = production.get_storage_limit(city)
+    gross_production_per_hour = production.get_gross_production_per_hour(db, city)
     production_per_hour = production.get_production_per_hour(db, city)
+    upkeep_status = upkeep_service.get_upkeep_status(db, city)
     population_used = unit_catalog.get_population_used(db, city)
     population_capacity = unit_catalog.get_population_capacity(city)
     population_available = max(
@@ -135,6 +143,13 @@ def city_status(
         loyalty=city.loyalty,
         storage_limit=storage_limit,
         production_per_hour=production_per_hour,
+        gross_production_per_hour=gross_production_per_hour,
+        net_gold_per_hour=float(production_per_hour[upkeep_service.UPKEEP_RESOURCE]),
+        upkeep_used_per_hour=float(upkeep_status["used_per_hour"]),
+        upkeep_reserved_per_hour=float(upkeep_status["reserved_per_hour"]),
+        upkeep_capacity_per_hour=float(upkeep_status["capacity_per_hour"]),
+        upkeep_available_per_hour=float(upkeep_status["available_per_hour"]),
+        upkeep_sustainable=bool(upkeep_status["sustainable"]),
         last_production=city.last_production,
         is_protected=protection.is_user_protected(city.owner),
         building_queue=building_queue,

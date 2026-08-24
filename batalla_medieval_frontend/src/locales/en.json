@@ -49,10 +49,13 @@
     "iron": "Iron",
     "gold": "Gold",
     "population": "Population",
+    "upkeep": "Upkeep",
     "wood_tip": "City base wood production",
     "stone_tip": "City base stone production",
     "iron_tip": "City base iron production",
     "gold_tip": "City base gold production",
+    "gold_tip_net": "Net gold production after troop upkeep: {{rate}} per hour",
+    "upkeep_tip": "Used upkeep: {{used}}/h; reserved: {{reserved}}/h; net gold: {{net}}/h",
     "population_tip": "Population used and maximum capacity for units"
   },
   "tutorial": {

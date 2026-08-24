@@ -62,8 +62,8 @@ def _build_troop_article() -> str:
         "",
         "Orden de recursos en costes: **Madera/Piedra/Hierro/Oro**.",
         "",
-        "| Unidad | Ataque | Def. Inf. | Def. Cab. | Def. Asedio | Carga | Velocidad | Coste (M/P/H/O) | Tiempo (s) | Requisitos |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |",
+        "| Unidad | Ataque | Def. Inf. | Def. Cab. | Def. Asedio | Carga | Velocidad | Pobl. | Mant. oro/h | Coste (M/P/H/O) | Tiempo (s) | Requisitos |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |",
     ]
     for unit_type in balance.UNIT_ORDER:
         definition = balance.UNIT_CATALOG[unit_type]
@@ -76,6 +76,8 @@ def _build_troop_article() -> str:
             f"| {int(stats['def_siege'])} "
             f"| {int(stats['carry'])} "
             f"| {balance.UNIT_SPEED[unit_type]:g} "
+            f"| {int(definition['population'])} "
+            f"| {float(definition['upkeep_per_hour']):g} "
             f"| {_fmt_cost(definition['training_cost'])} "
             f"| {int(definition['training_time_seconds'])} "
             f"| {_fmt_requirements(definition['training_requirements'])} |"
@@ -84,11 +86,15 @@ def _build_troop_article() -> str:
     lines.extend(
         [
             "",
-            "## Reglas de entrenamiento",
+            "## Reglas de entrenamiento y mantenimiento",
             "- El coste total es el coste por unidad multiplicado por la cantidad.",
             "- El tiempo total es el tiempo por unidad multiplicado por la cantidad y por el modificador activo del mundo.",
             "- El nivel del edificio sirve como requisito; no aplica una fórmula de tiempo paralela.",
             "- Las unidades investigables solo pueden entrenarse después de completar su investigación.",
+            "- Las tropas consumen oro por hora incluso mientras viajan o regresan; enviarlas fuera no elimina su mantenimiento.",
+            "- Las colas de entrenamiento reservan población y mantenimiento futuro antes de cobrar/encolar.",
+            "- La capacidad sostenible usa la producción normal de oro, reglas permanentes del mundo, tipo de asentamiento y oasis de oro; los eventos temporales no autorizan un ejército permanente mayor.",
+            "- Si un ejército existente deja de ser sostenible, el oro neto puede ser negativo hasta llegar a 0; el servidor no crea deuda ni elimina tropas automáticamente.",
         ]
     )
     return "\n".join(lines)
@@ -228,6 +234,9 @@ def _build_economy_article() -> str:
             "# Economía y fórmulas de progresión",
             f"Versión de balance: `{balance.BALANCE_VERSION}`.",
             f"- Producción base: `{rates}` antes de mundo, oasis y eventos.",
+            "- El oro neto resta el mantenimiento por hora de todas las tropas comprometidas, incluidas las que están en movimiento o retornando.",
+            "- El oro neto puede ser negativo y drena el saldo hasta 0; nunca genera deuda negativa.",
+            "- Los entrenamientos reservan mantenimiento futuro contra la producción estable de oro; los eventos temporales de producción no amplían esa capacidad sostenible.",
             f"- Coste de edificios: `coste_base * ({balance.BUILDING_COST_GROWTH} ** (nivel - 1))`.",
             "- El tiempo de edificio usa su tiempo base canónico multiplicado por el nivel objetivo.",
             "- Coste y tiempo de tropas provienen del catálogo de unidades y escalan linealmente con la cantidad.",
@@ -259,9 +268,10 @@ def _build_beginner_article() -> str:
             "3. Construye Barracas (`barracks`) para entrenar la infantería inicial.",
             "4. Construye la Academia Militar (`academy`) para investigar nuevas unidades; las investigaciones tardan tiempo real y solo se desbloquean al completar la cola.",
             "5. Mejora la Hacienda (`farm`) si necesitas aumentar la capacidad de población.",
-            "6. Usa espionaje antes de una hostilidad y respeta la protección de novatos.",
-            "7. La Muralla (`wall`) mejora la defensa y puede recibir daño de asedio.",
-            "8. El mercado permite comercio y transporte dentro del mismo mundo.",
+            "6. Vigila el mantenimiento de oro: población libre no significa que tu economía pueda sostener cualquier cantidad de tropas.",
+            "7. Usa espionaje antes de una hostilidad y respeta la protección de novatos.",
+            "8. La Muralla (`wall`) mejora la defensa y puede recibir daño de asedio.",
+            "9. El mercado permite comercio y transporte dentro del mismo mundo.",
         ]
     )
 

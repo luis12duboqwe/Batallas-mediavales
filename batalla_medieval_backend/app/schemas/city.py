@@ -61,7 +61,15 @@ class CityResourceStatus(BaseModel):
     population_available: int
     loyalty: float
     storage_limit: float
+    # ``production_per_hour`` is net income after committed troop upkeep.
     production_per_hour: dict
+    gross_production_per_hour: dict
+    net_gold_per_hour: float
+    upkeep_used_per_hour: float
+    upkeep_reserved_per_hour: float
+    upkeep_capacity_per_hour: float
+    upkeep_available_per_hour: float
+    upkeep_sustainable: bool
     last_production: datetime
     is_protected: bool = False
     building_queue: list[BuildingQueueRead] = Field(default_factory=list)
