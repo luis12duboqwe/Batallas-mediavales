@@ -123,7 +123,7 @@ def test_available_catalog_matches_timed_research_and_training_payment(
     assert heavy["researched"] is True
     assert heavy["research_queued"] is False
     assert heavy["training_cost"] == pytest.approx(
-        {"wood": 70.0, "stone": 60.0, "iron": 50.0}
+        {"wood": 70.0, "stone": 60.0, "iron": 50.0, "gold": 4.0}
     )
 
     before_training = {
@@ -183,6 +183,7 @@ def test_unit_availability_endpoint_exposes_server_research_quote(
         "wood": 70.0,
         "stone": 60.0,
         "iron": 50.0,
+        "gold": 4.0,
     }
     assert heavy["research_requirements_met"] is True
     assert heavy["research_queued"] is False
