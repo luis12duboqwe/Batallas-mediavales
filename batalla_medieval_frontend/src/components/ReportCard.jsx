@@ -162,29 +162,38 @@ const ReportCard = ({ report }) => {
           <h3 className="font-bold text-amber-100">Reporte #{report.id}</h3>
           <span className="text-xs text-gray-400">{formatDate(report.created_at)}</span>
         </div>
-        <div 
+        <div
           className="prose prose-invert prose-sm max-w-none"
-          dangerouslySetInnerHTML={{ __html: report.content }} 
+          dangerouslySetInnerHTML={{ __html: report.content }}
         />
       </div>
     );
   }
 
   // New JSON rendering
-  const { 
-    attacker, defender, loot, wall_damage, loyalty_change, conquest, moral, luck, success, 
+  const {
+    attacker, defender, loot, wall_damage, loyalty_change, conquest, moral, luck, success,
     resources, troops, buildings,
-    sender, receiver, from // New fields
+    sender, receiver, from,
+    role, algorithm_version, balance_version, seed, detected, intel_level,
+    success_chance, detection_chance, defender_spies,
   } = parsedContent;
 
   const isTrade = report.report_type === 'trade';
   const isReturn = report.report_type === 'return';
   const isReinforce = report.report_type === 'reinforce';
+  const visibleDefenderSpies = isSpy
+    ? (
+      defender?.spies
+      ?? defender_spies
+      ?? (Number(intel_level) >= 2 && troops ? (troops.spy ?? 0) : null)
+    )
+    : null;
 
   return (
     <div className={`card bg-black/40 border border-amber-900/30 overflow-hidden transition-all duration-300 ${expanded ? 'ring-1 ring-amber-500/50' : ''}`}>
       {/* Header Summary */}
-      <div 
+      <div
         className="p-4 cursor-pointer hover:bg-white/5 flex items-center gap-4"
         onClick={() => setExpanded(!expanded)}
       >
@@ -193,7 +202,7 @@ const ReportCard = ({ report }) => {
         {isTrade && <TradeIcon />}
         {isReturn && <ReturnIcon />}
         {isReinforce && <ReinforceIcon />}
-        
+
         <div className="flex-1">
           <div className="flex justify-between items-center">
             <h3 className="font-bold text-amber-100 text-lg">
@@ -205,7 +214,7 @@ const ReportCard = ({ report }) => {
             </h3>
             <span className="text-xs text-gray-400">{formatDate(report.created_at)}</span>
           </div>
-          
+
           <div className="flex items-center gap-2 text-sm mt-1">
             {isBattle && (
               <>
@@ -355,7 +364,7 @@ const ReportCard = ({ report }) => {
                       <ResourceAmounts values={loot} />
                     </div>
                   )}
-                  
+
                   {wall_damage && (
                     <div className="flex items-center gap-2 text-amber-200">
                       <CrackedWallIcon />
@@ -375,7 +384,7 @@ const ReportCard = ({ report }) => {
                     </div>
                   )}
                 </div>
-                
+
                 <div className="mt-3 pt-2 border-t border-gray-800 flex gap-4 text-xs text-gray-500">
                   <span>Moral: {(moral * 100).toFixed(0)}%</span>
                   <span>Suerte: {(luck * 100).toFixed(1)}%</span>
@@ -391,11 +400,31 @@ const ReportCard = ({ report }) => {
                 <h4 className={`font-bold ${success ? 'text-green-400' : 'text-red-400'} mb-2`}>
                   {success ? '¡Espionaje Exitoso!' : 'Misión Fallida'}
                 </h4>
-                <div className="flex justify-between text-sm text-gray-300">
-                  <span>Espías enviados: {attacker.spies}</span>
-                  <span>Espías defensores: {defender.spies}</span>
+                <div className="flex flex-wrap justify-between gap-2 text-sm text-gray-300">
+                  <span>Espías enviados: {attacker?.spies ?? 0}</span>
+                  <span>Espías defensores: {visibleDefenderSpies ?? 'Oculto'}</span>
+                  <span>{detected ? 'Misión detectada' : 'Misión no detectada'}</span>
                 </div>
               </div>
+
+              {role === 'attacker' && algorithm_version && seed && (
+                <div
+                  data-testid="spy-audit"
+                  data-spy-seed={seed}
+                  className="rounded border border-sky-900/40 bg-sky-950/20 p-3 text-xs text-gray-300"
+                >
+                  <div className="mb-2 font-semibold uppercase tracking-wide text-sky-300">Auditoría de espionaje</div>
+                  <div className="grid grid-cols-1 gap-1 md:grid-cols-2">
+                    <span>Algoritmo: {algorithm_version}</span>
+                    <span>Balance: {balance_version}</span>
+                    <span data-testid="spy-intel-level">Inteligencia: nivel {Number(intel_level) || 0}</span>
+                    <span>Éxito: {(Number(success_chance || 0) * 100).toFixed(1)}%</span>
+                    <span>Detección: {(Number(detection_chance || 0) * 100).toFixed(1)}%</span>
+                    <span>Suerte: {(Number(luck || 0) * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="mt-2 break-all font-mono text-[11px] text-sky-200" data-testid="spy-seed">{seed}</div>
+                </div>
+              )}
 
               {success && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -405,7 +434,7 @@ const ReportCard = ({ report }) => {
                       <ResourceAmounts values={resources} labeled />
                     </div>
                   )}
-                  
+
                   {troops && (
                     <div className="bg-black/20 p-3 rounded border border-gray-800">
                       <h5 className="font-bold text-amber-200 mb-2 text-sm">Tropas</h5>
