@@ -109,6 +109,7 @@ try {
   const detectionChance = Number(payload.detection_chance);
   if (successChance < 0.05 || successChance > 0.95) failures.push(`Success chance out of bounds: ${successChance}`);
   if (detectionChance < 0.05 || detectionChance > 0.95) failures.push(`Detection chance out of bounds: ${detectionChance}`);
+  if (Number(payload.troops?.spy ?? 0) !== 0) failures.push(`Expected defender spy intelligence=0: ${JSON.stringify(payload.troops)}`);
   if (Number(payload.troops?.archer) !== 9) failures.push(`Expected archer intelligence=9: ${JSON.stringify(payload.troops)}`);
   if (Number(payload.buildings?.wall) !== 3) failures.push(`Expected wall intelligence=3: ${JSON.stringify(payload.buildings)}`);
   for (const resource of ['wood', 'stone', 'iron', 'gold']) {
@@ -164,7 +165,7 @@ try {
     '9',
     'wall',
     'Nivel 3',
-    'Oculto',
+    'Espías defensores: 0',
     'Misión no detectada',
     ALGORITHM_VERSION,
     payload.balance_version,
