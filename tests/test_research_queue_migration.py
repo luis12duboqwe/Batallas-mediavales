@@ -73,10 +73,10 @@ def test_research_queue_migration_preserves_completed_research_and_rolls_back(
             text(
                 """
                 INSERT INTO research_queue (city_id, tech_name, finish_time, paid_cost)
-                VALUES (1, 'heavy_infantry', CURRENT_TIMESTAMP,
-                        '{"wood":500,"stone":400,"iron":300,"gold":50}')
+                VALUES (1, 'heavy_infantry', CURRENT_TIMESTAMP, :paid_cost)
                 """
-            )
+            ),
+            {"paid_cost": '{"wood":500,"stone":400,"iron":300,"gold":50}'},
         )
         assert connection.execute(text("SELECT COUNT(*) FROM research_queue")).scalar_one() == 1
 
