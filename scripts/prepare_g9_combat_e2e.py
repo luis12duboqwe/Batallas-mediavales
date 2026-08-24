@@ -17,6 +17,21 @@ PASSWORD = "G9-Combat-Test-2026!"
 EMAIL = "g9-combat@example.com"
 
 
+def _free_city_coordinate(db, world: models.World) -> tuple[int, int]:
+    occupied = {
+        (int(x), int(y))
+        for x, y in db.query(models.City.x, models.City.y)
+        .filter(models.City.world_id == world.id)
+        .all()
+    }
+    map_size = max(int(world.map_size), 1)
+    for y in range(map_size):
+        for x in range(map_size):
+            if (x, y) not in occupied:
+                return x, y
+    raise RuntimeError("G9 world has no free city coordinate")
+
+
 def main() -> None:
     db = SessionLocal()
     try:
@@ -83,12 +98,13 @@ def main() -> None:
             .one_or_none()
         )
         if target is None:
+            target_x, target_y = _free_city_coordinate(db, world)
             target = models.City(
                 name="G9 Auditable Barbarian",
                 owner_id=None,
                 world_id=world.id,
-                x=max(0, min(int(world.map_size) - 1, int(city.x) + 4)),
-                y=max(0, min(int(world.map_size) - 1, int(city.y) + 4)),
+                x=target_x,
+                y=target_y,
                 wood=1400.0,
                 stone=1200.0,
                 iron=1000.0,
