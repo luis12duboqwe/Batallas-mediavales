@@ -45,14 +45,23 @@ def _run_two(callback):
     return results, errors
 
 
-def test_two_research_requests_create_one_technology_and_one_charge(db_session, city):
-    db_session.add(models.Building(city_id=city.id, name="barracks", level=3))
-    city.wood = 600.0
-    city.clay = 500.0
-    city.iron = 400.0
+def test_two_research_requests_create_one_queue_and_one_charge(db_session, city):
+    db_session.add_all(
+        [
+            models.Building(city_id=city.id, name="academy", level=1),
+            models.Building(city_id=city.id, name="barracks", level=3),
+        ]
+    )
+    city.wood = 700.0
+    city.stone = 600.0
+    city.iron = 500.0
+    city.gold = 150.0
     city.last_production = datetime.now(timezone.utc)
     db_session.commit()
     city_id = city.id
+
+    before = {resource: float(getattr(city, resource)) for resource in ("wood", "stone", "iron", "gold")}
+    expected_cost = {"wood": 500.0, "stone": 400.0, "iron": 300.0, "gold": 50.0}
 
     def research_once(session):
         loaded_city = session.query(models.City).filter(models.City.id == city_id).one()
@@ -66,6 +75,44 @@ def test_two_research_requests_create_one_technology_and_one_charge(db_session, 
     assert isinstance(errors[0], ValueError)
 
     db_session.expire_all()
+    queues = (
+        db_session.query(models.ResearchQueue)
+        .filter_by(city_id=city_id, tech_name="heavy_infantry")
+        .all()
+    )
+    assert len(queues) == 1
+    assert (
+        db_session.query(models.Research)
+        .filter_by(city_id=city_id, tech_name="heavy_infantry")
+        .count()
+        == 0
+    )
+    refreshed = db_session.query(models.City).filter_by(id=city_id).one()
+    for resource, amount in expected_cost.items():
+        assert float(getattr(refreshed, resource)) == pytest.approx(before[resource] - amount)
+    assert "heavy_infantry" not in refreshed.researched_units
+
+
+def test_two_processors_complete_research_queue_once(db_session, city):
+    queue = models.ResearchQueue(
+        city_id=city.id,
+        tech_name="heavy_infantry",
+        finish_time=datetime.now(timezone.utc) - timedelta(seconds=1),
+        paid_cost={"wood": 500.0, "stone": 400.0, "iron": 300.0, "gold": 50.0},
+    )
+    db_session.add(queue)
+    db_session.commit()
+    city_id = city.id
+
+    def process_once(session):
+        return len(research_service.process_research_queues(session))
+
+    results, errors = _run_two(process_once)
+
+    assert errors == []
+    assert sorted(results) == [0, 1]
+
+    db_session.expire_all()
     rows = (
         db_session.query(models.Research)
         .filter_by(city_id=city_id, tech_name="heavy_infantry")
@@ -73,10 +120,8 @@ def test_two_research_requests_create_one_technology_and_one_charge(db_session, 
     )
     assert len(rows) == 1
     refreshed = db_session.query(models.City).filter_by(id=city_id).one()
-    assert refreshed.wood >= 100.0
-    assert refreshed.clay >= 100.0
-    assert refreshed.iron >= 100.0
     assert "heavy_infantry" in refreshed.researched_units
+    assert db_session.query(models.ResearchQueue).filter_by(city_id=city_id).count() == 0
 
 
 def test_two_processors_complete_troop_queue_once(db_session, city, monkeypatch):
@@ -85,7 +130,7 @@ def test_two_processors_complete_troop_queue_once(db_session, city, monkeypatch)
         troop_type="basic_infantry",
         amount=7,
         finish_time=datetime.now(timezone.utc) - timedelta(seconds=1),
-        paid_cost={"wood": 350.0, "clay": 210.0, "iron": 140.0},
+        paid_cost={"wood": 350.0, "stone": 210.0, "iron": 140.0},
     )
     db_session.add(queue)
     db_session.commit()
