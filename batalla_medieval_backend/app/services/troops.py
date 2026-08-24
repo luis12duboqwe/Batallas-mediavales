@@ -71,7 +71,7 @@ def research_unit(db: Session, city: models.City, unit_type: str):
 def queue_training(
     db: Session, city: models.City, unit_type: str, quantity: int
 ) -> models.TroopQueue:
-    """Quote, reserve population, pay and queue troop training atomically."""
+    """Quote, reserve population/upkeep, pay and queue training atomically."""
 
     if quantity <= 0:
         raise ValueError("Quantity must be positive")
@@ -100,6 +100,13 @@ def queue_training(
     if not unit_catalog.has_population_capacity(db, city, unit_type, quantity):
         db.rollback()
         raise ValueError("Not enough population capacity")
+
+    # The city row is still locked here. Because active training queues reserve
+    # their future upkeep, concurrent requests for the same city serialize on
+    # this check and cannot both consume the same sustainable gold headroom.
+    if not unit_catalog.has_upkeep_capacity(db, city, unit_type, quantity):
+        db.rollback()
+        raise ValueError("Not enough sustainable gold income for troop upkeep")
 
     total_cost = {
         resource: float(cost) * quantity
@@ -143,6 +150,7 @@ def queue_training(
             "quantity": quantity,
             "paid_cost": queue_entry.paid_cost,
             "finish_time": finish_time.isoformat(),
+            "upkeep_per_hour": float(definition.get("upkeep_per_hour", 0.0)) * quantity,
         },
     )
     return queue_entry
