@@ -10,7 +10,7 @@ from app.utils import utc_now
 USERNAME = "g7_research"
 PASSWORD = "G7-Research-Test-2026!"
 EMAIL = "g7-research@example.com"
-TECH_NAME = "heavy_infantry"
+TECH_NAMES = ("heavy_infantry", "archer")
 
 
 def _set_resources(city: models.City, amount: float) -> None:
@@ -77,26 +77,29 @@ def main() -> None:
         db.query(models.ResearchQueue).filter_by(city_id=city.id).delete(
             synchronize_session=False
         )
-        db.query(models.Research).filter_by(
-            city_id=city.id,
-            tech_name=TECH_NAME,
+        db.query(models.Research).filter(
+            models.Research.city_id == city.id,
+            models.Research.tech_name.in_(TECH_NAMES),
         ).delete(synchronize_session=False)
         city.researched_units = [
-            unit for unit in list(city.researched_units or []) if unit != TECH_NAME
+            unit for unit in list(city.researched_units or []) if unit not in TECH_NAMES
         ]
         if "basic_infantry" not in city.researched_units:
             city.researched_units.insert(0, "basic_infantry")
 
+        # Both heavy infantry and archer must be valid before the first click so
+        # the journey can prove the second one is disabled by the single queue
+        # slot rather than by missing prerequisites.
         _set_building(db, city.id, "town_hall", 4)
-        _set_building(db, city.id, "barracks", 3)
-        _set_building(db, city.id, "academy", 1)
-        _set_building(db, city.id, "smithy", 1)
+        _set_building(db, city.id, "barracks", 5)
+        _set_building(db, city.id, "academy", 2)
+        _set_building(db, city.id, "smithy", 3)
         _set_resources(city, 5000.0)
         db.add(city)
         db.commit()
 
         print(
-            f"prepared-g7:{user.id}:{world.id}:{city.id}:academy=1:barracks=3"
+            f"prepared-g7:{user.id}:{world.id}:{city.id}:academy=2:barracks=5:smithy=3"
         )
     finally:
         db.close()
