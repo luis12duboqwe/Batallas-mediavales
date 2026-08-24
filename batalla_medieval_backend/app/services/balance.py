@@ -23,7 +23,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, Tuple
 
-BALANCE_VERSION = "2026.08.23-bm0062.1"
+BALANCE_VERSION = "2026.08.23-bm0062.2"
 
 RESOURCE_FIELDS = ("wood", "stone", "iron", "gold")
 CITY_STARTING_RESOURCES: Dict[str, float] = {
@@ -150,6 +150,7 @@ BUILDING_COST_GROWTH = 1.20
 # per-building table above through ``get_building_build_time``.
 BASE_BUILD_TIME_SECONDS = 420
 QUEUE_REFUND_FACTOR = 0.80
+RESEARCH_QUEUE_SLOTS_PER_CITY = 1
 
 # ---------------------------------------------------------------------------
 # Economy / production / expansion
@@ -209,8 +210,6 @@ CAMP_STARTING_RESOURCES: Dict[str, float] = {
     resource: 0.0 for resource in RESOURCE_FIELDS
 }
 
-# Tutorial is part of the accepted G2 economic path. Its completion reward is
-# versioned here so the service, API/help and tests cannot silently diverge.
 TUTORIAL_REWARD: Dict[str, float] = {
     "wood": 250.0,
     "stone": 250.0,
@@ -218,10 +217,6 @@ TUTORIAL_REWARD: Dict[str, float] = {
     "gold": 250.0,
 }
 
-# The alpha PvE seed/AI values are versioned here because they directly affect
-# tutorial difficulty, loot availability and recovery. BM-0067 may replace
-# these values with the final barbarian/oasis model without creating a second
-# source of truth.
 BARBARIAN_STARTING_RESOURCES: Dict[str, float] = {
     "wood": 1000.0,
     "stone": 1000.0,
@@ -246,7 +241,7 @@ BARBARIAN_RECRUIT_CHANCE = 0.05
 BARBARIAN_RECRUIT_UNIT = "basic_infantry"
 
 # ---------------------------------------------------------------------------
-# Units
+# Units / research
 # ---------------------------------------------------------------------------
 
 UNIT_ORDER = [
@@ -273,14 +268,16 @@ UNIT_DISPLAY_NAMES = {
     "noble": "Noble",
 }
 
-# BM-0063 owns the final upkeep numbers. Gold is already the canonical
-# maintenance resource so no alternate resource model needs to be introduced.
+# BM-0062 owns research costs, requirements and duration. BM-0063 owns final
+# training/combat/upkeep values and may tune those fields without creating a
+# second research system.
 UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
     "basic_infantry": {
         "training_cost": {"wood": 50.0, "stone": 30.0, "iron": 20.0},
         "training_time_seconds": 45,
         "training_requirements": {"barracks": 1},
         "research_cost": {},
+        "research_time_seconds": 0,
         "research_requirements": {},
         "researchable": False,
         "population": 1,
@@ -290,8 +287,9 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "training_cost": {"wood": 70.0, "stone": 60.0, "iron": 50.0},
         "training_time_seconds": 60,
         "training_requirements": {"barracks": 3, "smithy": 1},
-        "research_cost": {"wood": 500.0, "stone": 400.0, "iron": 300.0},
-        "research_requirements": {"barracks": 3},
+        "research_cost": {"wood": 500.0, "stone": 400.0, "iron": 300.0, "gold": 50.0},
+        "research_time_seconds": 300,
+        "research_requirements": {"academy": 1, "barracks": 3},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
@@ -300,8 +298,9 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "training_cost": {"wood": 80.0, "stone": 40.0, "iron": 40.0},
         "training_time_seconds": 50,
         "training_requirements": {"barracks": 5, "smithy": 3},
-        "research_cost": {"wood": 600.0, "stone": 300.0, "iron": 300.0},
-        "research_requirements": {"barracks": 5},
+        "research_cost": {"wood": 600.0, "stone": 300.0, "iron": 300.0, "gold": 60.0},
+        "research_time_seconds": 360,
+        "research_requirements": {"academy": 2, "barracks": 5},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
@@ -310,8 +309,9 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "training_cost": {"wood": 120.0, "stone": 80.0, "iron": 100.0},
         "training_time_seconds": 70,
         "training_requirements": {"stable": 1},
-        "research_cost": {"wood": 1000.0, "stone": 800.0, "iron": 600.0},
-        "research_requirements": {"stable": 3},
+        "research_cost": {"wood": 1000.0, "stone": 800.0, "iron": 600.0, "gold": 100.0},
+        "research_time_seconds": 480,
+        "research_requirements": {"academy": 3, "stable": 3},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
@@ -320,8 +320,9 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "training_cost": {"wood": 200.0, "stone": 150.0, "iron": 200.0},
         "training_time_seconds": 80,
         "training_requirements": {"stable": 5, "smithy": 5},
-        "research_cost": {"wood": 2000.0, "stone": 1500.0, "iron": 1500.0},
-        "research_requirements": {"stable": 10},
+        "research_cost": {"wood": 2000.0, "stone": 1500.0, "iron": 1500.0, "gold": 250.0},
+        "research_time_seconds": 900,
+        "research_requirements": {"academy": 6, "stable": 10},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
@@ -330,8 +331,9 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "training_cost": {"wood": 40.0, "stone": 40.0, "iron": 40.0},
         "training_time_seconds": 30,
         "training_requirements": {"stable": 1},
-        "research_cost": {"wood": 200.0, "stone": 200.0, "iron": 200.0},
-        "research_requirements": {"stable": 1},
+        "research_cost": {"wood": 200.0, "stone": 200.0, "iron": 200.0, "gold": 40.0},
+        "research_time_seconds": 240,
+        "research_requirements": {"academy": 2, "stable": 1},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
@@ -340,8 +342,9 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "training_cost": {"wood": 300.0, "stone": 200.0, "iron": 150.0},
         "training_time_seconds": 90,
         "training_requirements": {"workshop": 1},
-        "research_cost": {"wood": 1500.0, "stone": 1000.0, "iron": 1000.0},
-        "research_requirements": {"barracks": 10},
+        "research_cost": {"wood": 1500.0, "stone": 1000.0, "iron": 1000.0, "gold": 150.0},
+        "research_time_seconds": 600,
+        "research_requirements": {"academy": 5, "workshop": 1},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
@@ -350,8 +353,9 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "training_cost": {"wood": 350.0, "stone": 250.0, "iron": 300.0},
         "training_time_seconds": 120,
         "training_requirements": {"workshop": 5},
-        "research_cost": {"wood": 2000.0, "stone": 1500.0, "iron": 1500.0},
-        "research_requirements": {"barracks": 15},
+        "research_cost": {"wood": 2000.0, "stone": 1500.0, "iron": 1500.0, "gold": 300.0},
+        "research_time_seconds": 1200,
+        "research_requirements": {"academy": 8, "workshop": 5},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
@@ -360,8 +364,9 @@ UNIT_CATALOG: Dict[str, Dict[str, Any]] = {
         "training_cost": {"wood": 1000.0, "stone": 1000.0, "iron": 1000.0},
         "training_time_seconds": 45,
         "training_requirements": {"town_hall": 20, "workshop": 10},
-        "research_cost": {"wood": 10000.0, "stone": 10000.0, "iron": 10000.0},
-        "research_requirements": {"town_hall": 20},
+        "research_cost": {"wood": 10000.0, "stone": 10000.0, "iron": 10000.0, "gold": 1500.0},
+        "research_time_seconds": 3600,
+        "research_requirements": {"academy": 12, "town_hall": 20, "workshop": 10},
         "researchable": True,
         "population": 1,
         "upkeep_per_hour": 0.0,
@@ -381,78 +386,15 @@ UNIT_SPEED: Dict[str, float] = {
 }
 
 UNIT_COMBAT_STATS: Dict[str, Dict[str, Any]] = {
-    "basic_infantry": {
-        "attack": 10,
-        "def_inf": 20,
-        "def_cav": 10,
-        "def_siege": 20,
-        "type": "infantry",
-        "carry": 40,
-    },
-    "heavy_infantry": {
-        "attack": 25,
-        "def_inf": 40,
-        "def_cav": 30,
-        "def_siege": 40,
-        "type": "infantry",
-        "carry": 30,
-    },
-    "archer": {
-        "attack": 30,
-        "def_inf": 10,
-        "def_cav": 40,
-        "def_siege": 15,
-        "type": "infantry",
-        "carry": 35,
-    },
-    "fast_cavalry": {
-        "attack": 60,
-        "def_inf": 20,
-        "def_cav": 20,
-        "def_siege": 20,
-        "type": "cavalry",
-        "carry": 80,
-    },
-    "heavy_cavalry": {
-        "attack": 100,
-        "def_inf": 40,
-        "def_cav": 60,
-        "def_siege": 40,
-        "type": "cavalry",
-        "carry": 60,
-    },
-    "spy": {
-        "attack": 0,
-        "def_inf": 0,
-        "def_cav": 0,
-        "def_siege": 0,
-        "type": "infantry",
-        "carry": 0,
-    },
-    "ram": {
-        "attack": 2,
-        "def_inf": 40,
-        "def_cav": 35,
-        "def_siege": 60,
-        "type": "siege",
-        "carry": 0,
-    },
-    "catapult": {
-        "attack": 2,
-        "def_inf": 70,
-        "def_cav": 70,
-        "def_siege": 90,
-        "type": "siege",
-        "carry": 0,
-    },
-    "noble": {
-        "attack": 30,
-        "def_inf": 50,
-        "def_cav": 50,
-        "def_siege": 50,
-        "type": "infantry",
-        "carry": 0,
-    },
+    "basic_infantry": {"attack": 10, "def_inf": 20, "def_cav": 10, "def_siege": 20, "type": "infantry", "carry": 40},
+    "heavy_infantry": {"attack": 25, "def_inf": 40, "def_cav": 30, "def_siege": 40, "type": "infantry", "carry": 30},
+    "archer": {"attack": 30, "def_inf": 10, "def_cav": 40, "def_siege": 15, "type": "infantry", "carry": 35},
+    "fast_cavalry": {"attack": 60, "def_inf": 20, "def_cav": 20, "def_siege": 20, "type": "cavalry", "carry": 80},
+    "heavy_cavalry": {"attack": 100, "def_inf": 40, "def_cav": 60, "def_siege": 40, "type": "cavalry", "carry": 60},
+    "spy": {"attack": 0, "def_inf": 0, "def_cav": 0, "def_siege": 0, "type": "infantry", "carry": 0},
+    "ram": {"attack": 2, "def_inf": 40, "def_cav": 35, "def_siege": 60, "type": "siege", "carry": 0},
+    "catapult": {"attack": 2, "def_inf": 70, "def_cav": 70, "def_siege": 90, "type": "siege", "carry": 0},
+    "noble": {"attack": 30, "def_inf": 50, "def_cav": 50, "def_siege": 50, "type": "infantry", "carry": 0},
 }
 
 LEGACY_UNIT_ALIASES = {
@@ -536,8 +478,6 @@ EVENT_TEMPLATES: Dict[str, Tuple[str, str, Dict[str, float]]] = {
 
 
 def unit_combat_stats_with_legacy_aliases() -> Dict[str, Dict[str, Any]]:
-    """Return combat stats including read-only legacy unit identifiers."""
-
     result = {key: deepcopy(value) for key, value in UNIT_COMBAT_STATS.items()}
     for legacy_name, canonical_name in LEGACY_UNIT_ALIASES.items():
         result[legacy_name] = deepcopy(UNIT_COMBAT_STATS[canonical_name])
@@ -550,8 +490,6 @@ def get_storage_capacity(warehouse_level: int) -> float:
 
 
 def get_population_capacity(settlement_type: str, farm_level: int) -> int:
-    """Return the canonical population cap for a settlement."""
-
     base = CAMP_POPULATION_MAX if settlement_type == "camp" else CITY_POPULATION_MAX
     if settlement_type == "camp":
         return base
@@ -571,8 +509,7 @@ def get_building_build_time(building_type: str, target_level: int) -> int:
     maximum = get_building_max_level(building_type)
     if target_level > maximum:
         raise ValueError(f"Maximum building level is {maximum}")
-    base = BUILDING_BASE_BUILD_TIME_SECONDS[building_type]
-    return int(base * target_level)
+    return int(BUILDING_BASE_BUILD_TIME_SECONDS[building_type] * target_level)
 
 
 def get_building_cost(building_type: str, target_level: int) -> Dict[str, float]:
@@ -589,8 +526,6 @@ def get_building_cost(building_type: str, target_level: int) -> Dict[str, float]
 
 
 def get_building_effect_definition(building_type: str) -> Dict[str, Any]:
-    """Return machine-readable effects backed by live gameplay constants."""
-
     if building_type == "wall":
         return {"type": "defense_bonus", "per_level": WALL_BONUS_PER_LEVEL}
     if building_type == "market":
@@ -600,7 +535,7 @@ def get_building_effect_definition(building_type: str) -> Dict[str, Any]:
     if building_type == "warehouse":
         return {"type": "storage_capacity", "per_level": STORAGE_PER_WAREHOUSE_LEVEL}
     if building_type == "academy":
-        return {"type": "research_access"}
+        return {"type": "research_access", "queue_slots": RESEARCH_QUEUE_SLOTS_PER_CITY}
     if building_type == "church":
         return {"type": "expansion_points", "per_completion": EXPANSION_POINTS_PER_COMPLETION["church"]}
     if building_type == "cathedral":
@@ -611,8 +546,6 @@ def get_building_effect_definition(building_type: str) -> Dict[str, Any]:
 
 
 def snapshot() -> Dict[str, Any]:
-    """Return the stable serializable contract consumed by APIs and UI."""
-
     units: Dict[str, Dict[str, Any]] = {}
     for unit_type in UNIT_ORDER:
         units[unit_type] = {
@@ -635,11 +568,7 @@ def snapshot() -> Dict[str, Any]:
         }
 
     events = {
-        key: {
-            "name": value[0],
-            "description": value[1],
-            "modifiers": deepcopy(value[2]),
-        }
+        key: {"name": value[0], "description": value[1], "modifiers": deepcopy(value[2])}
         for key, value in EVENT_TEMPLATES.items()
     }
 
@@ -657,6 +586,7 @@ def snapshot() -> Dict[str, Any]:
             "catalog": units,
             "order": list(UNIT_ORDER),
             "maintenance_resource": "gold",
+            "research_queue_slots_per_city": RESEARCH_QUEUE_SLOTS_PER_CITY,
         },
         "production": {
             "base_rates_per_hour": deepcopy(PRODUCTION_RATES_PER_HOUR),
@@ -684,9 +614,7 @@ def snapshot() -> Dict[str, Any]:
             "camp_starter_buildings": deepcopy(list(CAMP_STARTER_BUILDINGS)),
             "camp_starting_resources": deepcopy(CAMP_STARTING_RESOURCES),
         },
-        "tutorial": {
-            "completion_reward": deepcopy(TUTORIAL_REWARD),
-        },
+        "tutorial": {"completion_reward": deepcopy(TUTORIAL_REWARD)},
         "pve_alpha": {
             "barbarian_starting_resources": deepcopy(BARBARIAN_STARTING_RESOURCES),
             "barbarian_population_max": BARBARIAN_POPULATION_MAX,
