@@ -116,7 +116,11 @@ const TroopsView = () => {
           <div className="space-y-3">
             {queues.troops?.length === 0 && <p className="text-gray-400">Sin entrenamientos activos</p>}
             {queues.troops?.map((queue) => (
-              <div key={queue.id} className="glass-panel p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div
+                key={queue.id}
+                className="glass-panel p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+                data-testid={`troop-queue-${queue.id}`}
+              >
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-yellow-200 break-words">
                     {queue.amount}x {t(queue.troop_type || queue.unit)}
@@ -131,6 +135,7 @@ const TroopsView = () => {
                     disabled={busyQueueId === queue.id}
                     className="text-red-300 hover:text-red-200 text-xs underline rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400 disabled:opacity-50"
                     aria-label={`Cancelar entrenamiento de ${t(queue.troop_type || queue.unit)}`}
+                    data-testid={`cancel-troop-${queue.id}`}
                   >
                     {busyQueueId === queue.id ? '…' : 'Cancelar'}
                   </button>
