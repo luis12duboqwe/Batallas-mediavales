@@ -160,8 +160,12 @@ export const useCityStore = create((set, get) => ({
     return { movements: movementList };
   },
   async loadReports() {
-    const city = get().currentCity;
-    if (!city || !city.world_id) return { reports: [] };
+    let city = get().currentCity;
+    if (!city?.world_id) {
+      await get().loadCity();
+      city = get().currentCity;
+    }
+    if (!city?.world_id) return { reports: [] };
     const { data } = await api.getReports({ worldId: city.world_id });
     const reportList = Array.isArray(data) ? data : data?.reports || [];
     set({ reports: reportList });
