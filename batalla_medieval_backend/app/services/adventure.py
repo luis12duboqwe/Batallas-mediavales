@@ -1,130 +1,287 @@
+"""Deterministic, retry-safe adventures for the BM-0068 hero package."""
+
+from __future__ import annotations
+
+import hashlib
+import math
 import random
+from copy import deepcopy
+from datetime import timezone, timedelta
 from typing import Any
-from datetime import timedelta
+
 from sqlalchemy.orm import Session
+
 from .. import models
 from ..utils import utc_now
-from . import balance, hero as hero_service
+from . import balance, hero as hero_service, hero_rules, production
 
-DIFFICULTY_CONFIG = {
-    "easy": {"duration": 300, "xp": 50, "damage_min": 1, "damage_max": 10},
-    "medium": {"duration": 1800, "xp": 200, "damage_min": 10, "damage_max": 30},
-    "hard": {"duration": 7200, "xp": 1000, "damage_min": 30, "damage_max": 60},
-}
 
-def get_adventures(db: Session, hero_id: int) -> list[models.Adventure]:
-    """Get available adventures for hero. Generate new ones if needed."""
-    adventures = db.query(models.Adventure).filter(
-        models.Adventure.hero_id == hero_id,
-        models.Adventure.status.in_(["available", "active", "completed"])
-    ).all()
-    
-    active_or_available = [a for a in adventures if a.status in ["available", "active"]]
-    
-    if not active_or_available:
-        new_adventures: list[models.Adventure] = []
-        for _ in range(3):
-            diff = random.choice(["easy", "easy", "medium", "medium", "hard"])
-            config = DIFFICULTY_CONFIG[diff]
-            adv = models.Adventure(
-                hero_id=hero_id,
-                difficulty=diff,
-                duration=config["duration"],
-                status="available"
-            )
-            db.add(adv)
-            new_adventures.append(adv)
-        db.commit()
-        for adv in new_adventures:
-            db.refresh(adv)
-        return new_adventures
-        
-    return adventures
+def _ensure_timezone(value):
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
-def start_adventure(db: Session, adventure_id: int, hero: models.Hero) -> models.Adventure:
-    adv = db.query(models.Adventure).filter(models.Adventure.id == adventure_id).first()
-    if not adv:
+
+def _hero_from_value(db: Session, hero: models.Hero | int) -> models.Hero:
+    hero_id = hero.id if isinstance(hero, models.Hero) else int(hero)
+    return hero_service.lock_hero_for_update(db, hero_id)
+
+
+def _seed_for(
+    *, world_id: int, hero_id: int, generation: int, slot: int, difficulty: str
+) -> str:
+    payload = (
+        f"{hero_rules.HERO_RULES_VERSION}:{world_id}:{hero_id}:"
+        f"generation={generation}:slot={slot}:difficulty={difficulty}"
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _difficulty_for(*, world_id: int, hero_id: int, generation: int, slot: int) -> str:
+    payload = (
+        f"{hero_rules.HERO_RULES_VERSION}:{world_id}:{hero_id}:"
+        f"generation={generation}:slot={slot}:difficulty"
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).digest()
+    index = int.from_bytes(digest[:4], "big") % len(hero_rules.ADVENTURE_DIFFICULTY_PATTERN)
+    return hero_rules.ADVENTURE_DIFFICULTY_PATTERN[index]
+
+
+def _lock_adventure(db: Session, adventure_id: int) -> models.Adventure:
+    adventure = (
+        db.query(models.Adventure)
+        .filter(models.Adventure.id == adventure_id)
+        .with_for_update()
+        .populate_existing()
+        .one_or_none()
+    )
+    if adventure is None:
         raise ValueError("Adventure not found")
-    
-    if adv.hero_id != hero.id:
+    return adventure
+
+
+def get_adventures(
+    db: Session, hero: models.Hero | int
+) -> list[models.Adventure]:
+    """Return the package queue, creating one deterministic batch when empty."""
+
+    locked_hero = _hero_from_value(db, hero)
+    active = (
+        db.query(models.Adventure)
+        .filter(
+            models.Adventure.hero_id == locked_hero.id,
+            models.Adventure.status.in_(["available", "active"]),
+        )
+        .order_by(models.Adventure.id.asc())
+        .all()
+    )
+    if not active:
+        total = (
+            db.query(models.Adventure)
+            .filter(models.Adventure.hero_id == locked_hero.id)
+            .count()
+        )
+        generation = total // hero_rules.HERO_ADVENTURES_PER_BATCH
+        created: list[models.Adventure] = []
+        for slot in range(hero_rules.HERO_ADVENTURES_PER_BATCH):
+            difficulty = _difficulty_for(
+                world_id=locked_hero.world_id,
+                hero_id=locked_hero.id,
+                generation=generation,
+                slot=slot,
+            )
+            config = hero_rules.ADVENTURE_DIFFICULTIES[difficulty]
+            adventure = models.Adventure(
+                hero_id=locked_hero.id,
+                difficulty=difficulty,
+                duration=int(config["duration_seconds"]),
+                status="available",
+                rules_version=hero_rules.HERO_RULES_VERSION,
+                seed=_seed_for(
+                    world_id=locked_hero.world_id,
+                    hero_id=locked_hero.id,
+                    generation=generation,
+                    slot=slot,
+                    difficulty=difficulty,
+                ),
+            )
+            db.add(adventure)
+            created.append(adventure)
+        db.commit()
+        for adventure in created:
+            db.refresh(adventure)
+        active = created
+
+    recent_finished = (
+        db.query(models.Adventure)
+        .filter(
+            models.Adventure.hero_id == locked_hero.id,
+            models.Adventure.status.in_(["completed", "failed"]),
+        )
+        .order_by(models.Adventure.id.desc())
+        .limit(5)
+        .all()
+    )
+    return list(active) + list(recent_finished)
+
+
+def start_adventure(
+    db: Session, adventure_id: int, hero: models.Hero
+) -> models.Adventure:
+    adventure = _lock_adventure(db, adventure_id)
+    if adventure.hero_id != hero.id:
         raise ValueError("Not your adventure")
-        
-    if adv.status != "available":
+    if adventure.rules_version != hero_rules.HERO_RULES_VERSION:
+        raise ValueError("Adventure rules version is not supported")
+    if adventure.status != "available":
         raise ValueError("Adventure not available")
-        
-    if hero.status != "home":
+
+    locked_hero = hero_service.lock_hero_for_update(db, hero.id)
+    if locked_hero.status != "home":
         raise ValueError("Hero is busy")
-        
-    if hero.health < 20:
+    if float(locked_hero.health) < hero_rules.HERO_MIN_ADVENTURE_HEALTH:
         raise ValueError("Hero is too injured")
 
-    adv.status = "active"
-    adv.started_at = utc_now()
-    hero.status = "adventure"
-    
+    bonuses = hero_service.calculate_total_bonuses(locked_hero)
+    base_duration = int(
+        hero_rules.ADVENTURE_DIFFICULTIES[adventure.difficulty]["duration_seconds"]
+    )
+    adventure.duration = max(
+        1,
+        int(math.ceil(base_duration * (1.0 - bonuses["speed"]))),
+    )
+    adventure.status = "active"
+    adventure.started_at = utc_now()
+    locked_hero.status = "adventure"
+    db.add_all([adventure, locked_hero])
     db.commit()
-    db.refresh(adv)
-    return adv
+    db.refresh(adventure)
+    return adventure
 
-def claim_adventure(db: Session, adventure_id: int, hero: models.Hero) -> dict[str, Any]:
-    adv = db.query(models.Adventure).filter(models.Adventure.id == adventure_id).first()
-    if not adv:
-        raise ValueError("Adventure not found")
-        
-    if adv.status != "active":
+
+def claim_adventure(
+    db: Session, adventure_id: int, hero: models.Hero
+) -> dict[str, Any]:
+    """Claim exactly once; retries return the persisted outcome verbatim."""
+
+    adventure = _lock_adventure(db, adventure_id)
+    if adventure.hero_id != hero.id:
+        raise ValueError("Not your adventure")
+    if adventure.rules_version != hero_rules.HERO_RULES_VERSION:
+        raise ValueError("Adventure rules version is not supported")
+    if adventure.status in {"completed", "failed"} and adventure.result_json:
+        return deepcopy(adventure.result_json)
+    if adventure.status != "active":
         raise ValueError("Adventure not active")
-        
+    if adventure.started_at is None:
+        raise ValueError("Adventure start time is missing")
+
     now = utc_now()
-    started_at = adv.started_at
-    if started_at.tzinfo is None:
-        from datetime import timezone
-        started_at = started_at.replace(tzinfo=timezone.utc)
-        
-    end_time = started_at + timedelta(seconds=adv.duration)
-    
+    end_time = _ensure_timezone(adventure.started_at) + timedelta(
+        seconds=int(adventure.duration)
+    )
     if now < end_time:
         raise ValueError("Adventure not finished yet")
-        
-    config = DIFFICULTY_CONFIG[adv.difficulty]
-    raw_damage = random.randint(config["damage_min"], config["damage_max"])
-    defense_reduction = hero.defense_points // 10
-    damage = max(1, raw_damage - defense_reduction)
-    
-    hero.health = max(0, hero.health - damage)
-    if hero.health == 0:
-        hero.status = "dead"
-        adv.status = "failed"
+
+    locked_hero = hero_service.lock_hero_for_update(db, hero.id)
+    rng = random.Random(int(adventure.seed, 16))
+    config = hero_rules.ADVENTURE_DIFFICULTIES[adventure.difficulty]
+    bonuses = hero_service.calculate_total_bonuses(locked_hero)
+
+    raw_damage = rng.randint(int(config["damage_min"]), int(config["damage_max"]))
+    damage = max(1, int(round(raw_damage * (1.0 - bonuses["defense"]))))
+    locked_hero.health = max(0.0, float(locked_hero.health) - damage)
+
+    if locked_hero.health <= 0:
+        locked_hero.status = "dead"
+        adventure.status = "failed"
+        adventure.completed_at = now
+        result = {
+            "rules_version": hero_rules.HERO_RULES_VERSION,
+            "seed": adventure.seed,
+            "status": "dead",
+            "damage": damage,
+            "xp": 0,
+            "loot": None,
+        }
+        adventure.result_json = result
+        db.add_all([adventure, locked_hero])
         db.commit()
-        return {"status": "dead", "damage": damage, "xp": 0, "loot": None}
-    
-    hero.status = "home"
-    adv.status = "completed"
-    adv.completed_at = now
-    
-    xp_gained = config["xp"]
-    hero_service.add_xp(db, hero, xp_gained)
-    
+        return deepcopy(result)
+
+    locked_hero.status = "home"
+    adventure.status = "completed"
+    adventure.completed_at = now
+
+    xp_gained = max(
+        1,
+        int(round(float(config["base_xp"]) * (1.0 + bonuses["attack"]))),
+    )
+    hero_service.add_xp(locked_hero, xp_gained)
+
+    production_gains: dict[str, float] | None = None
+    reward_city: models.City | None = None
     loot: dict[str, Any] | None = None
-    roll = random.random()
-    if roll < 0.10:
-        templates = db.query(models.ItemTemplate).all()
+    roll = rng.random()
+    if roll < hero_rules.ADVENTURE_ITEM_LOOT_CHANCE:
+        hero_service.seed_items(db)
+        templates = (
+            db.query(models.ItemTemplate)
+            .order_by(models.ItemTemplate.name.asc())
+            .all()
+        )
         if templates:
-            item_tmpl = random.choice(templates)
-            hero_item = models.HeroItem(hero_id=hero.id, template_id=item_tmpl.id)
-            db.add(hero_item)
-            loot = {"type": "item", "name": item_tmpl.name, "rarity": item_tmpl.rarity}
-    elif roll < 0.40:
-        if hero.city:
-            amount = random.randint(100, 500) * (1 if adv.difficulty == "easy" else 3 if adv.difficulty == "medium" else 10)
-            res_type = random.choice(list(balance.RESOURCE_FIELDS))
-            setattr(hero.city, res_type, getattr(hero.city, res_type) + amount)
-            loot = {"type": "resource", "resource": res_type, "amount": amount}
-            
-    db.commit()
-    
-    return {
+            template = templates[rng.randrange(len(templates))]
+            item = models.HeroItem(
+                hero_id=locked_hero.id,
+                template_id=template.id,
+                is_equipped=False,
+            )
+            db.add(item)
+            db.flush()
+            loot = {
+                "type": "item",
+                "item_id": item.id,
+                "name": template.name,
+                "rarity": template.rarity,
+            }
+    elif roll < (
+        hero_rules.ADVENTURE_ITEM_LOOT_CHANCE
+        + hero_rules.ADVENTURE_RESOURCE_LOOT_CHANCE
+    ):
+        city = hero_service._ensure_hero_city(db, locked_hero)
+        reward_city, production_gains = production.lock_and_recalculate_resources(db, city)
+        resource = balance.RESOURCE_FIELDS[rng.randrange(len(balance.RESOURCE_FIELDS))]
+        base_amount = rng.randint(
+            int(config["resource_min"]), int(config["resource_max"])
+        )
+        requested = max(
+            1,
+            int(round(base_amount * (1.0 + bonuses["production"] + bonuses["loot"]))),
+        )
+        capacity = production.get_storage_limit(reward_city)
+        before = float(getattr(reward_city, resource))
+        delivered = max(0, min(requested, int(max(capacity - before, 0.0))))
+        setattr(reward_city, resource, before + delivered)
+        loot = {
+            "type": "resource",
+            "resource": resource,
+            "requested_amount": requested,
+            "amount": delivered,
+            "storage_capped": delivered < requested,
+        }
+
+    result = {
+        "rules_version": hero_rules.HERO_RULES_VERSION,
+        "seed": adventure.seed,
         "status": "success",
         "damage": damage,
         "xp": xp_gained,
-        "loot": loot
+        "loot": loot,
     }
+    adventure.result_json = result
+    db.add_all([adventure, locked_hero])
+    if reward_city is not None:
+        db.add(reward_city)
+    db.commit()
+    if reward_city is not None and production_gains is not None:
+        production.record_resource_gains(db, reward_city, production_gains)
+    return deepcopy(result)
