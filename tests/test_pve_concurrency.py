@@ -33,6 +33,17 @@ def test_two_workers_process_same_pve_bucket_once(db_session):
     oasis_id = oasis.id
     db_session.commit()
 
+    # This concurrency suite intentionally shares one PostgreSQL database across
+    # files. Earlier tests may have created additional active worlds, and the
+    # PvE scheduler is global by design: one winning worker processes every
+    # active world for the bucket while the concurrent worker must process none.
+    active_world_count = (
+        db_session.query(models.World)
+        .filter(models.World.is_active.is_(True))
+        .count()
+    )
+    assert active_world_count >= 1
+
     barrier = threading.Barrier(2)
     results: list[dict | Exception | None] = [None, None]
     tick_at = datetime(2026, 8, 25, 16, 0, tzinfo=timezone.utc)
@@ -57,8 +68,12 @@ def test_two_workers_process_same_pve_bucket_once(db_session):
         assert not thread.is_alive(), "Concurrent PvE tick did not finish"
 
     assert not any(isinstance(result, Exception) for result in results), results
-    processed_counts = sorted(int(result["worlds_processed"]) for result in results if isinstance(result, dict))
-    assert processed_counts == [0, 1]
+    processed_counts = sorted(
+        int(result["worlds_processed"])
+        for result in results
+        if isinstance(result, dict)
+    )
+    assert processed_counts == [0, active_world_count]
 
     db_session.expire_all()
     oasis = db_session.query(models.Oasis).filter(models.Oasis.id == oasis_id).one()
