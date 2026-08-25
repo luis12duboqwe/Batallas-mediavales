@@ -222,9 +222,12 @@ def claim_adventure(
     loot: dict[str, Any] | None = None
     roll = rng.random()
     if roll < hero_rules.ADVENTURE_ITEM_LOOT_CHANCE:
-        hero_service.seed_items(db)
+        canonical_names = [
+            definition["name"] for definition in hero_rules.ITEM_CATALOG.values()
+        ]
         templates = (
             db.query(models.ItemTemplate)
+            .filter(models.ItemTemplate.name.in_(canonical_names))
             .order_by(models.ItemTemplate.name.asc())
             .all()
         )
