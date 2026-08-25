@@ -3,88 +3,32 @@ import random
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import balance
 
 
 def create_world(db: Session, name: str, speed: float = 1.0) -> models.World:
-    """Create a deterministic generated world once for tools/tests.
+    """Create or reconcile one deterministic PvE world for tools/tests.
 
-    Production bootstrap uses ``app.seed``. This helper remains available for
-    tests and admin tooling, but repeated calls with the same world name are
-    idempotent and all generated coordinates respect ``map_size``.
+    BM-0067 owns barbarian and oasis generation in ``services.pve``. Keeping
+    this helper as a thin entrypoint prevents tests/admin tooling from creating
+    a second, incompatible PvE catalog (the legacy implementation generated 50
+    bare barbarian cities plus zero-defense ``rat``/``spider`` oases).
     """
 
-    existing = db.query(models.World).filter(models.World.name == name).one_or_none()
-    if existing:
-        return existing
+    from . import pve
 
-    world = models.World(
-        name=name,
-        speed_modifier=speed,
-        resource_modifier=1.0,
-        map_size=100,
-        is_active=True,
-    )
-    db.add(world)
-    db.flush()
-
-    rng = random.Random(f"batallas-medievales:{name}:{speed}")
-    occupied: set[tuple[int, int]] = set()
-
-    # Generate deterministic barbarian villages on valid, non-water tiles.
-    attempts = 0
-    while len(occupied) < 50 and attempts < 2000:
-        attempts += 1
-        x = rng.randrange(world.map_size)
-        y = rng.randrange(world.map_size)
-        coord = (x, y)
-        if coord in occupied or get_tile_type(x, y) == "water":
-            continue
-
-        occupied.add(coord)
-        resources = balance.BARBARIAN_STARTING_RESOURCES
-        db.add(
-            models.City(
-                name="Aldea Bárbara",
-                world_id=world.id,
-                x=x,
-                y=y,
-                owner_id=None,
-                wood=resources["wood"],
-                stone=resources["stone"],
-                iron=resources["iron"],
-                gold=resources["gold"],
-                tile_type=get_tile_type(x, y),
-            )
+    world = db.query(models.World).filter(models.World.name == name).one_or_none()
+    if world is None:
+        world = models.World(
+            name=name,
+            speed_modifier=speed,
+            resource_modifier=1.0,
+            map_size=100,
+            is_active=True,
         )
+        db.add(world)
+        db.flush()
 
-    oasis_count = 0
-    attempts = 0
-    oasis_coords: set[tuple[int, int]] = set()
-    while oasis_count < 20 and attempts < 2000:
-        attempts += 1
-        x = rng.randrange(world.map_size)
-        y = rng.randrange(world.map_size)
-        coord = (x, y)
-        if coord in occupied or coord in oasis_coords:
-            continue
-
-        oasis_coords.add(coord)
-        oasis_count += 1
-        db.add(
-            models.Oasis(
-                world_id=world.id,
-                x=x,
-                y=y,
-                resource_type=rng.choice(list(balance.RESOURCE_FIELDS)),
-                bonus_percent=25 if rng.random() > 0.2 else 50,
-                troops={
-                    "rat": rng.randint(5, 15),
-                    "spider": rng.randint(3, 8),
-                },
-            )
-        )
-
+    pve.ensure_world_pve(db, world)
     db.commit()
     db.refresh(world)
     return world
