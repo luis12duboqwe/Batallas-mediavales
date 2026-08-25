@@ -13,9 +13,19 @@ def _add_market(db_session, city: models.City, level: int = 2) -> None:
 
 
 def _target_city(db_session, world_id: int) -> models.City:
+    """Create a valid player-owned transport target for spend validation."""
+
+    owner = models.User(
+        username="four_resource_target",
+        email="four-resource-target@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(owner)
+    db_session.flush()
     target = models.City(
         name="Four Resource Target",
-        owner_id=None,
+        owner_id=owner.id,
         world_id=world_id,
         x=70,
         y=71,

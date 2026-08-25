@@ -84,7 +84,6 @@ def _disable_dispatch_noise(monkeypatch):
         ("attack", "basic_infantry", {"troops": {"basic_infantry": 2}}),
         ("spy", "spy", {"spy_count": 2}),
         ("reinforce", "basic_infantry", {"troops": {"basic_infantry": 2}}),
-        ("transport", None, {"resources": {"wood": 125}}),
     ],
 )
 def test_same_world_two_player_movement_can_be_dispatched_and_reserved_once(
@@ -110,8 +109,7 @@ def test_same_world_two_player_movement_can_be_dispatched_and_reserved_once(
         y=21,
     )
 
-    if troop_type:
-        db_session.add(models.Troop(city_id=city.id, unit_type=troop_type, quantity=5))
+    db_session.add(models.Troop(city_id=city.id, unit_type=troop_type, quantity=5))
     db_session.commit()
     _disable_dispatch_noise(monkeypatch)
 
@@ -139,17 +137,54 @@ def test_same_world_two_player_movement_can_be_dispatched_and_reserved_once(
     persisted = db_session.query(models.Movement).filter_by(id=body["id"]).one()
     assert persisted.world_id == city.world_id
 
-    if troop_type:
-        remaining = (
-            db_session.query(models.Troop)
-            .filter_by(city_id=city.id, unit_type=troop_type)
-            .one()
-        )
-        assert remaining.quantity == 3
-    else:
-        origin_after = db_session.query(models.City).filter_by(id=city.id).one()
-        assert origin_after.wood == pytest.approx(875, abs=0.1)
-        assert origin_after.gold == pytest.approx(1000, abs=0.1)
+    remaining = (
+        db_session.query(models.Troop)
+        .filter_by(city_id=city.id, unit_type=troop_type)
+        .one()
+    )
+    assert remaining.quantity == 3
+
+
+def test_generic_movement_endpoint_cannot_bypass_market_transport_rules(
+    client,
+    db_session,
+    user,
+    city,
+):
+    for resource in balance.RESOURCE_FIELDS:
+        setattr(city, resource, 1000)
+    city.last_production = utc_now()
+    db_session.add(city)
+    _, target = _other_player_city(
+        db_session,
+        city.world_id,
+        username="peer_transport_bypass",
+        x=22,
+        y=23,
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/movement/",
+        headers=_headers(user),
+        json={
+            "origin_city_id": city.id,
+            "target_city_id": target.id,
+            "movement_type": "transport",
+            "troops": {},
+            "resources": {"wood": 125},
+            "spy_count": 0,
+            "world_id": city.world_id,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error_code"] == "movement_creation_failed"
+    assert "market service" in response.json()["detail"]["message"]
+    db_session.expire_all()
+    origin_after = db_session.query(models.City).filter_by(id=city.id).one()
+    assert origin_after.wood == pytest.approx(1000, abs=0.1)
+    assert db_session.query(models.Movement).count() == 0
 
 
 @pytest.mark.parametrize("movement_type", ["attack", "spy", "reinforce", "transport"])

@@ -65,8 +65,7 @@ def npc_trade(
     current_user: models.User = Depends(get_current_user),
 ):
     city = get_city_or_404(db, city_id, current_user, world_id)
-    market.npc_trade(db, city, offer_type, request_type, amount)
-    return {"message": "Trade successful"}
+    return market.npc_trade(db, city, offer_type, request_type, amount)
 
 
 @router.post("/offers/{offer_id}/accept")

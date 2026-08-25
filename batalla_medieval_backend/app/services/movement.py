@@ -23,7 +23,9 @@ logger = logging.getLogger(__name__)
 # Compatibility aliases. Movement numbers live only in ``balance``.
 UNIT_SPEED = balance.UNIT_SPEED
 
-PLAYER_MOVEMENT_TYPES = {"attack", "spy", "reinforce", "transport"}
+# Economic transports deliberately do not use this generic dispatch path.
+# ``market`` owns their authorization, capacity and atomic reservation rules.
+PLAYER_MOVEMENT_TYPES = {"attack", "spy", "reinforce"}
 RESOURCE_FIELDS = balance.RESOURCE_FIELDS
 
 
@@ -60,8 +62,6 @@ def _normalize_resources(resources: Dict[str, int] | None) -> Dict[str, int]:
 def _get_base_speed(movement_type: str, troops: Dict[str, int]) -> float:
     if movement_type == "spy":
         return UNIT_SPEED["spy"]
-    if movement_type == "transport":
-        return balance.TRANSPORT_BASE_SPEED
     speeds = [UNIT_SPEED[unit] for unit, amount in troops.items() if amount > 0]
     return min(speeds) if speeds else UNIT_SPEED["basic_infantry"]
 
@@ -72,10 +72,12 @@ def _validate_target_type(
     target_oasis_id: int | None,
 ) -> None:
     if movement_type not in PLAYER_MOVEMENT_TYPES:
+        if movement_type == "transport":
+            raise ValueError("Transport movements must be created through the market service")
         raise ValueError(f"Unsupported movement type: {movement_type}")
     if (target_city_id is None) == (target_oasis_id is None):
         raise ValueError("Specify exactly one target")
-    if movement_type in {"spy", "reinforce", "transport"} and target_city_id is None:
+    if movement_type in {"spy", "reinforce"} and target_city_id is None:
         raise ValueError(f"{movement_type} movements require a city target")
 
 
@@ -127,11 +129,7 @@ def _reserve_payload_and_create(
             db.add(by_type[unit])
 
     if movement_type == "transport":
-        if not resources:
-            raise ValueError("Transport requires resources")
-        if not production.check_cost(city, resources):
-            raise ValueError("Insufficient resources")
-        production.pay_cost(city, resources)
+        raise ValueError("Transport movements must be created through the market service")
 
     movement_obj = models.Movement(
         origin_city_id=city.id,
@@ -244,8 +242,8 @@ def send_movement(
         normalized_troops = {}
     elif spy_count:
         raise ValueError("spy_count is only valid for spy missions")
-    if movement_type != "transport" and normalized_resources:
-        raise ValueError("Resources can only be sent with transport movements")
+    if normalized_resources:
+        raise ValueError("Resources can only be sent through the market service")
 
     base_speed = _get_base_speed(movement_type, normalized_troops)
     modifiers = event_service.get_active_modifiers(db, world_id=origin_city.world_id)
@@ -583,6 +581,59 @@ def _credit_resources_with_storage(city: models.City, resources: Dict[str, int])
             setattr(city, resource, min(current + amount, limit))
 
 
+def _canonical_transport_resources(resources: Dict[str, int] | None) -> Dict[str, int]:
+    """Strip transport metadata and return only positive canonical resources."""
+
+    return {
+        resource: max(int((resources or {}).get(resource, 0) or 0), 0)
+        for resource in RESOURCE_FIELDS
+        if int((resources or {}).get(resource, 0) or 0) > 0
+    }
+
+
+def _lock_city_for_delivery(db: Session, city_id: int) -> models.City | None:
+    return (
+        db.query(models.City)
+        .filter(models.City.id == city_id)
+        .with_for_update()
+        .populate_existing()
+        .one_or_none()
+    )
+
+
+def _lock_transport_cities(
+    db: Session, *city_ids: int | None
+) -> dict[int, models.City]:
+    """Lock all cities touched by a transport in one deterministic order.
+
+    Opposite-direction transports can be resolved by different workers at the
+    same instant. Locking only each receiver lets one worker hold A while the
+    other holds B, after which both return-movement FK checks wait on the other
+    city and PostgreSQL detects a deadlock. Taking every city row in ascending
+    ID order makes A→B and B→A serialize on the same first lock.
+    """
+
+    locked: dict[int, models.City] = {}
+    for city_id in sorted({int(value) for value in city_ids if value is not None}):
+        city = _lock_city_for_delivery(db, city_id)
+        if city is not None:
+            locked[city_id] = city
+    return locked
+
+
+def _can_store_all(city: models.City, resources: Dict[str, int]) -> bool:
+    limit = float(production.get_storage_limit(city))
+    return all(
+        float(getattr(city, resource)) + int(amount) <= limit
+        for resource, amount in resources.items()
+    )
+
+
+def _credit_resources_exact(city: models.City, resources: Dict[str, int]) -> None:
+    for resource, amount in resources.items():
+        setattr(city, resource, float(getattr(city, resource)) + int(amount))
+
+
 def _resolve_return_core(db: Session, movement: models.Movement) -> None:
     city = movement.target_city
     if not city:
@@ -671,18 +722,31 @@ def _resolve_reinforce_core(db: Session, movement: models.Movement) -> None:
 def _resolve_transport_core(
     db: Session, movement: models.Movement
 ) -> List[dict[str, Any]]:
-    receiver = movement.target_city
-    sender = movement.origin_city
-    if not receiver or not sender:
+    sender_id = movement.origin_city_id
+    receiver_id = movement.target_city_id
+    if sender_id is None or receiver_id is None:
         return []
-    _credit_resources_with_storage(receiver, movement.resources or {})
+
+    locked_cities = _lock_transport_cities(db, sender_id, receiver_id)
+    sender = locked_cities.get(sender_id)
+    receiver = locked_cities.get(receiver_id)
+    if sender is None or receiver is None:
+        return []
+
+    payload = _canonical_transport_resources(movement.resources or {})
+    merchant_capacity = sum(payload.values())
+    delivered = bool(payload) and _can_store_all(receiver, payload)
+    if delivered:
+        _credit_resources_exact(receiver, payload)
 
     content = json.dumps(
         {
             "type": "trade",
             "sender": {"id": sender.id, "name": sender.name},
             "receiver": {"id": receiver.id, "name": receiver.name},
-            "resources": movement.resources or {},
+            "resources": payload,
+            "delivered": delivered,
+            "return_reason": None if delivered else "insufficient_storage",
         }
     )
     for city_id in {sender.id, receiver.id}:
@@ -697,13 +761,16 @@ def _resolve_transport_core(
         )
 
     speed = movement.speed_used or balance.TRANSPORT_BASE_SPEED
+    return_resources: Dict[str, int] = {"capacity": merchant_capacity}
+    if not delivered:
+        return_resources.update(payload)
     db.add(
         models.Movement(
             origin_city_id=receiver.id,
             target_city_id=sender.id,
             movement_type="transport_return",
             troops={},
-            resources={},
+            resources=return_resources,
             arrival_time=utc_now()
             + timedelta(hours=calculate_distance(receiver, sender) / max(speed, 0.01)),
             speed_used=speed,
@@ -711,18 +778,93 @@ def _resolve_transport_core(
             status="ongoing",
         )
     )
+
+    effects: List[dict[str, Any]] = []
     if receiver.owner_id:
-        return [
+        effects.append(
             {
                 "type": "notification",
                 "user_id": receiver.owner_id,
-                "title": "Recursos recibidos",
-                "body": f"Has recibido recursos de {sender.name}.",
-                "notification_type": "transport_received",
+                "title": "Recursos recibidos" if delivered else "Transporte rechazado",
+                "body": (
+                    f"Has recibido recursos de {sender.name}."
+                    if delivered
+                    else "No había espacio suficiente para recibir el envío completo."
+                ),
+                "notification_type": "transport_received" if delivered else "transport_rejected",
                 "allow_email": True,
             }
-        ]
-    return []
+        )
+    if not delivered and sender.owner_id:
+        effects.append(
+            {
+                "type": "notification",
+                "user_id": sender.owner_id,
+                "title": "Recursos de regreso",
+                "body": f"{receiver.name} no tenía espacio; el envío completo está regresando.",
+                "notification_type": "transport_returning_resources",
+                "allow_email": False,
+            }
+        )
+    return effects
+
+
+def _resolve_transport_return_core(
+    db: Session, movement: models.Movement
+) -> tuple[bool, List[dict[str, Any]]]:
+    """Finish a merchant return without ever destroying rejected cargo.
+
+    A rejected shipment keeps its resource payload on the return movement. If
+    the sender has refilled storage before the merchants arrive, the movement
+    stays ongoing and therefore continues to consume merchant capacity until
+    the complete payload can be restored atomically.
+    """
+
+    target_city_id = movement.target_city_id
+    if target_city_id is None:
+        return True, []
+    city = _lock_city_for_delivery(db, target_city_id)
+    if city is None:
+        return True, []
+
+    payload = _canonical_transport_resources(movement.resources or {})
+    if payload and not _can_store_all(city, payload):
+        return False, []
+    if payload:
+        _credit_resources_exact(city, payload)
+        content = json.dumps(
+            {
+                "type": "transport_return",
+                "resources": payload,
+                "reason": "insufficient_destination_storage",
+            }
+        )
+        _add_report(
+            db,
+            city_id=city.id,
+            world_id=movement.world_id,
+            report_type="trade",
+            content=content,
+            attacker_city_id=movement.origin_city_id,
+            defender_city_id=city.id,
+        )
+
+    if not city.owner_id:
+        return True, []
+    return True, [
+        {
+            "type": "notification",
+            "user_id": city.owner_id,
+            "title": "Comerciantes regresaron",
+            "body": (
+                "Tus comerciantes regresaron con el envío rechazado."
+                if payload
+                else "Tus comerciantes han regresado."
+            ),
+            "notification_type": "transport_return",
+            "allow_email": False,
+        }
+    ]
 
 
 def _run_resolution_effect(db: Session, effect: dict[str, Any]) -> None:
@@ -785,6 +927,7 @@ def resolve_due_movements(db: Session) -> List[models.Movement]:
 
     effects: List[dict[str, Any]] = []
     for movement in movements:
+        should_complete = True
         if movement.movement_type == "spy":
             effects.extend(_resolve_spy_core(db, movement))
         elif movement.movement_type == "attack":
@@ -799,21 +942,13 @@ def resolve_due_movements(db: Session) -> List[models.Movement]:
         elif movement.movement_type == "return":
             _resolve_return_core(db, movement)
         elif movement.movement_type == "transport_return":
-            if movement.target_city and movement.target_city.owner_id:
-                effects.append(
-                    {
-                        "type": "notification",
-                        "user_id": movement.target_city.owner_id,
-                        "title": "Comerciantes regresaron",
-                        "body": "Tus comerciantes han regresado.",
-                        "notification_type": "transport_return",
-                        "allow_email": False,
-                    }
-                )
+            should_complete, return_effects = _resolve_transport_return_core(db, movement)
+            effects.extend(return_effects)
 
         # Mark completed before any helper that is allowed to commit. All core
         # state, reports, losses and return marches commit together below.
-        movement.status = "completed"
+        if should_complete:
+            movement.status = "completed"
         db.add(movement)
 
     db.commit()

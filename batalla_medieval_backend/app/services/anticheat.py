@@ -1,10 +1,23 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from .. import models
 from ..utils import utc_now
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Normalize SQLAlchemy datetimes before comparing them to aware UTC now.
+
+    SQLite commonly round-trips ``DateTime`` values without ``tzinfo`` even
+    when the application originally persisted an aware UTC value. Treat those
+    database-naive timestamps as UTC; preserve/convert aware values to UTC.
+    """
+
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _persist(db: Session, *instances: object):
@@ -51,7 +64,7 @@ def log_action(db: Session, user: models.User, action: str, details: str) -> mod
 def check_action_speed(db: Session, user: models.User, action_name: str):
     now = utc_now()
     if user.last_action_at:
-        delta = (now - user.last_action_at).total_seconds()
+        delta = (now - _as_utc(user.last_action_at)).total_seconds()
         if delta < 0.1:
             flag_violation(
                 db,
@@ -74,8 +87,8 @@ def check_repeated_actions(db: Session, user: models.User, signature: str):
         .all()
     )
     if len(recent_logs) >= 4:
-        newest = recent_logs[0].timestamp
-        oldest = recent_logs[-1].timestamp
+        newest = _as_utc(recent_logs[0].timestamp)
+        oldest = _as_utc(recent_logs[-1].timestamp)
         if (newest - oldest) <= timedelta(seconds=5):
             flag_violation(
                 db,
@@ -128,7 +141,7 @@ def check_repeated_account_interactions(
         .all()
     )
     if len(recent) >= 4:
-        timestamps = [mv.arrival_time for mv in recent if mv.arrival_time]
+        timestamps = [_as_utc(mv.arrival_time) for mv in recent if mv.arrival_time]
         if len(timestamps) >= 2:
             intervals = [
                 abs((timestamps[i] - timestamps[i + 1]).total_seconds())
@@ -158,16 +171,17 @@ def check_movement_legitimacy(
         return
 
     now = utc_now()
+    arrival_utc = _as_utc(arrival_time)
     distance = ((origin_city.x - target_city.x) ** 2 + (origin_city.y - target_city.y) ** 2) ** 0.5
     min_hours = distance / max(speed_used, 0.01)
-    actual_hours = max(0.0, (arrival_time - now).total_seconds() / 3600)
+    actual_hours = max(0.0, (arrival_utc - now).total_seconds() / 3600)
     if actual_hours + 0.01 < min_hours:
         flag_violation(
             db,
             origin_city.owner,
             "fake_attack",
             "critical",
-            f"Arrival time {arrival_time} too fast for distance {distance:.2f} at speed {speed_used}",
+            f"Arrival time {arrival_utc} too fast for distance {distance:.2f} at speed {speed_used}",
         )
 
     total_troops = sum(troop.quantity for troop in origin_city.troops)
@@ -183,7 +197,7 @@ def check_movement_legitimacy(
     check_repeated_account_interactions(db, origin_city, target_city, movement_type)
 
     signature = f"movement:{movement_type}:{origin_city.id}->{target_city.id}"
-    log_action(db, origin_city.owner, signature, f"Scheduled arrival at {arrival_time}")
+    log_action(db, origin_city.owner, signature, f"Scheduled arrival at {arrival_utc}")
     check_repeated_actions(db, origin_city.owner, signature)
 
     if movement_type == "spy" and spy_count <= 0:
