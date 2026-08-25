@@ -88,7 +88,6 @@ jobs:
           await page.waitForURL(`${base}/`, { timeout: 20000 });
           await page.waitForLoadState('networkidle');
 
-          // Prefer Spanish for the captures; keep going if fixture state already differs.
           try {
             await page.goto(`${base}/profile`, { waitUntil: 'networkidle' });
             const language = page.getByLabel('Language');
@@ -115,14 +114,17 @@ jobs:
           await browser.close();
           NODE
 
-      - name: Commit captures to diagnostic branch
+      - name: Export and commit captures
         run: |
+          for f in captures/*.jpg; do
+            base64 -w 0 "$f" > "$f.b64"
+          done
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add captures/*.jpg
+          git add captures/
           if git diff --cached --quiet; then
             echo "No capture changes"
           else
-            git commit -m "chore: capture current game UI"
+            git commit -m "chore: export current game UI captures"
             git push origin HEAD:chore/ui-captures-2026-08-25
           fi
