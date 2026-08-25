@@ -89,3 +89,30 @@ class User(Base):
     )
     world: Mapped["World"] = relationship(back_populates="users", foreign_keys=[world_id])
     world_memberships: Mapped[List["PlayerWorld"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+    def hero_for_world(self, world_id: int):
+        """Return only this user's hero belonging to the requested world."""
+
+        resolved_world_id = int(world_id)
+        return next(
+            (hero for hero in self.heroes if int(hero.world_id) == resolved_world_id),
+            None,
+        )
+
+    @property
+    def hero(self):
+        """Temporary compatibility for legacy single-world callers.
+
+        The final BM-0068 combat/movement path uses ``hero_for_world``. This
+        property deliberately returns ``None`` when the user owns heroes in
+        multiple worlds and no active-world match exists, preventing accidental
+        cross-world hero leakage.
+        """
+
+        if self.world_id is not None:
+            active = self.hero_for_world(self.world_id)
+            if active is not None:
+                return active
+        if len(self.heroes) == 1:
+            return self.heroes[0]
+        return None
