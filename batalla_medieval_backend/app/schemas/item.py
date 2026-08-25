@@ -22,8 +22,11 @@ class HeroItemBase(BaseModel):
 
 
 class HeroItemRead(HeroItemBase):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     is_equipped: bool
-    template: ItemTemplateRead
+    name: str
+    description: str
+    slot: str
+    rarity: str
+    bonus_type: str
+    bonus_value: float
