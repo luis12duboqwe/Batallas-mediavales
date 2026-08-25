@@ -5,7 +5,6 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-
 HERO_RULES_VERSION = "2026.08.25-bm0068-v1"
 
 HERO_MAX_LEVEL = 100
@@ -20,34 +19,24 @@ HERO_REVIVE_HEALTH = 50.0
 
 HERO_EQUIPMENT_SLOTS = ("head", "body", "feet", "weapon", "horse", "artifact")
 HERO_ITEM_RARITIES = ("common", "rare", "epic", "legendary")
+HERO_ITEM_CATALOG: tuple[dict[str, Any], ...] = (
+    {"name": "Espada de Madera", "slot": "weapon", "rarity": "common", "bonus_type": "attack_infantry", "bonus_value": 0.05, "description": "Una espada simple de entrenamiento."},
+    {"name": "Casco de Cuero", "slot": "head", "rarity": "common", "bonus_type": "defense_infantry", "bonus_value": 0.05, "description": "Protección básica."},
+    {"name": "Botas de Viaje", "slot": "feet", "rarity": "common", "bonus_type": "speed", "bonus_value": 0.10, "description": "Aumentan la velocidad de movimiento."},
+    {"name": "Hacha de Guerra", "slot": "weapon", "rarity": "rare", "bonus_type": "attack_infantry", "bonus_value": 0.15, "description": "Un hacha afilada."},
+    {"name": "Armadura de Placas", "slot": "body", "rarity": "epic", "bonus_type": "defense_infantry", "bonus_value": 0.20, "description": "Armadura pesada."},
+    {"name": "Caballo de Guerra", "slot": "horse", "rarity": "epic", "bonus_type": "speed", "bonus_value": 0.25, "description": "Un corcel rápido y fuerte."},
+    {"name": "Mapa Antiguo", "slot": "artifact", "rarity": "legendary", "bonus_type": "speed", "bonus_value": 0.50, "description": "Revela atajos secretos."},
+)
 
-# Preserve the existing progression curve, now behind a named versioned rule.
 HERO_XP_TABLE = [0] + [int(100 * (1.2 ** (level - 1))) for level in range(1, HERO_MAX_LEVEL + 1)]
 
 ADVENTURE_ACTIVE_OR_AVAILABLE_TARGET = 3
 ADVENTURE_DIFFICULTY_WEIGHTS = ("easy", "easy", "medium", "medium", "hard")
 ADVENTURE_CONFIG: dict[str, dict[str, Any]] = {
-    "easy": {
-        "duration": 300,
-        "xp": 50,
-        "damage_min": 1,
-        "damage_max": 10,
-        "resource_multiplier": 1,
-    },
-    "medium": {
-        "duration": 1800,
-        "xp": 200,
-        "damage_min": 10,
-        "damage_max": 30,
-        "resource_multiplier": 3,
-    },
-    "hard": {
-        "duration": 7200,
-        "xp": 1000,
-        "damage_min": 30,
-        "damage_max": 60,
-        "resource_multiplier": 10,
-    },
+    "easy": {"duration": 300, "xp": 50, "damage_min": 1, "damage_max": 10, "resource_multiplier": 1},
+    "medium": {"duration": 1800, "xp": 200, "damage_min": 10, "damage_max": 30, "resource_multiplier": 3},
+    "hard": {"duration": 7200, "xp": 1000, "damage_min": 30, "damage_max": 60, "resource_multiplier": 10},
 }
 ADVENTURE_ITEM_LOOT_CHANCE = 0.10
 ADVENTURE_RESOURCE_LOOT_CHANCE = 0.30
@@ -67,13 +56,10 @@ def snapshot() -> dict[str, Any]:
             "defense": HERO_DEFENSE_BONUS_PER_POINT,
             "production": HERO_PRODUCTION_BONUS_PER_POINT,
         },
-        "revive": {
-            "resource": "gold",
-            "cost": HERO_REVIVE_COST_GOLD,
-            "health": HERO_REVIVE_HEALTH,
-        },
+        "revive": {"resource": "gold", "cost": HERO_REVIVE_COST_GOLD, "health": HERO_REVIVE_HEALTH},
         "equipment_slots": list(HERO_EQUIPMENT_SLOTS),
         "item_rarities": list(HERO_ITEM_RARITIES),
+        "item_catalog": deepcopy(list(HERO_ITEM_CATALOG)),
         "adventures": {
             "available_target": ADVENTURE_ACTIVE_OR_AVAILABLE_TARGET,
             "difficulty_weights": list(ADVENTURE_DIFFICULTY_WEIGHTS),
