@@ -1,271 +1,233 @@
-import { useState, useEffect } from 'react';
-import axiosClient, { api } from '../api/axiosClient';
-import { useTranslation } from 'react-i18next';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import heroApi from '../api/heroApi';
+import { useCityStore } from '../store/cityStore';
+
+const SLOT_LABELS = {
+  head: 'Cabeza',
+  body: 'Cuerpo',
+  feet: 'Pies',
+  weapon: 'Arma',
+  horse: 'Montura',
+  artifact: 'Artefacto',
+};
+
+const BONUS_LABELS = {
+  attack: 'experiencia de aventura',
+  defense: 'reducción de daño',
+  production: 'botín de recursos',
+  speed: 'reducción de duración',
+  loot: 'botín de recursos',
+};
+
+const errorMessage = (error, fallback) => {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (detail?.message) return detail.message;
+  return fallback;
+};
+
+const percent = (value) => `${Math.round(Number(value || 0) * 100)}%`;
 
 const HeroView = () => {
-  const { t } = useTranslation();
+  const { currentCity, loadCity } = useCityStore();
+  const worldId = currentCity?.world_id ?? null;
   const [hero, setHero] = useState(null);
   const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [rules, setRules] = useState(null);
   const [points, setPoints] = useState({ attack: 0, defense: 0, production: 0 });
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    if (!worldId) return;
+    setLoading(true);
+    setError('');
     try {
-      const [heroRes, itemsRes] = await Promise.all([
-        axiosClient.get('/hero/'),
-        api.getHeroItems()
+      const [heroResponse, itemResponse, balanceResponse] = await Promise.all([
+        heroApi.getHero(worldId),
+        heroApi.getItems(worldId),
+        heroApi.getRules(),
       ]);
-      setHero(heroRes.data);
-      setItems(itemsRes.data);
-    } catch (err) {
-      console.error(err);
-      setError('Failed to load hero data');
+      setHero(heroResponse.data);
+      setItems(itemResponse.data || []);
+      setRules(balanceResponse.data?.hero_package || null);
+    } catch (requestError) {
+      setError(errorMessage(requestError, 'No se pudo cargar el paquete del héroe.'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [worldId]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
-  const handleDistribute = async () => {
-    try {
-      const res = await axiosClient.post('/hero/distribute', points);
-      setHero(res.data);
-      setPoints({ attack: 0, defense: 0, production: 0 });
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to distribute points');
-    }
-  };
-
-  const handleRevive = async () => {
-    try {
-      const res = await axiosClient.post('/hero/revive');
-      setHero(res.data);
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to revive hero');
-    }
-  };
-
-  const handleEquip = async (itemId) => {
-    try {
-      const res = await api.equipHeroItem(itemId);
-      setItems(res.data);
-      // Refresh hero stats as they might have changed
-      const heroRes = await axiosClient.get('/hero/');
-      setHero(heroRes.data);
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to equip item');
-    }
-  };
-
-  const handleUnequip = async (itemId) => {
-    try {
-      const res = await api.unequipHeroItem(itemId);
-      setItems(res.data);
-      // Refresh hero stats
-      const heroRes = await axiosClient.get('/hero/');
-      setHero(heroRes.data);
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to unequip item');
-    }
-  };
-
-  const incrementPoint = (type) => {
-    const currentTotal = points.attack + points.defense + points.production;
-    if (currentTotal < hero.available_points) {
-      setPoints(prev => ({ ...prev, [type]: prev[type] + 1 }));
-    }
-  };
-
-  const decrementPoint = (type) => {
-    if (points[type] > 0) {
-      setPoints(prev => ({ ...prev, [type]: prev[type] - 1 }));
-    }
-  };
-
-  if (loading) return <div className="p-4 text-white">Loading hero...</div>;
-  if (!hero) return <div className="p-4 text-red-500">{error}</div>;
-
-  const equippedItems = items.filter(i => i.is_equipped);
-  const inventoryItems = items.filter(i => !i.is_equipped);
-
-  const getEquippedInSlot = (slot) => equippedItems.find(i => i.slot === slot);
-
-  const renderItemCard = (item, actionLabel, onAction) => (
-    <div key={item.id} className="bg-gray-700 p-3 rounded border border-gray-600 flex flex-col justify-between">
-      <div>
-        <div className="font-bold text-yellow-400">{item.name}</div>
-        <div className="text-xs text-gray-300 capitalize">{item.slot}</div>
-        <div className="text-sm text-green-400 mt-1">
-          +{item.bonus_value}% {item.bonus_type.replace('_', ' ')}
-        </div>
-      </div>
-      <button
-        onClick={() => onAction(item.id)}
-        className="mt-2 bg-blue-600 hover:bg-blue-500 text-xs py-1 px-2 rounded"
-      >
-        {actionLabel}
-      </button>
-    </div>
+  const pendingTotal = points.attack + points.defense + points.production;
+  const remainingPoints = Math.max((hero?.available_points || 0) - pendingTotal, 0);
+  const slots = rules?.item_slots || Object.keys(SLOT_LABELS);
+  const equipped = useMemo(
+    () => new Map(items.filter((item) => item.is_equipped).map((item) => [item.slot, item])),
+    [items],
   );
+  const inventory = items.filter((item) => !item.is_equipped);
+
+  const run = async (operation, fallback) => {
+    setBusy(true);
+    setError('');
+    try {
+      await operation();
+    } catch (requestError) {
+      setError(errorMessage(requestError, fallback));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDistribute = () => run(async () => {
+    const response = await heroApi.distributePoints(worldId, points);
+    setHero(response.data);
+    setPoints({ attack: 0, defense: 0, production: 0 });
+  }, 'No se pudieron asignar los puntos.');
+
+  const handleRevive = () => run(async () => {
+    const response = await heroApi.revive(worldId);
+    setHero(response.data);
+    await loadCity();
+  }, 'No se pudo reanimar al héroe.');
+
+  const handleEquip = (itemId) => run(async () => {
+    const response = await heroApi.equipItem(worldId, itemId);
+    setItems(response.data || []);
+    const heroResponse = await heroApi.getHero(worldId);
+    setHero(heroResponse.data);
+  }, 'No se pudo equipar el objeto.');
+
+  const handleUnequip = (itemId) => run(async () => {
+    const response = await heroApi.unequipItem(worldId, itemId);
+    setItems(response.data || []);
+    const heroResponse = await heroApi.getHero(worldId);
+    setHero(heroResponse.data);
+  }, 'No se pudo retirar el objeto.');
+
+  if (!worldId) return <div role="status">Cargando ciudad activa...</div>;
+  if (loading) return <div role="status">Cargando héroe...</div>;
+  if (!hero) return <div role="alert" className="alert alert-error">{error || 'Héroe no disponible.'}</div>;
+
+  const xpProgress = hero.next_level_xp > 0
+    ? Math.min(100, Math.round((hero.xp / hero.next_level_xp) * 100))
+    : 100;
+  const reviveResource = Object.keys(hero.revive_cost || {})[0] || 'gold';
+  const reviveAmount = Number(hero.revive_cost?.[reviveResource] || 0);
 
   return (
-    <div className="p-4 max-w-6xl mx-auto text-white">
-      <h1 className="text-3xl font-bold mb-6 text-yellow-500">Hero: {hero.name}</h1>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column: Stats & Attributes */}
-        <div className="space-y-8">
-          {/* Hero Stats */}
-          <div className="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-xl font-semibold">Level {hero.level}</span>
-              <span className={`px-3 py-1 rounded-full text-sm ${hero.status === 'dead' ? 'bg-red-600' : 'bg-green-600'}`}>
-                {hero.status.toUpperCase()}
+    <div
+      className="p-3 sm:p-6 max-w-6xl mx-auto pb-24 md:pb-12 text-gray-100"
+      data-testid="hero-package"
+      data-rules-version={hero.rules_version}
+    >
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-6">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-amber-300">Paquete de héroe</p>
+          <h1 className="text-3xl font-bold text-amber-500">{hero.name}</h1>
+        </div>
+        <div className="text-xs text-gray-400 font-mono" data-testid="hero-rules-version">
+          Reglas {hero.rules_version}
+        </div>
+      </div>
+
+      {error && <div role="alert" className="alert alert-error mb-4">{error}</div>}
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="space-y-6">
+          <section className="card bg-black/40 border border-amber-900/40 p-5">
+            <div className="flex justify-between items-center gap-3 mb-4">
+              <h2 className="font-bold text-xl">Nivel {hero.level}</h2>
+              <span className={`badge ${hero.status === 'dead' ? 'badge-error' : hero.status === 'adventure' ? 'badge-warning' : 'badge-success'}`} data-testid="hero-status">
+                {hero.status === 'dead' ? 'Caído' : hero.status === 'adventure' ? 'En aventura' : 'En casa'}
               </span>
             </div>
-            
             <div className="mb-4">
-              <div className="flex justify-between text-sm mb-1">
-                <span>XP</span>
-                <span>{hero.xp} / {hero.next_level_xp}</span>
-              </div>
-              <div className="w-full bg-gray-700 rounded-full h-2.5">
-                <div 
-                  className="bg-blue-600 h-2.5 rounded-full" 
-                  style={{ width: `${Math.min(100, (hero.xp / hero.next_level_xp) * 100)}%` }}
-                ></div>
-              </div>
+              <div className="flex justify-between text-sm mb-1"><span>Experiencia</span><span>{hero.xp} / {hero.next_level_xp || 'MAX'}</span></div>
+              <progress className="progress progress-info w-full" value={xpProgress} max="100" />
             </div>
-
             <div className="mb-4">
-              <div className="flex justify-between text-sm mb-1">
-                <span>Health</span>
-                <span>{Math.round(hero.health)}%</span>
-              </div>
-              <div className="w-full bg-gray-700 rounded-full h-2.5">
-                <div 
-                  className="bg-red-600 h-2.5 rounded-full" 
-                  style={{ width: `${hero.health}%` }}
-                ></div>
-              </div>
+              <div className="flex justify-between text-sm mb-1"><span>Salud</span><span>{Math.round(hero.health)}%</span></div>
+              <progress className="progress progress-error w-full" value={hero.health} max="100" />
             </div>
-
             {hero.status === 'dead' && (
-              <button 
-                onClick={handleRevive}
-                className="w-full mt-4 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition"
-              >
-                Revive Hero
+              <button type="button" className="btn btn-warning w-full" onClick={handleRevive} disabled={busy} data-testid="hero-revive">
+                Reanimar por {reviveAmount} {reviveResource === 'gold' ? 'oro' : reviveResource}
               </button>
             )}
-          </div>
+          </section>
 
-          {/* Attributes */}
-          <div className="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700">
-            <h2 className="text-xl font-semibold mb-4 text-yellow-400">Attributes</h2>
-            <div className="mb-4 text-sm text-gray-400">
-              Available Points: <span className="text-white font-bold">{hero.available_points - (points.attack + points.defense + points.production)}</span>
-            </div>
-
-            <div className="space-y-4">
-              {['attack', 'defense', 'production'].map(attr => (
-                <div key={attr} className="flex items-center justify-between">
-                  <span className="capitalize w-24">{attr}</span>
-                  <span className="font-mono text-lg w-8 text-center">
-                    {hero[`${attr}_points`] + points[attr]}
-                  </span>
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={() => decrementPoint(attr)}
-                      disabled={points[attr] === 0}
-                      className="w-8 h-8 bg-gray-700 hover:bg-gray-600 rounded disabled:opacity-50"
-                    >
-                      -
-                    </button>
-                    <button 
-                      onClick={() => incrementPoint(attr)}
-                      disabled={hero.available_points - (points.attack + points.defense + points.production) <= 0}
-                      className="w-8 h-8 bg-gray-700 hover:bg-gray-600 rounded disabled:opacity-50"
-                    >
-                      +
-                    </button>
+          <section className="card bg-black/40 border border-amber-900/40 p-5" data-testid="hero-attributes">
+            <h2 className="font-bold text-xl text-amber-200 mb-2">Atributos</h2>
+            <p className="text-sm text-gray-400 mb-4">Puntos disponibles: <strong className="text-white">{remainingPoints}</strong></p>
+            {[['attack', 'Ataque', 'Más experiencia en aventuras'], ['defense', 'Defensa', 'Menos daño en aventuras'], ['production', 'Logística', 'Más botín de recursos']].map(([key, label, description]) => (
+              <div key={key} className="py-3 border-t border-white/10 first:border-t-0">
+                <div className="flex items-center justify-between gap-3">
+                  <div><div className="font-semibold">{label}</div><div className="text-xs text-gray-500">{description}</div></div>
+                  <div className="flex items-center gap-2">
+                    <button type="button" className="btn btn-xs" onClick={() => setPoints((value) => ({ ...value, [key]: Math.max(value[key] - 1, 0) }))} disabled={busy || points[key] === 0}>−</button>
+                    <span className="min-w-8 text-center font-mono">{hero[`${key}_points`] + points[key]}</span>
+                    <button type="button" className="btn btn-xs" onClick={() => setPoints((value) => ({ ...value, [key]: value[key] + 1 }))} disabled={busy || remainingPoints <= 0}>+</button>
                   </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
+            {pendingTotal > 0 && <button type="button" className="btn btn-success w-full mt-4" onClick={handleDistribute} disabled={busy}>Guardar atributos</button>}
+          </section>
 
-            {(points.attack > 0 || points.defense > 0 || points.production > 0) && (
-              <button 
-                onClick={handleDistribute}
-                className="w-full mt-6 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition"
-              >
-                Save Changes
-              </button>
-            )}
-          </div>
-
-          {/* Conquest Info */}
-          <div className="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700">
-            <h3 className="text-xl font-semibold mb-4 text-amber-500">Conquista de Oasis</h3>
-            <p className="text-sm text-gray-300 mb-2">
-              Tu héroe es esencial para expandir tu imperio. Envía a tu héroe en ataques a Oasis salvajes para anexionarlos a tu ciudad.
-            </p>
-            <ul className="list-disc list-inside text-sm text-gray-400 space-y-1">
-              <li>Requiere que el héroe sobreviva a la batalla.</li>
-              <li>Elimina todas las bestias salvajes.</li>
-              <li>Otorga bonificaciones de producción permanentes.</li>
-            </ul>
-          </div>
+          <section className="card bg-black/40 border border-amber-900/40 p-5" data-testid="hero-bonuses">
+            <h2 className="font-bold text-xl text-amber-200 mb-3">Efectos activos</h2>
+            <dl className="space-y-2 text-sm">
+              <div className="flex justify-between"><dt>Experiencia</dt><dd>+{percent(hero.bonuses?.attack)}</dd></div>
+              <div className="flex justify-between"><dt>Reducción de daño</dt><dd>{percent(hero.bonuses?.defense)}</dd></div>
+              <div className="flex justify-between"><dt>Botín por atributo</dt><dd>+{percent(hero.bonuses?.production)}</dd></div>
+              <div className="flex justify-between"><dt>Velocidad</dt><dd>{percent(hero.bonuses?.speed)}</dd></div>
+              <div className="flex justify-between"><dt>Botín por objetos</dt><dd>+{percent(hero.bonuses?.loot)}</dd></div>
+            </dl>
+          </section>
         </div>
 
-        {/* Middle Column: Equipment Slots */}
-        <div className="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700">
-          <h2 className="text-xl font-semibold mb-6 text-yellow-400 text-center">Equipment</h2>
-          <div className="flex flex-col items-center gap-4">
-            {['helmet', 'weapon', 'armor', 'boots', 'mount'].map(slot => {
-              const item = getEquippedInSlot(slot);
+        <section className="card bg-black/40 border border-amber-900/40 p-5">
+          <h2 className="font-bold text-xl text-amber-200 mb-4">Equipo</h2>
+          <div className="space-y-3">
+            {slots.map((slot) => {
+              const item = equipped.get(slot);
               return (
-                <div key={slot} className="w-full max-w-xs">
-                  <div className="text-xs text-gray-400 mb-1 capitalize text-center">{slot}</div>
+                <div key={slot} className="rounded-lg border border-white/10 bg-black/30 p-3" data-testid={`hero-slot-${slot}`}>
+                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">{SLOT_LABELS[slot] || slot}</div>
                   {item ? (
-                    <div className="bg-gray-700 p-3 rounded border border-yellow-600 relative group">
-                      <div className="font-bold text-yellow-400 text-center">{item.name}</div>
-                      <div className="text-sm text-green-400 text-center">
-                        +{item.bonus_value}% {item.bonus_type.replace('_', ' ')}
-                      </div>
-                      <button
-                        onClick={() => handleUnequip(item.id)}
-                        className="absolute top-0 right-0 bg-red-600 text-white text-xs p-1 rounded opacity-0 group-hover:opacity-100 transition"
-                      >
-                        X
-                      </button>
+                    <div className="flex items-center justify-between gap-3">
+                      <div><div className="font-semibold text-amber-100">{item.name}</div><div className="text-xs text-green-400">+{percent(item.bonus_value)} {BONUS_LABELS[item.bonus_type] || item.bonus_type}</div></div>
+                      <button type="button" className="btn btn-xs btn-error" onClick={() => handleUnequip(item.id)} disabled={busy}>Quitar</button>
                     </div>
-                  ) : (
-                    <div className="bg-gray-900 p-4 rounded border border-gray-700 border-dashed text-center text-gray-600 h-16 flex items-center justify-center">
-                      Empty
-                    </div>
-                  )}
+                  ) : <div className="text-gray-500 text-sm">Vacío</div>}
                 </div>
               );
             })}
           </div>
-        </div>
+        </section>
 
-        {/* Right Column: Inventory */}
-        <div className="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700">
-          <h2 className="text-xl font-semibold mb-4 text-yellow-400">Inventory</h2>
-          {inventoryItems.length === 0 ? (
-            <div className="text-gray-500 text-center italic">No items in inventory</div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {inventoryItems.map(item => renderItemCard(item, 'Equip', handleEquip))}
-            </div>
-          )}
-        </div>
+        <section className="card bg-black/40 border border-amber-900/40 p-5">
+          <h2 className="font-bold text-xl text-amber-200 mb-2">Inventario</h2>
+          <p className="text-xs text-gray-500 mb-4">Los objetos se obtienen mediante aventuras. Solo uno por slot puede estar equipado.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
+            {inventory.map((item) => (
+              <article key={item.id} className="rounded-lg border border-white/10 bg-black/30 p-3" data-testid="hero-item">
+                <div className="flex justify-between gap-2"><strong className="text-amber-100">{item.name}</strong><span className="text-xs capitalize text-purple-300">{item.rarity}</span></div>
+                <div className="text-xs text-gray-400 mt-1">{SLOT_LABELS[item.slot] || item.slot} · +{percent(item.bonus_value)} {BONUS_LABELS[item.bonus_type] || item.bonus_type}</div>
+                <p className="text-xs text-gray-500 mt-2">{item.description}</p>
+                <button type="button" className="btn btn-sm btn-primary w-full mt-3" onClick={() => handleEquip(item.id)} disabled={busy}>Equipar</button>
+              </article>
+            ))}
+            {inventory.length === 0 && <div className="text-gray-500 text-sm italic">No hay objetos sin equipar.</div>}
+          </div>
+        </section>
       </div>
     </div>
   );
