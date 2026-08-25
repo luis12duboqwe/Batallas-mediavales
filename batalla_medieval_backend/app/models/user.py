@@ -101,14 +101,11 @@ class User(Base):
 
     @property
     def hero(self):
-        """Temporary compatibility for legacy single-world callers.
+        """Compatibility accessor; authoritative callers should use world scope."""
 
-        The final BM-0068 combat/movement path uses ``hero_for_world``. This
-        property deliberately returns ``None`` when the user owns heroes in
-        multiple worlds and no active-world match exists, preventing accidental
-        cross-world hero leakage.
-        """
-
+        scoped_override = getattr(self, "_bm0068_scoped_hero", None)
+        if scoped_override is not None:
+            return scoped_override
         if self.world_id is not None:
             active = self.hero_for_world(self.world_id)
             if active is not None:
