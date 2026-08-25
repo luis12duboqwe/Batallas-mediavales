@@ -601,6 +601,26 @@ def _lock_city_for_delivery(db: Session, city_id: int) -> models.City | None:
     )
 
 
+def _lock_transport_cities(
+    db: Session, *city_ids: int | None
+) -> dict[int, models.City]:
+    """Lock all cities touched by a transport in one deterministic order.
+
+    Opposite-direction transports can be resolved by different workers at the
+    same instant. Locking only each receiver lets one worker hold A while the
+    other holds B, after which both return-movement FK checks wait on the other
+    city and PostgreSQL detects a deadlock. Taking every city row in ascending
+    ID order makes A→B and B→A serialize on the same first lock.
+    """
+
+    locked: dict[int, models.City] = {}
+    for city_id in sorted({int(value) for value in city_ids if value is not None}):
+        city = _lock_city_for_delivery(db, city_id)
+        if city is not None:
+            locked[city_id] = city
+    return locked
+
+
 def _can_store_all(city: models.City, resources: Dict[str, int]) -> bool:
     limit = float(production.get_storage_limit(city))
     return all(
@@ -702,13 +722,15 @@ def _resolve_reinforce_core(db: Session, movement: models.Movement) -> None:
 def _resolve_transport_core(
     db: Session, movement: models.Movement
 ) -> List[dict[str, Any]]:
-    sender = movement.origin_city
+    sender_id = movement.origin_city_id
     receiver_id = movement.target_city_id
-    if not sender or receiver_id is None:
+    if sender_id is None or receiver_id is None:
         return []
 
-    receiver = _lock_city_for_delivery(db, receiver_id)
-    if receiver is None:
+    locked_cities = _lock_transport_cities(db, sender_id, receiver_id)
+    sender = locked_cities.get(sender_id)
+    receiver = locked_cities.get(receiver_id)
+    if sender is None or receiver is None:
         return []
 
     payload = _canonical_transport_resources(movement.resources or {})
