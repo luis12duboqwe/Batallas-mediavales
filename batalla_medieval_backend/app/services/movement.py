@@ -253,9 +253,6 @@ def send_movement(
     distance = math.hypot(origin_city.x - target_x, origin_city.y - target_y)
     arrival_time = utc_now() + timedelta(hours=distance / speed)
 
-    # Anti-cheat helpers currently own their commits. They therefore run before
-    # any troops/resources are reserved so a helper failure cannot strand a
-    # paid payload without a movement record.
     if origin_city.owner:
         anticheat.check_action_speed(db, origin_city.owner, "movement")
         if target_city is not None:
@@ -347,6 +344,12 @@ def _create_return_movement(
     return return_move
 
 
+def _hero_for_world(owner: models.User | None, world_id: int) -> models.Hero | None:
+    if owner is None:
+        return None
+    return owner.hero_for_world(world_id)
+
+
 def _apply_hero_xp_without_commit(hero: models.Hero | None, xp_amount: int) -> None:
     if not hero or xp_amount <= 0:
         return
@@ -372,6 +375,11 @@ def _resolve_attack_core(db: Session, movement: models.Movement) -> List[dict[st
     if not attacker or not defender:
         return []
 
+    attacker_hero = _hero_for_world(attacker.owner, movement.world_id)
+    defender_hero = _hero_for_world(defender.owner, movement.world_id)
+    if defender_hero and defender_hero.city_id != defender.id:
+        defender_hero = None
+
     original_defender_owner_id = defender.owner_id
     attacker_resources_before = {
         resource: float(getattr(attacker, resource)) for resource in RESOURCE_FIELDS
@@ -382,18 +390,16 @@ def _resolve_attack_core(db: Session, movement: models.Movement) -> List[dict[st
         defender,
         movement.troops or {},
         modifiers,
+        attacker_hero=attacker_hero,
+        defender_hero=defender_hero,
         target_building=movement.target_building,
     )
 
-    # Combat calculates loot and deducts it from the defender. The loot belongs
-    # to the returning army, not to the city at impact time. Reset only the
-    # attacker's immediate credit and carry the exact loot on the return march.
     for resource, before in attacker_resources_before.items():
         setattr(attacker, resource, before)
 
     _apply_defender_losses(defender, result.get("defender_losses", {}))
-    if attacker.owner and attacker.owner.hero:
-        _apply_hero_xp_without_commit(attacker.owner.hero, result.get("xp_gained", 0))
+    _apply_hero_xp_without_commit(attacker_hero, result.get("xp_gained", 0))
 
     content = combat.build_battle_report_content(attacker, defender, result)
     _add_report(
@@ -477,7 +483,7 @@ def _resolve_oasis_attack_core(
     if not attacker or not oasis:
         return []
 
-    attacker_hero = attacker.owner.hero if attacker.owner else None
+    attacker_hero = _hero_for_world(attacker.owner, movement.world_id)
     modifiers = event_service.get_active_modifiers(db, world_id=movement.world_id)
     result = combat.resolve_oasis_battle(
         attacker,
@@ -582,8 +588,6 @@ def _credit_resources_with_storage(city: models.City, resources: Dict[str, int])
 
 
 def _canonical_transport_resources(resources: Dict[str, int] | None) -> Dict[str, int]:
-    """Strip transport metadata and return only positive canonical resources."""
-
     return {
         resource: max(int((resources or {}).get(resource, 0) or 0), 0)
         for resource in RESOURCE_FIELDS
@@ -604,15 +608,6 @@ def _lock_city_for_delivery(db: Session, city_id: int) -> models.City | None:
 def _lock_transport_cities(
     db: Session, *city_ids: int | None
 ) -> dict[int, models.City]:
-    """Lock all cities touched by a transport in one deterministic order.
-
-    Opposite-direction transports can be resolved by different workers at the
-    same instant. Locking only each receiver lets one worker hold A while the
-    other holds B, after which both return-movement FK checks wait on the other
-    city and PostgreSQL detects a deadlock. Taking every city row in ascending
-    ID order makes A→B and B→A serialize on the same first lock.
-    """
-
     locked: dict[int, models.City] = {}
     for city_id in sorted({int(value) for value in city_ids if value is not None}):
         city = _lock_city_for_delivery(db, city_id)
@@ -812,14 +807,6 @@ def _resolve_transport_core(
 def _resolve_transport_return_core(
     db: Session, movement: models.Movement
 ) -> tuple[bool, List[dict[str, Any]]]:
-    """Finish a merchant return without ever destroying rejected cargo.
-
-    A rejected shipment keeps its resource payload on the return movement. If
-    the sender has refilled storage before the merchants arrive, the movement
-    stays ongoing and therefore continues to consume merchant capacity until
-    the complete payload can be restored atomically.
-    """
-
     target_city_id = movement.target_city_id
     if target_city_id is None:
         return True, []
@@ -945,8 +932,6 @@ def resolve_due_movements(db: Session) -> List[models.Movement]:
             should_complete, return_effects = _resolve_transport_return_core(db, movement)
             effects.extend(return_effects)
 
-        # Mark completed before any helper that is allowed to commit. All core
-        # state, reports, losses and return marches commit together below.
         if should_complete:
             movement.status = "completed"
         db.add(movement)
@@ -970,8 +955,6 @@ def resolve_due_movements(db: Session) -> List[models.Movement]:
     return movements
 
 
-# Compatibility entrypoints kept for old callers. They now share the single
-# canonical resolver instead of maintaining separate combat implementations.
 def process_movements(db: Session) -> List[models.Movement]:
     return resolve_due_movements(db)
 
