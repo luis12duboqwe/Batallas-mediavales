@@ -24,6 +24,6 @@ def test_barbarian_profiles_only_use_canonical_balance_content():
     for profile in pve.BARBARIAN_PROFILES.values():
         assert set(profile["resources"]) == set(balance.RESOURCE_FIELDS)
         assert profile["resource_regen"] > 0
-        assert set(profile["buildings"]).issubset(balance.BUILDING_CATALOG)
+        assert set(profile["buildings"]).issubset(set(balance.BUILDING_ORDER))
         assert set(profile["troops"]).issubset(balance.UNIT_CATALOG)
         assert all(quantity > 0 for quantity in profile["troops"].values())
