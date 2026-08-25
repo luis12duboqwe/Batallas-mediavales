@@ -18,6 +18,8 @@ class MapTile(BaseModel):
     resource_type: Optional[str] = None
     bonus_percent: Optional[int] = None
     is_conquered: Optional[bool] = None
+    pve_tier: Optional[int] = None
+    pve_rules_version: Optional[str] = None
 
 
 class MapResponse(BaseModel):
