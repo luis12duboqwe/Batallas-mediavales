@@ -20,11 +20,7 @@ from . import quest as quest_service
 
 logger = logging.getLogger(__name__)
 
-# Compatibility aliases. Movement numbers live only in ``balance``.
 UNIT_SPEED = balance.UNIT_SPEED
-
-# Economic transports deliberately do not use this generic dispatch path.
-# ``market`` owns their authorization, capacity and atomic reservation rules.
 PLAYER_MOVEMENT_TYPES = {"attack", "spy", "reinforce"}
 RESOURCE_FIELDS = balance.RESOURCE_FIELDS
 
@@ -95,8 +91,9 @@ def _reserve_payload_and_create(
     speed: float,
     world_id: int,
     target_building: str | None,
+    hero_id: int | None,
 ) -> models.Movement:
-    """Reserve the payload and create the movement under one city row lock."""
+    """Reserve troops and optional hero in one transaction."""
 
     city = (
         db.query(models.City)
@@ -107,6 +104,29 @@ def _reserve_payload_and_create(
     )
     if city is None:
         raise ValueError("Origin city not found")
+
+    locked_hero = None
+    if hero_id is not None:
+        if movement_type != "attack":
+            raise ValueError("Hero can only be assigned to attack movements")
+        locked_hero = (
+            db.query(models.Hero)
+            .filter(
+                models.Hero.id == hero_id,
+                models.Hero.user_id == city.owner_id,
+                models.Hero.world_id == world_id,
+                models.Hero.city_id == city.id,
+            )
+            .with_for_update()
+            .populate_existing()
+            .one_or_none()
+        )
+        if locked_hero is None:
+            raise ValueError("Hero does not belong to the origin city and world")
+        if locked_hero.status != "home":
+            raise ValueError("Hero is busy")
+        if float(locked_hero.health) <= 0:
+            raise ValueError("Hero is dead")
 
     reserved_troops = {"spy": spy_count} if movement_type == "spy" else troops
     if reserved_troops:
@@ -131,6 +151,10 @@ def _reserve_payload_and_create(
     if movement_type == "transport":
         raise ValueError("Transport movements must be created through the market service")
 
+    if locked_hero is not None:
+        locked_hero.status = "moving"
+        db.add(locked_hero)
+
     movement_obj = models.Movement(
         origin_city_id=city.id,
         target_city_id=target_city_id,
@@ -142,6 +166,7 @@ def _reserve_payload_and_create(
         arrival_time=arrival_time,
         speed_used=speed,
         world_id=world_id,
+        hero_id=hero_id,
         target_building=target_building,
         status="ongoing",
     )
@@ -157,8 +182,6 @@ def _run_dispatch_side_effects(
     origin_city: models.City,
     target_city: models.City | None,
 ) -> None:
-    """Run non-economic effects only after the movement transaction committed."""
-
     if movement_obj.movement_type == "attack" and target_city and target_city.owner:
         try:
             notification_service.create_notification(
@@ -172,10 +195,7 @@ def _run_dispatch_side_effects(
             db.rollback()
             logger.exception("Failed to create incoming attack notification")
 
-    event_type = {
-        "attack": "attack_sent",
-        "spy": "spy_sent",
-    }.get(movement_obj.movement_type)
+    event_type = {"attack": "attack_sent", "spy": "spy_sent"}.get(movement_obj.movement_type)
     if event_type and origin_city.owner:
         try:
             quest_service.handle_event(
@@ -200,12 +220,15 @@ def send_movement(
     target_city: models.City | None = None,
     target_building: str | None = None,
     target_oasis_id: int | None = None,
+    hero_id: int | None = None,
 ) -> models.Movement:
     """Validate, reserve and persist a player movement atomically."""
 
     _validate_target_type(movement_type, target_city_id, target_oasis_id)
     normalized_troops = _normalize_troops(troops)
     normalized_resources = _normalize_resources(resources)
+    if hero_id is not None and movement_type != "attack":
+        raise ValueError("Hero can only be assigned to attack movements")
 
     if target_city_id is not None:
         target_city = target_city or (
@@ -222,11 +245,7 @@ def send_movement(
             raise ValueError("Origin and target city must be different")
         target_x, target_y = target_city.x, target_city.y
     else:
-        target_oasis = (
-            db.query(models.Oasis)
-            .filter(models.Oasis.id == target_oasis_id)
-            .first()
-        )
+        target_oasis = db.query(models.Oasis).filter(models.Oasis.id == target_oasis_id).first()
         if not target_oasis:
             raise ValueError("Target oasis not found")
         if target_oasis.world_id != origin_city.world_id:
@@ -279,6 +298,7 @@ def send_movement(
         speed=speed,
         world_id=origin_city.world_id,
         target_building=target_building,
+        hero_id=hero_id,
     )
     _run_dispatch_side_effects(db, movement_obj, origin_city, target_city)
 
@@ -290,6 +310,7 @@ def send_movement(
             "target_city_id": target_city_id,
             "target_oasis_id": target_oasis_id,
             "movement_type": movement_type,
+            "hero_id": hero_id,
             "arrival_time": arrival_time.isoformat(),
         },
     )
@@ -335,6 +356,7 @@ def _create_return_movement(
         movement_type="return",
         troops=troops or {},
         resources=resources or {},
+        hero_id=source_movement.hero_id,
         arrival_time=utc_now() + timedelta(hours=distance / max(speed, 0.01)),
         speed_used=speed,
         world_id=source_movement.world_id,
@@ -369,21 +391,26 @@ def _apply_defender_losses(defender: models.City, losses: Dict[str, int]) -> Non
             troop.quantity = max(0, troop.quantity - int(loss))
 
 
+def _movement_hero(movement: models.Movement) -> models.Hero | None:
+    hero = movement.hero
+    if hero is None or hero.world_id != movement.world_id or hero.status != "moving" or hero.health <= 0:
+        return None
+    return hero
+
+
 def _resolve_attack_core(db: Session, movement: models.Movement) -> List[dict[str, Any]]:
     attacker = movement.origin_city
     defender = movement.target_city
     if not attacker or not defender:
         return []
 
-    attacker_hero = _hero_for_world(attacker.owner, movement.world_id)
+    attacker_hero = _movement_hero(movement)
     defender_hero = _hero_for_world(defender.owner, movement.world_id)
-    if defender_hero and defender_hero.city_id != defender.id:
+    if defender_hero and (defender_hero.city_id != defender.id or defender_hero.status != "home"):
         defender_hero = None
 
     original_defender_owner_id = defender.owner_id
-    attacker_resources_before = {
-        resource: float(getattr(attacker, resource)) for resource in RESOURCE_FIELDS
-    }
+    attacker_resources_before = {resource: float(getattr(attacker, resource)) for resource in RESOURCE_FIELDS}
     modifiers = event_service.get_active_modifiers(db, world_id=movement.world_id)
     result = combat.resolve_battle(
         attacker,
@@ -402,35 +429,13 @@ def _resolve_attack_core(db: Session, movement: models.Movement) -> List[dict[st
     _apply_hero_xp_without_commit(attacker_hero, result.get("xp_gained", 0))
 
     content = combat.build_battle_report_content(attacker, defender, result)
-    _add_report(
-        db,
-        city_id=attacker.id,
-        world_id=movement.world_id,
-        report_type="battle",
-        content=content,
-        attacker_city_id=attacker.id,
-        defender_city_id=defender.id,
-    )
-    _add_report(
-        db,
-        city_id=defender.id,
-        world_id=movement.world_id,
-        report_type="battle",
-        content=content,
-        attacker_city_id=attacker.id,
-        defender_city_id=defender.id,
-    )
+    _add_report(db, city_id=attacker.id, world_id=movement.world_id, report_type="battle", content=content, attacker_city_id=attacker.id, defender_city_id=defender.id)
+    _add_report(db, city_id=defender.id, world_id=movement.world_id, report_type="battle", content=content, attacker_city_id=attacker.id, defender_city_id=defender.id)
 
-    survivors = {
-        unit: int(amount)
-        for unit, amount in result.get("attacker_survivors", {}).items()
-        if int(amount) > 0
-    }
-    loot = {
-        resource: int(result.get("loot", {}).get(resource, 0) or 0)
-        for resource in RESOURCE_FIELDS
-    }
-    if survivors or any(loot.values()):
+    survivors = {unit: int(amount) for unit, amount in result.get("attacker_survivors", {}).items() if int(amount) > 0}
+    loot = {resource: int(result.get("loot", {}).get(resource, 0) or 0) for resource in RESOURCE_FIELDS}
+    hero_returns = bool(attacker_hero and attacker_hero.status != "dead" and attacker_hero.health > 0)
+    if survivors or any(loot.values()) or hero_returns:
         _create_return_movement(
             db,
             from_city=defender,
@@ -442,56 +447,23 @@ def _resolve_attack_core(db: Session, movement: models.Movement) -> List[dict[st
 
     effects: List[dict[str, Any]] = []
     if attacker.owner_id:
-        effects.append(
-            {
-                "type": "notification",
-                "user_id": attacker.owner_id,
-                "title": "Informe de batalla listo",
-                "body": f"Tu ataque contra {defender.name} ha generado un informe.",
-                "notification_type": "report_ready",
-                "allow_email": False,
-            }
-        )
+        effects.append({"type": "notification", "user_id": attacker.owner_id, "title": "Informe de batalla listo", "body": f"Tu ataque contra {defender.name} ha generado un informe.", "notification_type": "report_ready", "allow_email": False})
     if original_defender_owner_id:
-        effects.append(
-            {
-                "type": "notification",
-                "user_id": original_defender_owner_id,
-                "title": "Has recibido un informe de batalla",
-                "body": f"Tu ciudad {defender.name} ha sido atacada. Hay un nuevo informe disponible.",
-                "notification_type": "report_ready",
-                "allow_email": False,
-            }
-        )
+        effects.append({"type": "notification", "user_id": original_defender_owner_id, "title": "Has recibido un informe de batalla", "body": f"Tu ciudad {defender.name} ha sido atacada. Hay un nuevo informe disponible.", "notification_type": "report_ready", "allow_email": False})
     if attacker.owner_id and sum(result.get("defender_survivors", {}).values()) == 0:
-        effects.append(
-            {
-                "type": "achievement",
-                "user_id": attacker.owner_id,
-                "requirement_type": "win_battles",
-                "increment": 1,
-            }
-        )
+        effects.append({"type": "achievement", "user_id": attacker.owner_id, "requirement_type": "win_battles", "increment": 1})
     return effects
 
 
-def _resolve_oasis_attack_core(
-    db: Session, movement: models.Movement
-) -> List[dict[str, Any]]:
+def _resolve_oasis_attack_core(db: Session, movement: models.Movement) -> List[dict[str, Any]]:
     attacker = movement.origin_city
     oasis = movement.target_oasis
     if not attacker or not oasis:
         return []
 
-    attacker_hero = _hero_for_world(attacker.owner, movement.world_id)
+    attacker_hero = _movement_hero(movement)
     modifiers = event_service.get_active_modifiers(db, world_id=movement.world_id)
-    result = combat.resolve_oasis_battle(
-        attacker,
-        oasis,
-        movement.troops or {},
-        modifiers=modifiers,
-        attacker_hero=attacker_hero,
-    )
+    result = combat.resolve_oasis_battle(attacker, oasis, movement.troops or {}, modifiers=modifiers, attacker_hero=attacker_hero)
 
     oasis_troops = dict(oasis.troops or {})
     for unit, loss in result.get("defender_losses", {}).items():
@@ -504,50 +476,29 @@ def _resolve_oasis_attack_core(
         oasis.owner_city_id = attacker.id
         oasis.troops = {}
         if attacker.owner_id:
-            effects.append(
-                {
-                    "type": "notification",
-                    "user_id": attacker.owner_id,
-                    "title": "¡Oasis Conquistado!",
-                    "body": f"Has conquistado un oasis en ({oasis.x}, {oasis.y}).",
-                    "notification_type": "conquest",
-                    "allow_email": True,
-                }
-            )
+            effects.append({"type": "notification", "user_id": attacker.owner_id, "title": "¡Oasis Conquistado!", "body": f"Has conquistado un oasis en ({oasis.x}, {oasis.y}).", "notification_type": "conquest", "allow_email": True})
 
     _apply_hero_xp_without_commit(attacker_hero, result.get("xp_gained", 0))
     content = combat.build_oasis_report_content(attacker, oasis, result)
-    _add_report(
-        db,
-        city_id=attacker.id,
-        world_id=movement.world_id,
-        report_type="battle",
-        content=content,
-        attacker_city_id=attacker.id,
-        defender_city_id=None,
-    )
+    _add_report(db, city_id=attacker.id, world_id=movement.world_id, report_type="battle", content=content, attacker_city_id=attacker.id, defender_city_id=None)
 
-    survivors = {
-        unit: int(amount)
-        for unit, amount in result.get("attacker_survivors", {}).items()
-        if int(amount) > 0
-    }
-    if survivors:
+    survivors = {unit: int(amount) for unit, amount in result.get("attacker_survivors", {}).items() if int(amount) > 0}
+    hero_returns = bool(attacker_hero and attacker_hero.status != "dead" and attacker_hero.health > 0)
+    if survivors or hero_returns:
         speed = movement.speed_used or UNIT_SPEED["basic_infantry"]
         distance = math.hypot(attacker.x - oasis.x, attacker.y - oasis.y)
-        db.add(
-            models.Movement(
-                origin_city_id=attacker.id,
-                target_city_id=attacker.id,
-                movement_type="return",
-                troops=survivors,
-                resources={},
-                arrival_time=utc_now() + timedelta(hours=distance / max(speed, 0.01)),
-                speed_used=speed,
-                world_id=movement.world_id,
-                status="ongoing",
-            )
-        )
+        db.add(models.Movement(
+            origin_city_id=attacker.id,
+            target_city_id=attacker.id,
+            movement_type="return",
+            troops=survivors,
+            resources={},
+            hero_id=movement.hero_id if hero_returns else None,
+            arrival_time=utc_now() + timedelta(hours=distance / max(speed, 0.01)),
+            speed_used=speed,
+            world_id=movement.world_id,
+            status="ongoing",
+        ))
     return effects
 
 
@@ -559,22 +510,9 @@ def _resolve_spy_core(db: Session, movement: models.Movement) -> List[dict[str, 
     success_chance = float(report_data.get("success_chance", 0.0))
     success = bool(report_data.get("success", False))
     if surviving_spies > 0:
-        _create_return_movement(
-            db,
-            from_city=movement.target_city,
-            to_city=movement.origin_city,
-            source_movement=movement,
-            troops={"spy": surviving_spies},
-        )
+        _create_return_movement(db, from_city=movement.target_city, to_city=movement.origin_city, source_movement=movement, troops={"spy": surviving_spies})
     if movement.origin_city.owner_id:
-        return [
-            {
-                "type": "spy_audit",
-                "user_id": movement.origin_city.owner_id,
-                "success_chance": success_chance,
-                "success": success,
-            }
-        ]
+        return [{"type": "spy_audit", "user_id": movement.origin_city.owner_id, "success_chance": success_chance, "success": success}]
     return []
 
 
@@ -588,26 +526,14 @@ def _credit_resources_with_storage(city: models.City, resources: Dict[str, int])
 
 
 def _canonical_transport_resources(resources: Dict[str, int] | None) -> Dict[str, int]:
-    return {
-        resource: max(int((resources or {}).get(resource, 0) or 0), 0)
-        for resource in RESOURCE_FIELDS
-        if int((resources or {}).get(resource, 0) or 0) > 0
-    }
+    return {resource: max(int((resources or {}).get(resource, 0) or 0), 0) for resource in RESOURCE_FIELDS if int((resources or {}).get(resource, 0) or 0) > 0}
 
 
 def _lock_city_for_delivery(db: Session, city_id: int) -> models.City | None:
-    return (
-        db.query(models.City)
-        .filter(models.City.id == city_id)
-        .with_for_update()
-        .populate_existing()
-        .one_or_none()
-    )
+    return db.query(models.City).filter(models.City.id == city_id).with_for_update().populate_existing().one_or_none()
 
 
-def _lock_transport_cities(
-    db: Session, *city_ids: int | None
-) -> dict[int, models.City]:
+def _lock_transport_cities(db: Session, *city_ids: int | None) -> dict[int, models.City]:
     locked: dict[int, models.City] = {}
     for city_id in sorted({int(value) for value in city_ids if value is not None}):
         city = _lock_city_for_delivery(db, city_id)
@@ -618,10 +544,7 @@ def _lock_transport_cities(
 
 def _can_store_all(city: models.City, resources: Dict[str, int]) -> bool:
     limit = float(production.get_storage_limit(city))
-    return all(
-        float(getattr(city, resource)) + int(amount) <= limit
-        for resource, amount in resources.items()
-    )
+    return all(float(getattr(city, resource)) + int(amount) <= limit for resource, amount in resources.items())
 
 
 def _credit_resources_exact(city: models.City, resources: Dict[str, int]) -> None:
@@ -638,38 +561,32 @@ def _resolve_return_core(db: Session, movement: models.Movement) -> None:
         amount = int(raw_amount)
         if amount <= 0:
             continue
-        troop = (
-            db.query(models.Troop)
-            .filter(
-                models.Troop.city_id == city.id,
-                models.Troop.unit_type == unit,
-            )
-            .first()
-        )
+        troop = db.query(models.Troop).filter(models.Troop.city_id == city.id, models.Troop.unit_type == unit).first()
         if not troop:
             troop = models.Troop(city_id=city.id, unit_type=unit, quantity=0)
             db.add(troop)
         troop.quantity += amount
 
     _credit_resources_with_storage(city, movement.resources or {})
+    if movement.hero_id is not None:
+        hero = (
+            db.query(models.Hero)
+            .filter(
+                models.Hero.id == movement.hero_id,
+                models.Hero.world_id == movement.world_id,
+                models.Hero.city_id == city.id,
+            )
+            .with_for_update()
+            .populate_existing()
+            .one_or_none()
+        )
+        if hero and hero.status != "dead" and hero.health > 0:
+            hero.status = "home"
+            db.add(hero)
+
     from_city = movement.origin_city or city
-    content = json.dumps(
-        {
-            "type": "return",
-            "from": {"id": from_city.id, "name": from_city.name},
-            "troops": movement.troops or {},
-            "resources": movement.resources or {},
-        }
-    )
-    _add_report(
-        db,
-        city_id=city.id,
-        world_id=movement.world_id,
-        report_type="return",
-        content=content,
-        attacker_city_id=from_city.id,
-        defender_city_id=city.id,
-    )
+    content = json.dumps({"type": "return", "from": {"id": from_city.id, "name": from_city.name}, "troops": movement.troops or {}, "resources": movement.resources or {}, "hero_id": movement.hero_id})
+    _add_report(db, city_id=city.id, world_id=movement.world_id, report_type="return", content=content, attacker_city_id=from_city.id, defender_city_id=city.id)
 
 
 def _resolve_reinforce_core(db: Session, movement: models.Movement) -> None:
@@ -681,47 +598,22 @@ def _resolve_reinforce_core(db: Session, movement: models.Movement) -> None:
         amount = int(raw_amount)
         if amount <= 0:
             continue
-        troop = (
-            db.query(models.Troop)
-            .filter(
-                models.Troop.city_id == receiver.id,
-                models.Troop.unit_type == unit,
-            )
-            .first()
-        )
+        troop = db.query(models.Troop).filter(models.Troop.city_id == receiver.id, models.Troop.unit_type == unit).first()
         if not troop:
             troop = models.Troop(city_id=receiver.id, unit_type=unit, quantity=0)
             db.add(troop)
         troop.quantity += amount
 
-    content = json.dumps(
-        {
-            "type": "reinforce",
-            "sender": {"id": sender.id, "name": sender.name},
-            "receiver": {"id": receiver.id, "name": receiver.name},
-            "troops": movement.troops or {},
-        }
-    )
+    content = json.dumps({"type": "reinforce", "sender": {"id": sender.id, "name": sender.name}, "receiver": {"id": receiver.id, "name": receiver.name}, "troops": movement.troops or {}})
     for city_id in {sender.id, receiver.id}:
-        _add_report(
-            db,
-            city_id=city_id,
-            world_id=movement.world_id,
-            report_type="reinforce",
-            content=content,
-            attacker_city_id=sender.id,
-            defender_city_id=receiver.id,
-        )
+        _add_report(db, city_id=city_id, world_id=movement.world_id, report_type="reinforce", content=content, attacker_city_id=sender.id, defender_city_id=receiver.id)
 
 
-def _resolve_transport_core(
-    db: Session, movement: models.Movement
-) -> List[dict[str, Any]]:
+def _resolve_transport_core(db: Session, movement: models.Movement) -> List[dict[str, Any]]:
     sender_id = movement.origin_city_id
     receiver_id = movement.target_city_id
     if sender_id is None or receiver_id is None:
         return []
-
     locked_cities = _lock_transport_cities(db, sender_id, receiver_id)
     sender = locked_cities.get(sender_id)
     receiver = locked_cities.get(receiver_id)
@@ -734,79 +626,35 @@ def _resolve_transport_core(
     if delivered:
         _credit_resources_exact(receiver, payload)
 
-    content = json.dumps(
-        {
-            "type": "trade",
-            "sender": {"id": sender.id, "name": sender.name},
-            "receiver": {"id": receiver.id, "name": receiver.name},
-            "resources": payload,
-            "delivered": delivered,
-            "return_reason": None if delivered else "insufficient_storage",
-        }
-    )
+    content = json.dumps({"type": "trade", "sender": {"id": sender.id, "name": sender.name}, "receiver": {"id": receiver.id, "name": receiver.name}, "resources": payload, "delivered": delivered, "return_reason": None if delivered else "insufficient_storage"})
     for city_id in {sender.id, receiver.id}:
-        _add_report(
-            db,
-            city_id=city_id,
-            world_id=movement.world_id,
-            report_type="trade",
-            content=content,
-            attacker_city_id=sender.id,
-            defender_city_id=receiver.id,
-        )
+        _add_report(db, city_id=city_id, world_id=movement.world_id, report_type="trade", content=content, attacker_city_id=sender.id, defender_city_id=receiver.id)
 
     speed = movement.speed_used or balance.TRANSPORT_BASE_SPEED
     return_resources: Dict[str, int] = {"capacity": merchant_capacity}
     if not delivered:
         return_resources.update(payload)
-    db.add(
-        models.Movement(
-            origin_city_id=receiver.id,
-            target_city_id=sender.id,
-            movement_type="transport_return",
-            troops={},
-            resources=return_resources,
-            arrival_time=utc_now()
-            + timedelta(hours=calculate_distance(receiver, sender) / max(speed, 0.01)),
-            speed_used=speed,
-            world_id=movement.world_id,
-            status="ongoing",
-        )
-    )
+    db.add(models.Movement(
+        origin_city_id=receiver.id,
+        target_city_id=sender.id,
+        movement_type="transport_return",
+        troops={},
+        resources=return_resources,
+        arrival_time=utc_now() + timedelta(hours=calculate_distance(receiver, sender) / max(speed, 0.01)),
+        speed_used=speed,
+        world_id=movement.world_id,
+        status="ongoing",
+    ))
 
     effects: List[dict[str, Any]] = []
     if receiver.owner_id:
-        effects.append(
-            {
-                "type": "notification",
-                "user_id": receiver.owner_id,
-                "title": "Recursos recibidos" if delivered else "Transporte rechazado",
-                "body": (
-                    f"Has recibido recursos de {sender.name}."
-                    if delivered
-                    else "No había espacio suficiente para recibir el envío completo."
-                ),
-                "notification_type": "transport_received" if delivered else "transport_rejected",
-                "allow_email": True,
-            }
-        )
+        effects.append({"type": "notification", "user_id": receiver.owner_id, "title": "Recursos recibidos" if delivered else "Transporte rechazado", "body": f"Has recibido recursos de {sender.name}." if delivered else "No había espacio suficiente para recibir el envío completo.", "notification_type": "transport_received" if delivered else "transport_rejected", "allow_email": True})
     if not delivered and sender.owner_id:
-        effects.append(
-            {
-                "type": "notification",
-                "user_id": sender.owner_id,
-                "title": "Recursos de regreso",
-                "body": f"{receiver.name} no tenía espacio; el envío completo está regresando.",
-                "notification_type": "transport_returning_resources",
-                "allow_email": False,
-            }
-        )
+        effects.append({"type": "notification", "user_id": sender.owner_id, "title": "Recursos de regreso", "body": f"{receiver.name} no tenía espacio; el envío completo está regresando.", "notification_type": "transport_returning_resources", "allow_email": False})
     return effects
 
 
-def _resolve_transport_return_core(
-    db: Session, movement: models.Movement
-) -> tuple[bool, List[dict[str, Any]]]:
+def _resolve_transport_return_core(db: Session, movement: models.Movement) -> tuple[bool, List[dict[str, Any]]]:
     target_city_id = movement.target_city_id
     if target_city_id is None:
         return True, []
@@ -819,39 +667,12 @@ def _resolve_transport_return_core(
         return False, []
     if payload:
         _credit_resources_exact(city, payload)
-        content = json.dumps(
-            {
-                "type": "transport_return",
-                "resources": payload,
-                "reason": "insufficient_destination_storage",
-            }
-        )
-        _add_report(
-            db,
-            city_id=city.id,
-            world_id=movement.world_id,
-            report_type="trade",
-            content=content,
-            attacker_city_id=movement.origin_city_id,
-            defender_city_id=city.id,
-        )
+        content = json.dumps({"type": "transport_return", "resources": payload, "reason": "insufficient_destination_storage"})
+        _add_report(db, city_id=city.id, world_id=movement.world_id, report_type="trade", content=content, attacker_city_id=movement.origin_city_id, defender_city_id=city.id)
 
     if not city.owner_id:
         return True, []
-    return True, [
-        {
-            "type": "notification",
-            "user_id": city.owner_id,
-            "title": "Comerciantes regresaron",
-            "body": (
-                "Tus comerciantes regresaron con el envío rechazado."
-                if payload
-                else "Tus comerciantes han regresado."
-            ),
-            "notification_type": "transport_return",
-            "allow_email": False,
-        }
-    ]
+    return True, [{"type": "notification", "user_id": city.owner_id, "title": "Comerciantes regresaron", "body": "Tus comerciantes regresaron con el envío rechazado." if payload else "Tus comerciantes han regresado.", "notification_type": "transport_return", "allow_email": False}]
 
 
 def _run_resolution_effect(db: Session, effect: dict[str, Any]) -> None:
@@ -859,32 +680,14 @@ def _run_resolution_effect(db: Session, effect: dict[str, Any]) -> None:
     if effect_type == "notification":
         user = db.query(models.User).filter(models.User.id == effect["user_id"]).first()
         if user:
-            notification_service.create_notification(
-                db,
-                user,
-                title=effect["title"],
-                body=effect["body"],
-                notification_type=effect["notification_type"],
-                allow_email=effect.get("allow_email", True),
-            )
+            notification_service.create_notification(db, user, title=effect["title"], body=effect["body"], notification_type=effect["notification_type"], allow_email=effect.get("allow_email", True))
     elif effect_type == "achievement":
         from .achievement import update_achievement_progress
-
-        update_achievement_progress(
-            db,
-            effect["user_id"],
-            effect["requirement_type"],
-            increment=effect.get("increment"),
-        )
+        update_achievement_progress(db, effect["user_id"], effect["requirement_type"], increment=effect.get("increment"))
     elif effect_type == "spy_audit":
         user = db.query(models.User).filter(models.User.id == effect["user_id"]).first()
         if user:
-            anticheat.check_spy_result(
-                db,
-                user,
-                effect["success_chance"],
-                effect["success"],
-            )
+            anticheat.check_spy_result(db, user, effect["success_chance"], effect["success"])
 
 
 def resolve_due_movements(db: Session) -> List[models.Movement]:
@@ -894,17 +697,15 @@ def resolve_due_movements(db: Session) -> List[models.Movement]:
     movements = (
         db.query(models.Movement)
         .options(
+            selectinload(models.Movement.hero).selectinload(models.Hero.items).selectinload(models.HeroItem.template),
             selectinload(models.Movement.origin_city).selectinload(models.City.owner),
             selectinload(models.Movement.origin_city).selectinload(models.City.buildings),
-            selectinload(models.Movement.target_city).selectinload(models.City.owner),
+            selectinload(models.Movement.target_city).selectinload(models.City.owner).selectinload(models.User.heroes).selectinload(models.Hero.items).selectinload(models.HeroItem.template),
             selectinload(models.Movement.target_city).selectinload(models.City.troops),
             selectinload(models.Movement.target_city).selectinload(models.City.buildings),
             selectinload(models.Movement.target_oasis),
         )
-        .filter(
-            models.Movement.arrival_time <= now,
-            models.Movement.status == "ongoing",
-        )
+        .filter(models.Movement.arrival_time <= now, models.Movement.status == "ongoing")
         .order_by(models.Movement.id.asc())
         .with_for_update(skip_locked=True)
         .all()
@@ -943,15 +744,9 @@ def resolve_due_movements(db: Session) -> List[models.Movement]:
             _run_resolution_effect(db, effect)
         except Exception:
             db.rollback()
-            logger.exception(
-                "Post-resolution side effect failed",
-                extra={"effect_type": effect.get("type")},
-            )
+            logger.exception("Post-resolution side effect failed", extra={"effect_type": effect.get("type")})
 
-    logger.info(
-        "movements_resolved",
-        extra={"movement_ids": [movement.id for movement in movements]},
-    )
+    logger.info("movements_resolved", extra={"movement_ids": [movement.id for movement in movements]})
     return movements
 
 
