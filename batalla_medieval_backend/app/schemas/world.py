@@ -30,6 +30,8 @@ class WorldRead(WorldBase):
     id: int
     created_at: datetime
     ended_at: Optional[datetime] = None
+    pve_rules_version: str = "2026.08.25-bm0067-v1"
+    pve_last_tick_at: Optional[datetime] = None
     winner_id: Optional[int] = None
     winner_alliance_id: Optional[int] = None
     winner: Optional[WorldWinner] = None
