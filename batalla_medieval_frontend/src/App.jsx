@@ -26,6 +26,7 @@ import HeroView from './pages/HeroView';
 import AdventuresView from './pages/AdventuresView';
 import TutorialOverlay from './components/TutorialOverlay';
 import { useUserStore } from './store/userStore';
+import { useCityStore } from './store/cityStore';
 import soundManager from './services/sound';
 import { useTranslation } from 'react-i18next';
 
@@ -140,14 +141,16 @@ const GameRoute = ({ children }) => (
 
 const App = () => {
   const { user, token, refreshCity } = useUserStore();
+  const { loadCity } = useCityStore();
   const { i18n } = useTranslation();
   const location = useLocation();
 
   useEffect(() => {
     if (token) {
       refreshCity().catch(() => {});
+      loadCity().catch(() => {});
     }
-  }, [token, refreshCity]);
+  }, [token, refreshCity, loadCity]);
 
   useEffect(() => {
     if (user?.language && i18n.resolvedLanguage !== user.language) {
