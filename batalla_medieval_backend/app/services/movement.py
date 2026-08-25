@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models
 from ..utils import utc_now
-from . import anticheat, balance, combat, espionage
+from . import anticheat, balance, combat, espionage, hero_rules
 from . import event as event_service
 from . import notification as notification_service
 from . import production
@@ -87,13 +87,15 @@ def _reserve_payload_and_create(
     troops: Dict[str, int],
     resources: Dict[str, int],
     spy_count: int,
-    arrival_time,
-    speed: float,
+    base_speed: float,
+    movement_speed_multiplier: float,
+    world_speed: float,
+    distance: float,
     world_id: int,
     target_building: str | None,
     hero_id: int | None,
 ) -> models.Movement:
-    """Reserve troops and optional hero in one transaction."""
+    """Reserve troops/hero and freeze authoritative travel timing atomically."""
 
     city = (
         db.query(models.City)
@@ -127,6 +129,19 @@ def _reserve_payload_and_create(
             raise ValueError("Hero is busy")
         if float(locked_hero.health) <= 0:
             raise ValueError("Hero is dead")
+
+    # Equipment changes lock this same hero row and are forbidden once the hero
+    # is moving. Therefore the speed bonus observed here is the loadout frozen
+    # for this march, not a stale pre-dispatch estimate.
+    hero_speed_bonus = hero_rules.speed_bonus(locked_hero) if locked_hero else 0.0
+    speed = max(
+        float(base_speed)
+        * max(float(movement_speed_multiplier), 0.0)
+        * max(float(world_speed), 0.0)
+        * (1.0 + hero_speed_bonus),
+        0.01,
+    )
+    arrival_time = utc_now() + timedelta(hours=max(float(distance), 0.0) / speed)
 
     reserved_troops = {"spy": spy_count} if movement_type == "spy" else troops
     if reserved_troops:
@@ -266,24 +281,12 @@ def send_movement(
 
     base_speed = _get_base_speed(movement_type, normalized_troops)
     modifiers = event_service.get_active_modifiers(db, world_id=origin_city.world_id)
-    effective_speed = base_speed * modifiers.get("movement_speed", 1.0)
-    world_speed = origin_city.world.speed_modifier if origin_city.world else 1.0
-    speed = max(effective_speed * world_speed, 0.01)
+    movement_speed_multiplier = float(modifiers.get("movement_speed", 1.0))
+    world_speed = float(origin_city.world.speed_modifier if origin_city.world else 1.0)
     distance = math.hypot(origin_city.x - target_x, origin_city.y - target_y)
-    arrival_time = utc_now() + timedelta(hours=distance / speed)
 
     if origin_city.owner:
         anticheat.check_action_speed(db, origin_city.owner, "movement")
-        if target_city is not None:
-            anticheat.check_movement_legitimacy(
-                db,
-                origin_city,
-                target_city,
-                movement_type,
-                arrival_time,
-                speed,
-                spy_count,
-            )
 
     movement_obj = _reserve_payload_and_create(
         db,
@@ -294,12 +297,29 @@ def send_movement(
         troops=normalized_troops,
         resources=normalized_resources,
         spy_count=spy_count,
-        arrival_time=arrival_time,
-        speed=speed,
+        base_speed=base_speed,
+        movement_speed_multiplier=movement_speed_multiplier,
+        world_speed=world_speed,
+        distance=distance,
         world_id=origin_city.world_id,
         target_building=target_building,
         hero_id=hero_id,
     )
+
+    # Validate the exact persisted timing rather than a pre-lock estimate. This
+    # makes anti-cheat aware of the same bounded hero speed bonus used by the
+    # authoritative movement row.
+    if origin_city.owner and target_city is not None:
+        anticheat.check_movement_legitimacy(
+            db,
+            origin_city,
+            target_city,
+            movement_type,
+            movement_obj.arrival_time,
+            float(movement_obj.speed_used or 0.01),
+            spy_count,
+        )
+
     _run_dispatch_side_effects(db, movement_obj, origin_city, target_city)
 
     logger.info(
@@ -311,7 +331,8 @@ def send_movement(
             "target_oasis_id": target_oasis_id,
             "movement_type": movement_type,
             "hero_id": hero_id,
-            "arrival_time": arrival_time.isoformat(),
+            "arrival_time": movement_obj.arrival_time.isoformat(),
+            "speed_used": movement_obj.speed_used,
         },
     )
     return movement_obj
