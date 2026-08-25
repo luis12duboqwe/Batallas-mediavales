@@ -4,11 +4,18 @@ The implementation lives in :mod:`combat_rounds`; this module keeps the
 historic import path stable for movement, conquest, tests and external callers.
 BM-0067 also attaches the versioned PvE oasis reward while remaining inside the
 same worker transaction as the battle, so retries cannot pay twice.
+
+BM-0068 adapts the legacy combat helper hooks to the versioned percentage-based
+hero rules. This keeps the BM-0064 deterministic round engine intact while
+removing its old absolute ``100 + points * 10`` hero power model. Equipped
+items and allocated attributes now affect the live army through bounded bonuses
+owned exclusively by :mod:`hero_rules`.
 """
 
 import json
 
 from . import combat_rounds as _impl
+from . import hero_rules
 
 COMBAT_ALGORITHM_VERSION = _impl.COMBAT_ALGORITHM_VERSION
 COMBAT_MAX_ROUNDS = _impl.COMBAT_MAX_ROUNDS
@@ -17,11 +24,47 @@ UNIT_STATS = _impl.UNIT_STATS
 WALL_NAME = _impl.WALL_NAME
 WALL_BONUS_PER_LEVEL = _impl.WALL_BONUS_PER_LEVEL
 
+# Capture the BM-0064 unit-only helpers before installing the BM-0068 adapters.
+# The adapters are module-static (not per-request monkeypatches), so concurrent
+# battles all execute the same deterministic code path.
+_base_split_attack_by_type = _impl._split_attack_by_type
+_base_defense_values = _impl._defense_values
+
+
+def _split_attack_by_type(troops, hero=None):
+    """Return army attack after the bounded BM-0068 hero multiplier."""
+
+    attack_by_type, total_attack = _base_split_attack_by_type(troops, None)
+    if hero is None or getattr(hero, "status", None) != "moving" or float(getattr(hero, "health", 0.0)) <= 0:
+        return attack_by_type, total_attack
+
+    multiplier = 1.0 + hero_rules.attack_bonus(hero)
+    return (
+        {category: value * multiplier for category, value in attack_by_type.items()},
+        total_attack * multiplier,
+    )
+
+
+def _defense_values(defender_troops, hero=None):
+    """Return army defenses after the bounded BM-0068 hero multiplier."""
+
+    defenses = _base_defense_values(defender_troops, None)
+    if hero is None or getattr(hero, "status", None) != "home" or float(getattr(hero, "health", 0.0)) <= 0:
+        return defenses
+
+    multiplier = 1.0 + hero_rules.defense_bonus(hero)
+    return {category: value * multiplier for category, value in defenses.items()}
+
+
+# ``combat_rounds._resolve_rounds`` resolves these names at runtime inside its
+# own module. Install the adapters once so direct and compatibility callers use
+# the same authoritative BM-0068 behavior.
+_impl._split_attack_by_type = _split_attack_by_type
+_impl._defense_values = _defense_values
+
 # Compatibility helpers retained for callers that imported the previous module
 # internals. Authoritative resolution lives entirely in combat_rounds.
 _wall_names = _impl._wall_names
-_split_attack_by_type = _impl._split_attack_by_type
-_defense_values = _impl._defense_values
 _wall_bonus = _impl._wall_bonus
 _moral = _impl._moral
 _luck = _impl._luck
@@ -53,7 +96,13 @@ def resolve_battle(*args, **kwargs):
         previous_override = getattr(defender_owner, "_bm0068_scoped_hero", None)
         defender_owner._bm0068_scoped_hero = defender_hero
     try:
-        return _impl.resolve_battle(*args, **kwargs)
+        result = _impl.resolve_battle(*args, **kwargs)
+        result["hero_rules_version"] = hero_rules.HERO_RULES_VERSION
+        if kwargs.get("attacker_hero") is not None:
+            result["attacker_hero_bonus"] = hero_rules.attack_bonus(kwargs["attacker_hero"])
+        if defender_hero is not None:
+            result["defender_hero_bonus"] = hero_rules.defense_bonus(defender_hero)
+        return result
     finally:
         if defender_owner is not None and defender_hero is not None:
             if had_override:
@@ -95,19 +144,7 @@ def _credit_oasis_reward(attacker_city, oasis, result, *, was_wild: bool):
 
 
 def resolve_oasis_battle(*args, **kwargs):
-    """Preserve oasis scoring while applying the BM-0067 PvE reward contract.
-
-    BM-0064 changed combat determinism/rounds only. Oasis combat historically
-    returned ``xp_gained`` for the hero but did not award player attacker
-    ranking points, so keep that boundary stable. BM-0067 adds a separately
-    versioned conquest reward, credited atomically with battle resolution and
-    capped by the attacker's server-authoritative storage capacity.
-
-    The reward is a one-time wild-oasis capture reward. Ownership is sampled
-    before combat because the authoritative combat engine mutates
-    ``owner_city_id`` when conquest succeeds; checking ownership afterwards
-    would make an already-owned oasis indistinguishable from a first capture.
-    """
+    """Preserve oasis scoring while applying PvE and BM-0068 hero rules."""
 
     attacker_city = args[0] if args else kwargs.get("attacker_city")
     oasis = args[1] if len(args) > 1 else kwargs.get("oasis")
@@ -117,6 +154,10 @@ def resolve_oasis_battle(*args, **kwargs):
     result = _impl.resolve_oasis_battle(*args, **kwargs)
     if owner is not None and previous_points is not None:
         owner.attacker_points = previous_points
+    attacker_hero = kwargs.get("attacker_hero")
+    result["hero_rules_version"] = hero_rules.HERO_RULES_VERSION
+    if attacker_hero is not None:
+        result["attacker_hero_bonus"] = hero_rules.attack_bonus(attacker_hero)
     if attacker_city is not None and oasis is not None:
         result = _credit_oasis_reward(
             attacker_city,
@@ -133,4 +174,6 @@ def build_oasis_report_content(attacker_city, oasis, battle_result):
     report = json.loads(_impl.build_oasis_report_content(attacker_city, oasis, battle_result))
     report["loot"] = battle_result.get("loot", {})
     report["pve"] = battle_result.get("pve", {})
+    report["hero_rules_version"] = battle_result.get("hero_rules_version")
+    report["attacker_hero_bonus"] = battle_result.get("attacker_hero_bonus", 0.0)
     return json.dumps(report, sort_keys=True)
