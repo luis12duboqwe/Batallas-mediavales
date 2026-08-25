@@ -122,6 +122,7 @@ def create_movement(
             target_city=target_city,
             target_building=payload.target_building,
             target_oasis_id=payload.target_oasis_id,
+            hero_id=payload.hero_id,
         )
     except ValueError as exc:
         raise error_response(400, "movement_creation_failed", str(exc)) from exc
