@@ -73,7 +73,21 @@ _loss_ratios = _impl._loss_ratios
 _apply_losses = _impl._apply_losses
 _find_target_building = _impl._find_target_building
 
-build_battle_report_content = _impl.build_battle_report_content
+
+def build_battle_report_content(attacker_city, defender_city, battle_result):
+    """Serialize BM-0064 combat plus the exact BM-0068 hero modifiers used."""
+
+    report = json.loads(
+        _impl.build_battle_report_content(attacker_city, defender_city, battle_result)
+    )
+    report["hero_rules_version"] = battle_result.get("hero_rules_version")
+    report["attacker_hero_bonus"] = float(
+        battle_result.get("attacker_hero_bonus", 0.0) or 0.0
+    )
+    report["defender_hero_bonus"] = float(
+        battle_result.get("defender_hero_bonus", 0.0) or 0.0
+    )
+    return json.dumps(report, sort_keys=True)
 
 
 def resolve_battle(*args, **kwargs):
@@ -169,11 +183,13 @@ def resolve_oasis_battle(*args, **kwargs):
 
 
 def build_oasis_report_content(attacker_city, oasis, battle_result):
-    """Add BM-0067 PvE audit/reward metadata to the canonical oasis report."""
+    """Add BM-0067 PvE and BM-0068 hero audit metadata to the oasis report."""
 
     report = json.loads(_impl.build_oasis_report_content(attacker_city, oasis, battle_result))
     report["loot"] = battle_result.get("loot", {})
     report["pve"] = battle_result.get("pve", {})
     report["hero_rules_version"] = battle_result.get("hero_rules_version")
-    report["attacker_hero_bonus"] = battle_result.get("attacker_hero_bonus", 0.0)
+    report["attacker_hero_bonus"] = float(
+        battle_result.get("attacker_hero_bonus", 0.0) or 0.0
+    )
     return json.dumps(report, sort_keys=True)
