@@ -34,7 +34,7 @@ const HeroView = () => {
 
   useEffect(() => {
     fetchData();
-  }, [worldId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [worldId]);
 
   const handleDistribute = async () => {
     try {
