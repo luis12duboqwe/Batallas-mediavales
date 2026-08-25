@@ -19,6 +19,8 @@ class World(Base):
     created_at = Column(DateTime, default=get_utc_now)
     is_active = Column(Boolean, default=True)
     ended_at = Column(DateTime, nullable=True)
+    pve_rules_version = Column(String, nullable=False, default="2026.08.25-bm0067-v1")
+    pve_last_tick_at = Column(DateTime, nullable=True)
     winner_id = Column(
         Integer,
         ForeignKey("users.id", name="fk_worlds_winner_id_users", use_alter=True),
