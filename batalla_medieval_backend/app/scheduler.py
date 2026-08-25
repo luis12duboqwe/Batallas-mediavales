@@ -17,7 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import text
 
 from .database import SessionLocal, engine
-from .services import barbarian_ai, queue as queue_service
+from .services import barbarian_ai, pve_rules, queue as queue_service
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ def _run_database_job(job_name: str, callback) -> bool:
 
 
 def run_barbarian_ai_job() -> bool:
-    """Run barbarian growth exactly once across active worker replicas."""
+    """Run one durable PvE tick exactly once across active worker replicas."""
 
     return _run_database_job("barbarian_ai", barbarian_ai.process_barbarian_growth)
 
@@ -118,9 +118,9 @@ def start_scheduler() -> None:
 
     scheduler.add_job(
         run_barbarian_ai_job,
-        trigger=IntervalTrigger(minutes=5),
+        trigger=IntervalTrigger(seconds=pve_rules.PVE_TICK_SECONDS),
         id="barbarian_ai",
-        name="Barbarian AI Growth",
+        name="Versioned PvE Tick",
         replace_existing=True,
         coalesce=True,
         max_instances=1,
