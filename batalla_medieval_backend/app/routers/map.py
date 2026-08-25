@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models, schemas
 from ..database import get_db
-from ..services import ranking, world_gen, world_membership
+from ..services import pve, ranking, world_gen, world_membership
 from .auth import get_current_user
 from .responses import error_response
 from .world_access import require_world_access
@@ -40,6 +40,7 @@ def get_map_tiles(
     if world is None:
         world = db.query(models.World).filter(models.World.id == world_id).one()
     map_size = int(world.map_size)
+    rules_version = pve.world_rules_version(world)
 
     # A viewport may be centred on the first/last row of the map. Clamp the
     # requested square so clients never receive negative or >= map_size tiles
@@ -63,6 +64,7 @@ def get_map_tiles(
         db.query(models.City)
         .options(
             owner_alliance,
+            selectinload(models.City.world),
             selectinload(models.City.buildings),
             selectinload(models.City.troops),
         )
@@ -81,6 +83,7 @@ def get_map_tiles(
     oases = (
         db.query(models.Oasis)
         .options(
+            selectinload(models.Oasis.world),
             selectinload(models.Oasis.owner_city)
             .selectinload(models.City.owner)
             .selectinload(models.User.alliances)
@@ -117,6 +120,8 @@ def get_map_tiles(
             resource_type = None
             bonus_percent = None
             is_conquered = False
+            pve_tier = None
+            pve_rules_version = None
 
             if city:
                 if city.owner:
@@ -125,10 +130,14 @@ def get_map_tiles(
                     alliance_name = _alliance_name(city.owner, world_id)
                 else:
                     owner_name = "Bárbaros"
+                    pve_tier = pve.barbarian_tier(city)
+                    pve_rules_version = rules_version
             elif oasis:
                 oasis_id = oasis.id
                 resource_type = oasis.resource_type
                 bonus_percent = oasis.bonus_percent
+                pve_tier = pve.oasis_tier(oasis)
+                pve_rules_version = rules_version
                 if oasis.owner_city:
                     is_conquered = True
                     owner_id = oasis.owner_city.owner_id
@@ -154,6 +163,8 @@ def get_map_tiles(
                     resource_type=resource_type,
                     bonus_percent=bonus_percent,
                     is_conquered=is_conquered,
+                    pve_tier=pve_tier,
+                    pve_rules_version=pve_rules_version,
                 )
             )
 
@@ -166,7 +177,12 @@ def get_oasis(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    oasis = db.query(models.Oasis).filter(models.Oasis.id == oasis_id).first()
+    oasis = (
+        db.query(models.Oasis)
+        .options(selectinload(models.Oasis.world))
+        .filter(models.Oasis.id == oasis_id)
+        .first()
+    )
     if not oasis:
         raise error_response(404, "oasis_not_found", "Oasis not found")
     try:
@@ -182,4 +198,10 @@ def get_oasis(
             "You have not joined this world",
             {"world_id": oasis.world_id},
         ) from exc
-    return oasis
+
+    return schemas.OasisRead.model_validate(oasis).model_copy(
+        update={
+            "pve_tier": pve.oasis_tier(oasis),
+            "pve_rules_version": pve.world_rules_version(oasis.world),
+        }
+    )

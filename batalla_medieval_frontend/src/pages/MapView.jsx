@@ -12,6 +12,23 @@ const OASIS_RESOURCE_META = {
   gold: { icon: '🪙', label: 'Oro' },
 };
 
+const PveDifficulty = ({ tile }) => {
+  if (!tile?.pve_tier) return null;
+  return (
+    <div
+      className="rounded border border-amber-700/40 bg-amber-950/30 p-2 text-xs text-amber-100"
+      data-testid="pve-difficulty"
+      data-pve-tier={tile.pve_tier}
+      data-pve-rules-version={tile.pve_rules_version || ''}
+    >
+      <div className="font-semibold">Dificultad PvE T{tile.pve_tier}</div>
+      {tile.pve_rules_version && (
+        <div className="mt-1 break-all text-[10px] text-gray-400">Reglas {tile.pve_rules_version}</div>
+      )}
+    </div>
+  );
+};
+
 const MapView = () => {
   const { user } = useUserStore();
   const { currentCity } = useCityStore();
@@ -164,6 +181,7 @@ const MapView = () => {
                     <div className="text-sm text-gray-400">Jugador</div>
                     <div className="font-bold text-white">{selectedTile.owner_name || 'Bárbaros'}</div>
                   </div>
+                  {!selectedTile.owner_id && <PveDifficulty tile={selectedTile} />}
                   {selectedTile.alliance_name && (
                     <div>
                       <div className="text-sm text-gray-400">Alianza</div>
@@ -191,6 +209,7 @@ const MapView = () => {
                     <div className="text-sm text-gray-400">Oasis</div>
                     <div className="font-bold text-lg text-white">{selectedOasisResource?.icon || '🏞️'} {selectedOasisResource?.label || selectedTile.resource_type} (+{selectedTile.bonus_percent}%)</div>
                   </div>
+                  <PveDifficulty tile={selectedTile} />
                   <div>
                     <div className="text-sm text-gray-400">Estado</div>
                     <div className="font-bold text-white">{selectedTile.is_conquered ? (selectedTile.owner_id ? 'Conquistado' : 'Ocupado') : 'Salvaje'}</div>

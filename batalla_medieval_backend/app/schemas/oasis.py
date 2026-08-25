@@ -17,3 +17,5 @@ class OasisRead(OasisBase):
     world_id: int
     owner_city_id: Optional[int] = None
     troops: Dict[str, int] = Field(default_factory=dict)
+    pve_tier: Optional[int] = None
+    pve_rules_version: Optional[str] = None
