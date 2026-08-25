@@ -59,6 +59,21 @@ const MarketView = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (currentCity) return undefined;
+    let mounted = true;
+    loadCity().catch((error) => {
+      console.warn('Unable to initialize market city', error);
+      if (mounted) {
+        setMessageKind('error');
+        setMessage('No se pudo cargar la ciudad para abrir el mercado.');
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [currentCity, loadCity]);
+
   const fetchOffers = useCallback(async () => {
     if (!currentCity) return;
     try {
