@@ -1,14 +1,14 @@
 """Persist optional hero assignment on military movements.
 
 Revision ID: 0011_movement_hero_assignment
-Revises: 0010_hero_world_adventure_outcome
+Revises: 0010
 """
 
 from alembic import op
 import sqlalchemy as sa
 
 revision = "0011_movement_hero_assignment"
-down_revision = "0010_hero_world_adventure_outcome"
+down_revision = "0010"
 branch_labels = None
 depends_on = None
 
