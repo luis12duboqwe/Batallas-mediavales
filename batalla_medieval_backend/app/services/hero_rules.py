@@ -14,6 +14,10 @@ HERO_MIN_ADVENTURE_HEALTH = 20.0
 HERO_ATTACK_BONUS_PER_POINT = 0.01
 HERO_DEFENSE_BONUS_PER_POINT = 0.01
 HERO_PRODUCTION_BONUS_PER_POINT = 0.005
+HERO_MAX_ATTACK_BONUS = 0.50
+HERO_MAX_DEFENSE_BONUS = 0.50
+HERO_MAX_PRODUCTION_BONUS = 0.50
+HERO_MAX_SPEED_BONUS = 0.50
 HERO_REVIVE_COST_GOLD = 250.0
 HERO_REVIVE_HEALTH = 50.0
 
@@ -44,6 +48,50 @@ ADVENTURE_RESOURCE_MIN_AMOUNT = 100
 ADVENTURE_RESOURCE_MAX_AMOUNT = 500
 
 
+def _equipped_bonus(hero, *bonus_types: str) -> float:
+    if hero is None:
+        return 0.0
+    accepted = set(bonus_types)
+    total = 0.0
+    for item in getattr(hero, "items", ()) or ():
+        if not getattr(item, "is_equipped", False):
+            continue
+        template = getattr(item, "template", None)
+        if template is not None and getattr(template, "bonus_type", None) in accepted:
+            total += max(float(getattr(template, "bonus_value", 0.0) or 0.0), 0.0)
+    return total
+
+
+def attack_bonus(hero) -> float:
+    if hero is None or float(getattr(hero, "health", 0.0)) <= 0:
+        return 0.0
+    value = max(int(getattr(hero, "attack_points", 0)), 0) * HERO_ATTACK_BONUS_PER_POINT
+    value += _equipped_bonus(hero, "attack_all", "attack_infantry")
+    return min(value, HERO_MAX_ATTACK_BONUS)
+
+
+def defense_bonus(hero) -> float:
+    if hero is None or float(getattr(hero, "health", 0.0)) <= 0:
+        return 0.0
+    value = max(int(getattr(hero, "defense_points", 0)), 0) * HERO_DEFENSE_BONUS_PER_POINT
+    value += _equipped_bonus(hero, "defense_all", "defense_infantry")
+    return min(value, HERO_MAX_DEFENSE_BONUS)
+
+
+def production_bonus(hero) -> float:
+    if hero is None or getattr(hero, "status", None) != "home" or float(getattr(hero, "health", 0.0)) <= 0:
+        return 0.0
+    value = max(int(getattr(hero, "production_points", 0)), 0) * HERO_PRODUCTION_BONUS_PER_POINT
+    value += _equipped_bonus(hero, "production")
+    return min(value, HERO_MAX_PRODUCTION_BONUS)
+
+
+def speed_bonus(hero) -> float:
+    if hero is None or float(getattr(hero, "health", 0.0)) <= 0:
+        return 0.0
+    return min(_equipped_bonus(hero, "speed"), HERO_MAX_SPEED_BONUS)
+
+
 def snapshot() -> dict[str, Any]:
     return {
         "rules_version": HERO_RULES_VERSION,
@@ -55,6 +103,12 @@ def snapshot() -> dict[str, Any]:
             "attack": HERO_ATTACK_BONUS_PER_POINT,
             "defense": HERO_DEFENSE_BONUS_PER_POINT,
             "production": HERO_PRODUCTION_BONUS_PER_POINT,
+        },
+        "bonus_caps": {
+            "attack": HERO_MAX_ATTACK_BONUS,
+            "defense": HERO_MAX_DEFENSE_BONUS,
+            "production": HERO_MAX_PRODUCTION_BONUS,
+            "speed": HERO_MAX_SPEED_BONUS,
         },
         "revive": {"resource": "gold", "cost": HERO_REVIVE_COST_GOLD, "health": HERO_REVIVE_HEALTH},
         "equipment_slots": list(HERO_EQUIPMENT_SLOTS),
