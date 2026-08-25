@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WorldWinner(BaseModel):
@@ -15,7 +15,10 @@ class WorldBase(BaseModel):
     name: str
     speed_modifier: float = 1.0
     resource_modifier: float = 1.0
-    map_size: int = 100
+    # BM-0067 needs room for 8 managed barbarians + 20 oases. A 10x10
+    # deterministic map has ample non-water capacity while retaining margin for
+    # player cities; smaller legacy worlds are not a supported v1.0 shape.
+    map_size: int = Field(default=100, ge=10)
     special_rules: str = ""
     is_active: bool = True
 
