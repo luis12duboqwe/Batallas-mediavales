@@ -9,8 +9,7 @@ from sqlalchemy.orm import Session
 
 from . import models
 from .database import SessionLocal
-from .services import balance, hero as hero_service
-from .services.world_gen import get_tile_type
+from .services import balance, hero as hero_service, pve
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,8 @@ CANONICAL_BARBARIANS = (
     (15, 80),
 )
 
-# Compatibility aliases. PvE content numbers live in the balance catalog.
+# Compatibility aliases kept for callers that still import the historical
+# alpha baseline. BM-0067 fresh worlds use the tier profiles in ``services.pve``.
 BARBARIAN_BUILDINGS = balance.BARBARIAN_STARTING_BUILDINGS
 BARBARIAN_TROOPS = balance.BARBARIAN_STARTING_TROOPS
 
@@ -50,7 +50,7 @@ def _get_or_create_world(db: Session) -> tuple[models.World, bool]:
     )
     if world:
         # Never rewrite rules of a world that may already contain player
-        # progress. World balance changes must be versioned explicitly.
+        # progress. PvE reconciliation reads/preserves its pinned manifest.
         return world, False
 
     world = models.World(
@@ -66,82 +66,48 @@ def _get_or_create_world(db: Session) -> tuple[models.World, bool]:
     return world, True
 
 
-def _create_barbarian_city(
-    db: Session,
-    world: models.World,
-    index: int,
-    x: int,
-    y: int,
-) -> models.City:
-    resources = balance.BARBARIAN_STARTING_RESOURCES
-    city = models.City(
-        name=f"Aldea Bárbara {index:02d}",
-        owner_id=None,
-        world_id=world.id,
-        x=x,
-        y=y,
-        wood=resources["wood"],
-        stone=resources["stone"],
-        iron=resources["iron"],
-        gold=resources["gold"],
-        population_max=balance.BARBARIAN_POPULATION_MAX,
-        loyalty=balance.LOYALTY_MAX,
-        tile_type=get_tile_type(x, y),
-    )
-    db.add(city)
-    db.flush()
+def _validate_canonical_coordinates(db: Session, world: models.World) -> None:
+    """Refuse to reinterpret a real player settlement as canonical PvE state.
 
-    for building_name, level in BARBARIAN_BUILDINGS:
-        db.add(
-            models.Building(
-                city_id=city.id,
-                name=building_name,
-                level=level,
+    A player-owned city whose name still starts with ``Aldea Bárbara`` is a
+    legitimately conquered canonical village and must be preserved. Any other
+    player city on a reserved coordinate indicates incompatible/corrupt seed
+    state and remains a hard failure, matching the pre-BM-0067 contract.
+    """
+
+    for x, y in CANONICAL_BARBARIANS:
+        existing = (
+            db.query(models.City)
+            .filter(
+                models.City.world_id == world.id,
+                models.City.x == x,
+                models.City.y == y,
             )
+            .one_or_none()
         )
-
-    for unit_type, quantity in BARBARIAN_TROOPS:
-        db.add(
-            models.Troop(
-                city_id=city.id,
-                unit_type=unit_type,
-                quantity=quantity,
+        if (
+            existing is not None
+            and existing.owner_id is not None
+            and not str(existing.name or "").startswith("Aldea Bárbara")
+        ):
+            raise RuntimeError(
+                "Canonical seed coordinate is occupied by a player city: "
+                f"world={world.id} x={x} y={y}"
             )
-        )
-
-    return city
 
 
 def seed_game(db: Session) -> SeedResult:
-    """Create the canonical initial world without resetting existing progress."""
+    """Create/reconcile the canonical initial world without resetting progress."""
 
     world, world_created = _get_or_create_world(db)
-    barbarians_created = 0
 
     try:
-        for index, (x, y) in enumerate(CANONICAL_BARBARIANS, start=1):
-            existing = (
-                db.query(models.City)
-                .filter(
-                    models.City.world_id == world.id,
-                    models.City.x == x,
-                    models.City.y == y,
-                )
-                .one_or_none()
-            )
-            if existing:
-                if existing.owner_id is not None:
-                    raise RuntimeError(
-                        "Canonical seed coordinate is occupied by a player city: "
-                        f"world={world.id} x={x} y={y}"
-                    )
-                # Existing barbarian progress belongs to the running world. Do
-                # not replenish resources, troops or building levels on restart.
-                continue
-
-            _create_barbarian_city(db, world, index, x, y)
-            barbarians_created += 1
-
+        _validate_canonical_coordinates(db, world)
+        created = pve.ensure_world_pve(
+            db,
+            world,
+            canonical_barbarian_coords=CANONICAL_BARBARIANS,
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -155,7 +121,7 @@ def seed_game(db: Session) -> SeedResult:
     return SeedResult(
         world_id=world.id,
         world_created=world_created,
-        barbarians_created=barbarians_created,
+        barbarians_created=int(created["barbarians_created"]),
     )
 
 
