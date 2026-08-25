@@ -46,7 +46,7 @@ class User(Base):
 
     current_theme_id: Mapped[Optional[int]] = mapped_column(ForeignKey("themes.id"))
 
-    hero: Mapped["Hero"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+    heroes: Mapped[List["Hero"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     cities: Mapped[List["City"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     premium_status: Mapped["PremiumStatus"] = relationship(
         back_populates="user", cascade="all, delete-orphan", uselist=False
