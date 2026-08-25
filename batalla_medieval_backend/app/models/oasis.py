@@ -1,4 +1,4 @@
-from sqlalchemy import Column, ForeignKey, Integer, String, Float, JSON
+from sqlalchemy import Column, ForeignKey, Integer, String, JSON
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -11,15 +11,15 @@ class Oasis(Base):
     world_id = Column(Integer, ForeignKey("worlds.id"), nullable=False)
     x = Column(Integer, nullable=False)
     y = Column(Integer, nullable=False)
-    
-    # wood, clay, iron, crop
-    resource_type = Column(String, nullable=False) 
+
+    # Canonical BM-0060 resource key: wood, stone, iron or gold.
+    resource_type = Column(String, nullable=False)
     bonus_percent = Column(Integer, default=25)
-    
+
     owner_city_id = Column(Integer, ForeignKey("cities.id"), nullable=True)
-    
-    # Troops guarding the oasis (barbarians/animals)
-    troops = Column(JSON, default={}) 
+
+    # Neutral guards use canonical unit keys from the BM-0063 unit catalog.
+    troops = Column(JSON, default=dict)
 
     world = relationship("World")
     owner_city = relationship("City", back_populates="oases")
