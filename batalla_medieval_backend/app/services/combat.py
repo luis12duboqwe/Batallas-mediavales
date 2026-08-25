@@ -30,8 +30,36 @@ _loss_ratios = _impl._loss_ratios
 _apply_losses = _impl._apply_losses
 _find_target_building = _impl._find_target_building
 
-resolve_battle = _impl.resolve_battle
 build_battle_report_content = _impl.build_battle_report_content
+
+
+def resolve_battle(*args, **kwargs):
+    """Call BM-0064 with the defender hero selected by BM-0068 world scope.
+
+    ``combat_rounds`` predates multi-world heroes and still reads the legacy
+    ``owner.hero`` compatibility attribute. BM-0068 callers pass the exact
+    defender hero for the movement world; expose it only for the duration of
+    this pure in-memory resolution and remove the override immediately after.
+    No database field or active-world preference is mutated.
+    """
+
+    defender_hero = kwargs.pop("defender_hero", None)
+    defender_city = args[1] if len(args) > 1 else kwargs.get("defender_city")
+    defender_owner = getattr(defender_city, "owner", None)
+    had_override = False
+    previous_override = None
+    if defender_owner is not None and defender_hero is not None:
+        had_override = hasattr(defender_owner, "_bm0068_scoped_hero")
+        previous_override = getattr(defender_owner, "_bm0068_scoped_hero", None)
+        defender_owner._bm0068_scoped_hero = defender_hero
+    try:
+        return _impl.resolve_battle(*args, **kwargs)
+    finally:
+        if defender_owner is not None and defender_hero is not None:
+            if had_override:
+                defender_owner._bm0068_scoped_hero = previous_override
+            elif hasattr(defender_owner, "_bm0068_scoped_hero"):
+                delattr(defender_owner, "_bm0068_scoped_hero")
 
 
 def _credit_oasis_reward(attacker_city, oasis, result):
