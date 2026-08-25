@@ -8,6 +8,8 @@ class AdventureBase(BaseModel):
     difficulty: str
     duration: int
     status: str
+    rules_version: str
+    seed: str
 
 
 class AdventureRead(AdventureBase):
@@ -21,6 +23,8 @@ class AdventureRead(AdventureBase):
 
 
 class AdventureClaimResponse(BaseModel):
+    rules_version: str
+    seed: str
     status: str
     damage: int
     xp: int
