@@ -28,7 +28,7 @@ const AdventuresView = () => {
 
   useEffect(() => {
     fetchAdventures();
-  }, [worldId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [worldId]);
 
   const handleStart = async (id) => {
     try {
