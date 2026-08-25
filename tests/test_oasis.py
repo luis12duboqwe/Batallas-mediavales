@@ -57,6 +57,8 @@ def test_oasis_combat_conquest_reward_and_retry_are_auditable(
 
     hero = models.Hero(
         user_id=user.id,
+        world_id=world.id,
+        city_id=city.id,
         name="Conqueror",
         attack_points=10,
         defense_points=0,
@@ -118,7 +120,6 @@ def test_oasis_combat_conquest_reward_and_retry_are_auditable(
     assert payload["pve"]["conquest_reward"] == expected_reward
     assert payload["pve"]["credited_reward"] == expected_reward
 
-    # Exactly-once movement resolution prevents a retry from paying the reward again.
     after_first = {
         resource: float(getattr(city, resource))
         for resource in balance.RESOURCE_FIELDS
