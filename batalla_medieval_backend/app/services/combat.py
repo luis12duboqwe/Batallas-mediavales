@@ -62,16 +62,18 @@ def resolve_battle(*args, **kwargs):
                 delattr(defender_owner, "_bm0068_scoped_hero")
 
 
-def _credit_oasis_reward(attacker_city, oasis, result):
-    """Credit the BM-0067 conquest reward without exceeding city storage."""
+def _credit_oasis_reward(attacker_city, oasis, result, *, was_wild: bool):
+    """Credit the BM-0067 reward only for a first conquest of a wild oasis."""
 
     from . import production, pve
 
     tier = pve.oasis_tier(oasis)
     theoretical = pve.oasis_conquest_reward(oasis)
     credited = {}
+    conquered = bool(result.get("conquered") or result.get("conquest"))
+    reward_eligible = bool(was_wild and conquered)
 
-    if result.get("conquered") or result.get("conquest"):
+    if reward_eligible:
         storage_limit = float(production.get_storage_limit(attacker_city))
         for resource, amount in theoretical.items():
             current = float(getattr(attacker_city, resource))
@@ -86,6 +88,8 @@ def _credit_oasis_reward(attacker_city, oasis, result):
         "tier": tier,
         "conquest_reward": theoretical,
         "credited_reward": credited,
+        "reward_eligible": reward_eligible,
+        "was_wild": bool(was_wild),
     }
     return result
 
@@ -98,17 +102,28 @@ def resolve_oasis_battle(*args, **kwargs):
     ranking points, so keep that boundary stable. BM-0067 adds a separately
     versioned conquest reward, credited atomically with battle resolution and
     capped by the attacker's server-authoritative storage capacity.
+
+    The reward is a one-time wild-oasis capture reward. Ownership is sampled
+    before combat because the authoritative combat engine mutates
+    ``owner_city_id`` when conquest succeeds; checking ownership afterwards
+    would make an already-owned oasis indistinguishable from a first capture.
     """
 
     attacker_city = args[0] if args else kwargs.get("attacker_city")
     oasis = args[1] if len(args) > 1 else kwargs.get("oasis")
+    was_wild = bool(oasis is not None and getattr(oasis, "owner_city_id", None) is None)
     owner = getattr(attacker_city, "owner", None)
     previous_points = getattr(owner, "attacker_points", None) if owner else None
     result = _impl.resolve_oasis_battle(*args, **kwargs)
     if owner is not None and previous_points is not None:
         owner.attacker_points = previous_points
     if attacker_city is not None and oasis is not None:
-        result = _credit_oasis_reward(attacker_city, oasis, result)
+        result = _credit_oasis_reward(
+            attacker_city,
+            oasis,
+            result,
+            was_wild=was_wild,
+        )
     return result
 
 
