@@ -1,6 +1,6 @@
-from typing import Optional
+from typing import Dict, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HeroBase(BaseModel):
@@ -12,6 +12,7 @@ class HeroRead(HeroBase):
 
     id: int
     user_id: int
+    world_id: int
     city_id: Optional[int]
     name: str
     level: int
@@ -23,9 +24,12 @@ class HeroRead(HeroBase):
     defense_points: int
     production_points: int
     available_points: int
+    rules_version: str
+    bonuses: Dict[str, float]
+    revive_cost: Dict[str, float]
 
 
 class HeroDistributePoints(BaseModel):
-    attack: int = 0
-    defense: int = 0
-    production: int = 0
+    attack: int = Field(default=0, ge=0)
+    defense: int = Field(default=0, ge=0)
+    production: int = Field(default=0, ge=0)
