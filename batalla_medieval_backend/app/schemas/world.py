@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WorldWinner(BaseModel):
@@ -21,7 +21,10 @@ class WorldBase(BaseModel):
 
 
 class WorldCreate(WorldBase):
-    pass
+    # BM-0067 needs room for 8 managed barbarians + 20 oases. Keep this
+    # creation-only constraint while BM-0068 evolves world-scoped heroes.
+    # WorldRead intentionally remains permissive for legacy tiny worlds.
+    map_size: int = Field(default=100, ge=10)
 
 
 class WorldRead(WorldBase):
