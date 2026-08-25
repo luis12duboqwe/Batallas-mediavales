@@ -22,6 +22,8 @@ import MarketView from './pages/MarketView';
 import AcademyView from './pages/AcademyView';
 import ExpansionView from './pages/ExpansionView';
 import SendMovementView from './pages/SendMovementView';
+import HeroView from './pages/HeroView';
+import AdventuresView from './pages/AdventuresView';
 import TutorialOverlay from './components/TutorialOverlay';
 import { useUserStore } from './store/userStore';
 import soundManager from './services/sound';
@@ -37,6 +39,8 @@ const sidebarLinks = [
   { to: '/movements', key: 'nav.movements', icon: '🧭' },
   { to: '/reports', key: 'nav.reports', icon: '📜' },
   { to: '/market', key: 'nav.market', icon: '⚖️' },
+  { to: '/hero', label: 'Héroe', icon: '🛡️' },
+  { to: '/adventures', label: 'Aventuras', icon: '🧭' },
   { to: '/ranking', key: 'nav.ranking', icon: '🏆' },
   { to: '/alliance', key: 'nav.alliance', icon: '🤝' },
   { to: '/messages', key: 'nav.messages', icon: '✉️' },
@@ -61,7 +65,7 @@ const NavLink = ({ link, active, mobile = false, t }) => (
     }
   >
     <span className={mobile ? 'text-base' : 'text-lg'} aria-hidden>{link.icon}</span>
-    <span className="font-medium whitespace-nowrap">{t(link.key)}</span>
+    <span className="font-medium whitespace-nowrap">{link.label || t(link.key)}</span>
   </Link>
 );
 
@@ -79,12 +83,7 @@ const Layout = ({ children }) => {
           <div className="mb-4 text-xs uppercase tracking-[0.2em] text-gray-500">{t('nav.navigation')}</div>
           <nav className="space-y-1" aria-label={t('nav.navigation')}>
             {sidebarLinks.map((link) => (
-              <NavLink
-                key={link.to}
-                link={link}
-                active={location.pathname === link.to}
-                t={t}
-              />
+              <NavLink key={link.to} link={link} active={location.pathname === link.to} t={t} />
             ))}
           </nav>
         </aside>
@@ -100,13 +99,7 @@ const Layout = ({ children }) => {
       >
         <div className="flex overflow-x-auto overscroll-x-contain">
           {sidebarLinks.map((link) => (
-            <NavLink
-              key={link.to}
-              link={link}
-              active={location.pathname === link.to}
-              mobile
-              t={t}
-            />
+            <NavLink key={link.to} link={link} active={location.pathname === link.to} mobile t={t} />
           ))}
         </div>
       </nav>
@@ -140,9 +133,7 @@ const App = () => {
   const location = useLocation();
 
   useEffect(() => {
-    if (token) {
-      refreshCity().catch(() => {});
-    }
+    if (token) refreshCity().catch(() => {});
   }, [token, refreshCity]);
 
   useEffect(() => {
@@ -154,9 +145,7 @@ const App = () => {
   useEffect(() => {
     const handleClick = (event) => {
       const target = event.target;
-      if (target instanceof Element && target.closest('button')) {
-        soundManager.playSFX('click_ui');
-      }
+      if (target instanceof Element && target.closest('button')) soundManager.playSFX('click_ui');
     };
     document.addEventListener('click', handleClick, true);
     return () => document.removeEventListener('click', handleClick, true);
@@ -182,6 +171,8 @@ const App = () => {
       <Route path="/academy" element={<GameRoute><AcademyView /></GameRoute>} />
       <Route path="/troops" element={<GameRoute><TroopsView /></GameRoute>} />
       <Route path="/market" element={<GameRoute><MarketView /></GameRoute>} />
+      <Route path="/hero" element={<GameRoute><HeroView /></GameRoute>} />
+      <Route path="/adventures" element={<GameRoute><AdventuresView /></GameRoute>} />
       <Route path="/movements" element={<GameRoute><MovementsView /></GameRoute>} />
       <Route path="/map" element={<GameRoute><MapView /></GameRoute>} />
       <Route path="/reports" element={<GameRoute><ReportsView /></GameRoute>} />
@@ -190,15 +181,7 @@ const App = () => {
       <Route path="/messages" element={<GameRoute><MessagesView /></GameRoute>} />
       <Route path="/send-movement/:targetCityId" element={<GameRoute><SendMovementView /></GameRoute>} />
 
-      <Route
-        path="/admin"
-        element={
-          <AdminRoute>
-            <Layout><AdminPanel /></Layout>
-          </AdminRoute>
-        }
-      />
-
+      <Route path="/admin" element={<AdminRoute><Layout><AdminPanel /></Layout></AdminRoute>} />
       <Route path="*" element={<Navigate to={token ? '/' : '/login'} replace />} />
     </Routes>
   );
