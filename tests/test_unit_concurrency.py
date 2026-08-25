@@ -58,7 +58,10 @@ def test_two_research_requests_create_one_queue_and_one_charge(db_session, city)
     city.stone = 600.0
     city.iron = 500.0
     city.gold = 150.0
-    city.last_production = datetime.now(timezone.utc)
+    # This test measures exactly-once charging, not passive production. Pin the
+    # economic clock ahead of both worker threads so runner speed cannot add a
+    # fractional production tick and make the resource assertion flaky.
+    city.last_production = datetime.now(timezone.utc) + timedelta(minutes=1)
     db_session.commit()
     city_id = city.id
 
@@ -129,7 +132,9 @@ def test_two_processors_complete_research_queue_once(db_session, city):
 def test_two_training_requests_cannot_overbook_upkeep_capacity(db_session, city):
     db_session.add(models.Building(city_id=city.id, name="barracks", level=1))
     city.population_max = 1000
-    city.last_production = datetime.now(timezone.utc)
+    # Same isolation as the research charge test: passive production must not
+    # affect the exact resource-reservation assertion below.
+    city.last_production = datetime.now(timezone.utc) + timedelta(minutes=1)
     for resource in balance.RESOURCE_FIELDS:
         setattr(city, resource, 100000.0)
     status = premium_service.get_or_create_status(db_session, city.owner)
