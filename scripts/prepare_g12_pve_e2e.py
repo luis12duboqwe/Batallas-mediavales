@@ -119,8 +119,12 @@ def main() -> None:
             .count()
         )
         oasis_count = db.query(models.Oasis).filter_by(world_id=world.id).count()
-        if active_barbarians != pve.PVE_BARBARIAN_TARGET_ACTIVE:
-            raise RuntimeError(f"G12 barbarian population mismatch: {active_barbarians}")
+        # G2-G11 share this SQLite fixture. G9 intentionally creates an extra
+        # neutral combat target, so the PvE population contract is a floor here:
+        # BM-0067 must preserve at least its eight active generated barbarians and
+        # must never delete unrelated neutral settlements just to force a count.
+        if active_barbarians < pve.PVE_BARBARIAN_TARGET_ACTIVE:
+            raise RuntimeError(f"G12 barbarian population below target: {active_barbarians}")
         if oasis_count != pve.PVE_OASIS_TARGET_TOTAL:
             raise RuntimeError(f"G12 oasis population mismatch: {oasis_count}")
 
@@ -129,7 +133,7 @@ def main() -> None:
             f"{user.id}:{world.id}:"
             f"barbarian={barbarian.id}@{target_x},{target_y}:tier=3:"
             f"oasis={oasis.id}@{oasis.x},{oasis.y}:tier={oasis_tier}:"
-            f"rules={pve.PVE_RULES_VERSION}"
+            f"rules={pve.PVE_RULES_VERSION}:active_barbarians={active_barbarians}"
         )
     finally:
         db.close()
