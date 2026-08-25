@@ -14,6 +14,7 @@ from .. import models
 from ..utils import utc_now
 from . import anticheat, balance, combat, espionage
 from . import event as event_service
+from . import hero as hero_service
 from . import notification as notification_service
 from . import production
 from . import quest as quest_service
@@ -347,15 +348,29 @@ def _create_return_movement(
     return return_move
 
 
-def _apply_hero_xp_without_commit(hero: models.Hero | None, xp_amount: int) -> None:
-    if not hero or xp_amount <= 0:
-        return
-    from .hero import XP_TABLE
+def _lock_owner_hero_for_world(
+    db: Session, owner_id: int | None, world_id: int
+) -> models.Hero | None:
+    """Lock the hero participating in this movement's immutable world."""
 
-    hero.xp += int(xp_amount)
-    while hero.level < 100 and hero.xp >= XP_TABLE[hero.level]:
-        hero.xp -= XP_TABLE[hero.level]
-        hero.level += 1
+    if owner_id is None:
+        return None
+    return (
+        db.query(models.Hero)
+        .filter(
+            models.Hero.user_id == owner_id,
+            models.Hero.world_id == world_id,
+        )
+        .with_for_update()
+        .populate_existing()
+        .one_or_none()
+    )
+
+
+def _apply_hero_xp_without_commit(hero: models.Hero | None, xp_amount: int) -> None:
+    if hero is None or xp_amount <= 0:
+        return
+    hero_service.add_xp(hero, int(xp_amount))
 
 
 def _apply_defender_losses(defender: models.City, losses: Dict[str, int]) -> None:
@@ -392,8 +407,10 @@ def _resolve_attack_core(db: Session, movement: models.Movement) -> List[dict[st
         setattr(attacker, resource, before)
 
     _apply_defender_losses(defender, result.get("defender_losses", {}))
-    if attacker.owner and attacker.owner.hero:
-        _apply_hero_xp_without_commit(attacker.owner.hero, result.get("xp_gained", 0))
+    attacker_hero = _lock_owner_hero_for_world(
+        db, attacker.owner_id, movement.world_id
+    )
+    _apply_hero_xp_without_commit(attacker_hero, result.get("xp_gained", 0))
 
     content = combat.build_battle_report_content(attacker, defender, result)
     _add_report(
@@ -477,7 +494,9 @@ def _resolve_oasis_attack_core(
     if not attacker or not oasis:
         return []
 
-    attacker_hero = attacker.owner.hero if attacker.owner else None
+    attacker_hero = _lock_owner_hero_for_world(
+        db, attacker.owner_id, movement.world_id
+    )
     modifiers = event_service.get_active_modifiers(db, world_id=movement.world_id)
     result = combat.resolve_oasis_battle(
         attacker,
