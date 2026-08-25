@@ -8,7 +8,7 @@ from app.seed import (
     DEFAULT_WORLD_NAME,
     seed_game,
 )
-from app.services import balance
+from app.services import balance, pve
 
 
 def test_seed_exports_canonical_pve_aliases():
@@ -36,22 +36,25 @@ def test_canonical_seed_is_idempotent(db_session):
         )
         .all()
     )
+    oases = db_session.query(models.Oasis).filter(models.Oasis.world_id == world.id).all()
 
     assert first.world_created is True
     assert first.barbarians_created == len(CANONICAL_BARBARIANS)
     assert second.world_created is False
     assert second.barbarians_created == 0
-    assert len(barbarians) == len(CANONICAL_BARBARIANS)
-
-    expected_buildings = {name: level for name, level in BARBARIAN_BUILDINGS}
-    expected_troops = {unit: quantity for unit, quantity in BARBARIAN_TROOPS}
+    assert len(barbarians) == pve.PVE_BARBARIAN_TARGET_ACTIVE
+    assert len(oases) == pve.PVE_OASIS_TARGET_TOTAL
 
     for city in barbarians:
-        assert {building.name: building.level for building in city.buildings} == expected_buildings
-        assert {troop.unit_type: troop.quantity for troop in city.troops} == expected_troops
-        assert {resource: getattr(city, resource) for resource in balance.RESOURCE_FIELDS} == (
-            balance.BARBARIAN_STARTING_RESOURCES
-        )
+        tier = pve.barbarian_tier(city)
+        assert tier in pve.PVE_TIERS
+        profile = pve.BARBARIAN_PROFILES[tier]
+        assert {building.name: building.level for building in city.buildings} == profile["buildings"]
+        assert {troop.unit_type: troop.quantity for troop in city.troops} == profile["troops"]
+        assert {
+            resource: float(getattr(city, resource))
+            for resource in balance.RESOURCE_FIELDS
+        } == pytest.approx(profile["resources"])
         assert city.population_max == balance.BARBARIAN_POPULATION_MAX
 
 
