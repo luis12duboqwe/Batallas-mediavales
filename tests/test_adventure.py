@@ -1,45 +1,63 @@
+from datetime import timedelta
+
 import pytest
-from app import models, schemas
-from app.services import adventure, hero
 
-def test_adventure_flow(db_session, user):
-    # Setup hero
-    hero_obj = hero.get_hero(db_session, user.id)
-    assert hero_obj is not None
-    
-    # Seed items
-    hero.seed_items(db_session)
-    
-    # Get adventures (should generate)
-    adventures = adventure.get_adventures(db_session, hero_obj.id)
-    assert len(adventures) == 3
-    assert adventures[0].status == "available"
-    
-    # Start adventure
-    adv = adventures[0]
-    adventure.start_adventure(db_session, adv.id, hero_obj)
-    
-    assert adv.status == "active"
-    assert hero_obj.status == "adventure"
-    assert adv.started_at is not None
-    
-    # Try to claim too early
-    with pytest.raises(ValueError, match="Adventure not finished yet"):
-        adventure.claim_adventure(db_session, adv.id, hero_obj)
-        
-    # Fast forward time (hack: modify started_at)
-    from datetime import timedelta
-    adv.started_at -= timedelta(seconds=adv.duration + 1)
+from app import models
+from app.services import adventure, hero, hero_rules
+
+
+def _join_fixture_world(db_session, user, city):
+    membership = models.PlayerWorld(
+        user_id=user.id,
+        world_id=city.world_id,
+        starting_city_id=city.id,
+    )
+    db_session.add(membership)
+    user.world_id = city.world_id
+    db_session.add(user)
     db_session.commit()
-    
-    # Claim
-    result = adventure.claim_adventure(db_session, adv.id, hero_obj)
-    assert result["status"] == "success"
-    assert adv.status == "completed"
-    assert hero_obj.status == "home"
-    assert hero_obj.xp > 0
-    
-    # Check if loot works (might be None, but function shouldn't crash)
-    if result["loot"]:
-        assert "type" in result["loot"]
 
+
+def test_adventure_flow_is_world_scoped_and_retry_safe(db_session, user, city):
+    _join_fixture_world(db_session, user, city)
+    hero_obj = hero.get_hero(db_session, user.id, city.world_id)
+    assert hero_obj.world_id == city.world_id
+
+    adventures = adventure.get_adventures(db_session, hero_obj)
+    assert len([item for item in adventures if item.status == "available"]) == 3
+    current = next(item for item in adventures if item.status == "available")
+    assert current.rules_version == hero_rules.HERO_RULES_VERSION
+    assert len(current.seed) == 64
+
+    adventure.start_adventure(db_session, current.id, hero_obj)
+    assert current.status == "active"
+    assert hero_obj.status == "adventure"
+
+    with pytest.raises(ValueError, match="Adventure not finished yet"):
+        adventure.claim_adventure(db_session, current.id, hero_obj)
+
+    current.started_at -= timedelta(seconds=current.duration + 1)
+    db_session.commit()
+
+    result = adventure.claim_adventure(db_session, current.id, hero_obj)
+    assert result["status"] == "success"
+    assert result["rules_version"] == hero_rules.HERO_RULES_VERSION
+    assert result["seed"] == current.seed
+
+    db_session.refresh(current)
+    db_session.refresh(hero_obj)
+    xp_after_first = (hero_obj.level, hero_obj.xp)
+    items_after_first = db_session.query(models.HeroItem).filter_by(hero_id=hero_obj.id).count()
+    resources_after_first = tuple(
+        float(getattr(city, resource)) for resource in ("wood", "stone", "iron", "gold")
+    )
+
+    retry = adventure.claim_adventure(db_session, current.id, hero_obj)
+    assert retry == result
+    db_session.refresh(hero_obj)
+    db_session.refresh(city)
+    assert (hero_obj.level, hero_obj.xp) == xp_after_first
+    assert db_session.query(models.HeroItem).filter_by(hero_id=hero_obj.id).count() == items_after_first
+    assert tuple(
+        float(getattr(city, resource)) for resource in ("wood", "stone", "iron", "gold")
+    ) == resources_after_first
