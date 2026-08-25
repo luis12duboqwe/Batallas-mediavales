@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ..services import balance, espionage, market
+from ..services import balance, espionage, market, pve_rules
 
 router = APIRouter(prefix="/economy", tags=["economy"])
 
@@ -45,4 +45,7 @@ def balance_preview():
     # BM-0066 follows the same exact-contract discipline for commerce while
     # preserving the historical BALANCE_VERSION used by prior military seeds.
     payload["market"] = market.commerce_rules_snapshot()
+    # BM-0067 pins PvE independently per world so tuning neutral content does
+    # not change historical BM-0064/BM-0065 random streams.
+    payload["pve"] = pve_rules.rules_snapshot()
     return payload
