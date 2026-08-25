@@ -9,30 +9,12 @@ from sqlalchemy.orm import Session
 
 from . import models
 from .database import SessionLocal
-from .services import balance, hero as hero_service
-from .services.world_gen import get_tile_type
+from .services import hero as hero_service, pve_rules, world_gen
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_WORLD_NAME = "Mundo 1"
 DEFAULT_WORLD_MAP_SIZE = 100
-
-# Fixed, valid map coordinates. They deliberately avoid water tiles and are
-# stable across runs so a restored/new database gets the same initial world.
-CANONICAL_BARBARIANS = (
-    (20, 15),
-    (30, 25),
-    (40, 35),
-    (50, 45),
-    (60, 55),
-    (70, 65),
-    (80, 75),
-    (15, 80),
-)
-
-# Compatibility aliases. PvE content numbers live in the balance catalog.
-BARBARIAN_BUILDINGS = balance.BARBARIAN_STARTING_BUILDINGS
-BARBARIAN_TROOPS = balance.BARBARIAN_STARTING_TROOPS
 
 
 @dataclass(frozen=True)
@@ -40,6 +22,7 @@ class SeedResult:
     world_id: int
     world_created: bool
     barbarians_created: int
+    oases_created: int = 0
 
 
 def _get_or_create_world(db: Session) -> tuple[models.World, bool]:
@@ -49,8 +32,8 @@ def _get_or_create_world(db: Session) -> tuple[models.World, bool]:
         .one_or_none()
     )
     if world:
-        # Never rewrite rules of a world that may already contain player
-        # progress. World balance changes must be versioned explicitly.
+        # Never rewrite rules/content of a world that may already contain
+        # player progress. BM-0067 pins PvE identity on world creation.
         return world, False
 
     world = models.World(
@@ -60,56 +43,11 @@ def _get_or_create_world(db: Session) -> tuple[models.World, bool]:
         map_size=DEFAULT_WORLD_MAP_SIZE,
         special_rules="",
         is_active=True,
+        pve_rules_version=pve_rules.PVE_RULES_VERSION,
     )
     db.add(world)
     db.flush()
     return world, True
-
-
-def _create_barbarian_city(
-    db: Session,
-    world: models.World,
-    index: int,
-    x: int,
-    y: int,
-) -> models.City:
-    resources = balance.BARBARIAN_STARTING_RESOURCES
-    city = models.City(
-        name=f"Aldea Bárbara {index:02d}",
-        owner_id=None,
-        world_id=world.id,
-        x=x,
-        y=y,
-        wood=resources["wood"],
-        stone=resources["stone"],
-        iron=resources["iron"],
-        gold=resources["gold"],
-        population_max=balance.BARBARIAN_POPULATION_MAX,
-        loyalty=balance.LOYALTY_MAX,
-        tile_type=get_tile_type(x, y),
-    )
-    db.add(city)
-    db.flush()
-
-    for building_name, level in BARBARIAN_BUILDINGS:
-        db.add(
-            models.Building(
-                city_id=city.id,
-                name=building_name,
-                level=level,
-            )
-        )
-
-    for unit_type, quantity in BARBARIAN_TROOPS:
-        db.add(
-            models.Troop(
-                city_id=city.id,
-                unit_type=unit_type,
-                quantity=quantity,
-            )
-        )
-
-    return city
 
 
 def seed_game(db: Session) -> SeedResult:
@@ -117,31 +55,11 @@ def seed_game(db: Session) -> SeedResult:
 
     world, world_created = _get_or_create_world(db)
     barbarians_created = 0
+    oases_created = 0
 
     try:
-        for index, (x, y) in enumerate(CANONICAL_BARBARIANS, start=1):
-            existing = (
-                db.query(models.City)
-                .filter(
-                    models.City.world_id == world.id,
-                    models.City.x == x,
-                    models.City.y == y,
-                )
-                .one_or_none()
-            )
-            if existing:
-                if existing.owner_id is not None:
-                    raise RuntimeError(
-                        "Canonical seed coordinate is occupied by a player city: "
-                        f"world={world.id} x={x} y={y}"
-                    )
-                # Existing barbarian progress belongs to the running world. Do
-                # not replenish resources, troops or building levels on restart.
-                continue
-
-            _create_barbarian_city(db, world, index, x, y)
-            barbarians_created += 1
-
+        if world_created:
+            barbarians_created, oases_created = world_gen.populate_world_pve(db, world)
         db.commit()
     except Exception:
         db.rollback()
@@ -156,6 +74,7 @@ def seed_game(db: Session) -> SeedResult:
         world_id=world.id,
         world_created=world_created,
         barbarians_created=barbarians_created,
+        oases_created=oases_created,
     )
 
 
@@ -165,10 +84,13 @@ def main() -> None:
     try:
         result = seed_game(db)
         logger.info(
-            "Canonical seed complete: world_id=%s world_created=%s barbarians_created=%s",
+            "Canonical seed complete: world_id=%s world_created=%s "
+            "barbarians_created=%s oases_created=%s pve_rules=%s",
             result.world_id,
             result.world_created,
             result.barbarians_created,
+            result.oases_created,
+            pve_rules.PVE_RULES_VERSION,
         )
     finally:
         db.close()
