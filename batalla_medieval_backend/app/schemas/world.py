@@ -15,16 +15,17 @@ class WorldBase(BaseModel):
     name: str
     speed_modifier: float = 1.0
     resource_modifier: float = 1.0
-    # BM-0067 needs room for 8 managed barbarians + 20 oases. A 10x10
-    # deterministic map has ample non-water capacity while retaining margin for
-    # player cities; smaller legacy worlds are not a supported v1.0 shape.
-    map_size: int = Field(default=100, ge=10)
+    map_size: int = 100
     special_rules: str = ""
     is_active: bool = True
 
 
 class WorldCreate(WorldBase):
-    pass
+    # BM-0067 needs room for 8 managed barbarians + 20 oases. A 10x10
+    # deterministic map has ample non-water capacity while retaining margin for
+    # player cities. The constraint belongs on creation only so legacy worlds
+    # can still be read and migrated instead of failing response validation.
+    map_size: int = Field(default=100, ge=10)
 
 
 class WorldRead(WorldBase):
