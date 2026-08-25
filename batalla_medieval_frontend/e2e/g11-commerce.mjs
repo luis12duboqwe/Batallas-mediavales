@@ -143,8 +143,18 @@ try {
   await page.goto(`${BASE_URL}/market`, { waitUntil: 'networkidle' });
   await waitForExperienceReady();
 
+  if (page.url() !== `${BASE_URL}/market`) {
+    throw new Error(`Market deep link redirected unexpectedly: ${page.url()}`);
+  }
+  await page.getByRole('heading', { name: 'Mercado', exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+
   const rulesPanel = page.getByTestId('commerce-rules');
-  await rulesPanel.waitFor({ state: 'visible', timeout: 10000 });
+  try {
+    await rulesPanel.waitFor({ state: 'visible', timeout: 10000 });
+  } catch (error) {
+    const bodyText = ((await page.locator('body').textContent()) || '').replace(/\s+/g, ' ').trim().slice(0, 1800);
+    throw new Error(`Commerce rules panel did not hydrate at ${page.url()}; body=${bodyText}; cause=${error.message}`);
+  }
   const uiRulesVersion = await rulesPanel.getAttribute('data-rules-version');
   if (uiRulesVersion !== RULES_VERSION) failures.push(`UI commerce version mismatch: ${uiRulesVersion}`);
   const rulesText = (await rulesPanel.textContent()) || '';
