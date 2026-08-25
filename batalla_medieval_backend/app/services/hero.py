@@ -190,20 +190,25 @@ def revive_hero(db: Session, hero: models.Hero) -> models.Hero:
 
 def calculate_total_bonuses(hero: models.Hero) -> dict[str, float]:
     bonuses = {
-        "attack": hero.attack_points * hero_rules.HERO_ATTACK_BONUS_PER_POINT,
-        "defense": hero.defense_points * hero_rules.HERO_DEFENSE_BONUS_PER_POINT,
-        "production": hero.production_points * hero_rules.HERO_PRODUCTION_BONUS_PER_POINT,
+        "attack": hero_rules.attack_bonus(hero),
+        "defense": hero_rules.defense_bonus(hero),
+        "production": hero_rules.production_bonus(hero),
         "attack_infantry": 0.0,
         "attack_cavalry": 0.0,
         "defense_infantry": 0.0,
         "defense_cavalry": 0.0,
-        "speed": 0.0,
+        "speed": hero_rules.speed_bonus(hero),
     }
     for item in hero.items:
         if not item.is_equipped:
             continue
         template = item.template
-        if template.bonus_type in bonuses:
+        if template.bonus_type in {
+            "attack_infantry",
+            "attack_cavalry",
+            "defense_infantry",
+            "defense_cavalry",
+        }:
             bonuses[template.bonus_type] += template.bonus_value
         elif template.bonus_type == "attack_all":
             bonuses["attack_infantry"] += template.bonus_value
@@ -211,13 +216,27 @@ def calculate_total_bonuses(hero: models.Hero) -> dict[str, float]:
     return bonuses
 
 
+def _require_home_loadout(locked: models.Hero) -> None:
+    if locked.status != "home":
+        raise ValueError("Hero equipment can only change while hero is home")
+    if float(locked.health) <= 0:
+        raise ValueError("Dead hero cannot change equipment")
+
+
 def equip_item(db: Session, hero: models.Hero, item_id: int) -> models.Hero:
     locked = (
         db.query(models.Hero)
         .filter(models.Hero.id == hero.id, models.Hero.world_id == hero.world_id)
         .with_for_update()
+        .populate_existing()
         .one()
     )
+    try:
+        _require_home_loadout(locked)
+    except ValueError:
+        db.rollback()
+        raise
+
     item = (
         db.query(models.HeroItem)
         .filter(models.HeroItem.id == item_id, models.HeroItem.hero_id == locked.id)
@@ -252,9 +271,22 @@ def equip_item(db: Session, hero: models.Hero, item_id: int) -> models.Hero:
 
 
 def unequip_item(db: Session, hero: models.Hero, item_id: int) -> models.Hero:
+    locked = (
+        db.query(models.Hero)
+        .filter(models.Hero.id == hero.id, models.Hero.world_id == hero.world_id)
+        .with_for_update()
+        .populate_existing()
+        .one()
+    )
+    try:
+        _require_home_loadout(locked)
+    except ValueError:
+        db.rollback()
+        raise
+
     item = (
         db.query(models.HeroItem)
-        .filter(models.HeroItem.id == item_id, models.HeroItem.hero_id == hero.id)
+        .filter(models.HeroItem.id == item_id, models.HeroItem.hero_id == locked.id)
         .with_for_update()
         .one_or_none()
     )
@@ -263,8 +295,8 @@ def unequip_item(db: Session, hero: models.Hero, item_id: int) -> models.Hero:
         raise ValueError("Item not found in inventory")
     item.is_equipped = False
     db.commit()
-    db.refresh(hero)
-    return hero
+    db.refresh(locked)
+    return locked
 
 
 def seed_items(db: Session) -> None:
