@@ -1,5 +1,3 @@
-"""Server-authoritative movement dispatch and worker-side resolution."""
-
 from __future__ import annotations
 
 import json
@@ -25,31 +23,33 @@ PLAYER_MOVEMENT_TYPES = {"attack", "spy", "reinforce"}
 RESOURCE_FIELDS = balance.RESOURCE_FIELDS
 
 
-def calculate_distance(origin: models.City, target: models.City) -> float:
-    return math.hypot(origin.x - target.x, origin.y - target.y)
+def calculate_distance(city1: models.City, city2: models.City) -> float:
+    return math.hypot(city1.x - city2.x, city1.y - city2.y)
 
 
 def _normalize_troops(troops: Dict[str, int] | None) -> Dict[str, int]:
     normalized: Dict[str, int] = {}
     for unit, raw_amount in (troops or {}).items():
-        if unit not in UNIT_SPEED:
-            raise ValueError(f"Unknown troop type: {unit}")
+        canonical = balance.LEGACY_UNIT_ALIASES.get(unit, unit)
+        if canonical not in balance.UNIT_CATALOG:
+            raise ValueError(f"Unknown unit type: {unit}")
         amount = int(raw_amount)
         if amount < 0:
-            raise ValueError("Troop amounts cannot be negative")
+            raise ValueError("Troop quantities cannot be negative")
         if amount > 0:
-            normalized[unit] = amount
+            normalized[canonical] = normalized.get(canonical, 0) + amount
     return normalized
 
 
 def _normalize_resources(resources: Dict[str, int] | None) -> Dict[str, int]:
+    unknown = set(resources or {}) - set(RESOURCE_FIELDS)
+    if unknown:
+        raise ValueError(f"Unknown resource type: {sorted(unknown)[0]}")
     normalized: Dict[str, int] = {}
-    for resource, raw_amount in (resources or {}).items():
-        if resource not in RESOURCE_FIELDS:
-            raise ValueError(f"Unknown resource: {resource}")
-        amount = int(raw_amount)
+    for resource in RESOURCE_FIELDS:
+        amount = int((resources or {}).get(resource, 0))
         if amount < 0:
-            raise ValueError("Resource amounts cannot be negative")
+            raise ValueError("Resource quantities cannot be negative")
         if amount > 0:
             normalized[resource] = amount
     return normalized
@@ -58,8 +58,9 @@ def _normalize_resources(resources: Dict[str, int] | None) -> Dict[str, int]:
 def _get_base_speed(movement_type: str, troops: Dict[str, int]) -> float:
     if movement_type == "spy":
         return UNIT_SPEED["spy"]
-    speeds = [UNIT_SPEED[unit] for unit, amount in troops.items() if amount > 0]
-    return min(speeds) if speeds else UNIT_SPEED["basic_infantry"]
+    if not troops:
+        return UNIT_SPEED["basic_infantry"]
+    return min(UNIT_SPEED[unit] for unit in troops)
 
 
 def _validate_target_type(
@@ -130,9 +131,6 @@ def _reserve_payload_and_create(
         if float(locked_hero.health) <= 0:
             raise ValueError("Hero is dead")
 
-    # Equipment changes lock this same hero row and are forbidden once the hero
-    # is moving. Therefore the speed bonus observed here is the loadout frozen
-    # for this march, not a stale pre-dispatch estimate.
     hero_speed_bonus = hero_rules.speed_bonus(locked_hero) if locked_hero else 0.0
     speed = max(
         float(base_speed)
@@ -306,9 +304,6 @@ def send_movement(
         hero_id=hero_id,
     )
 
-    # Validate the exact persisted timing rather than a pre-lock estimate. This
-    # makes anti-cheat aware of the same bounded hero speed bonus used by the
-    # authoritative movement row.
     if origin_city.owner and target_city is not None:
         anticheat.check_movement_legitimacy(
             db,
@@ -345,8 +340,8 @@ def _add_report(
     world_id: int,
     report_type: str,
     content: str,
-    attacker_city_id: int | None,
-    defender_city_id: int | None,
+    attacker_city_id: int | None = None,
+    defender_city_id: int | None = None,
 ) -> models.Report:
     report = models.Report(
         city_id=city_id,
@@ -394,12 +389,17 @@ def _hero_for_world(owner: models.User | None, world_id: int) -> models.Hero | N
 
 
 def _apply_hero_xp_without_commit(hero: models.Hero | None, xp_amount: int) -> None:
-    if not hero or xp_amount <= 0:
+    """Add XP and normalize all earned levels without committing the worker txn."""
+
+    if hero is None:
         return
+    amount = int(xp_amount)
+    if amount < 0:
+        raise ValueError("Hero XP cannot be negative")
     from .hero import XP_TABLE
 
-    hero.xp += int(xp_amount)
-    while hero.level < 100 and hero.xp >= XP_TABLE[hero.level]:
+    hero.xp += amount
+    while hero.level < hero_rules.HERO_MAX_LEVEL and hero.xp >= XP_TABLE[hero.level]:
         hero.xp -= XP_TABLE[hero.level]
         hero.level += 1
 
@@ -448,6 +448,10 @@ def _resolve_attack_core(db: Session, movement: models.Movement) -> List[dict[st
 
     _apply_defender_losses(defender, result.get("defender_losses", {}))
     _apply_hero_xp_without_commit(attacker_hero, result.get("xp_gained", 0))
+    # The BM-0064 combat engine already credits defender XP from attacker
+    # casualties. Normalize that accumulated XP through the same BM-0068 level
+    # table before this resolution transaction commits.
+    _apply_hero_xp_without_commit(defender_hero, 0)
 
     content = combat.build_battle_report_content(attacker, defender, result)
     _add_report(db, city_id=attacker.id, world_id=movement.world_id, report_type="battle", content=content, attacker_city_id=attacker.id, defender_city_id=defender.id)
@@ -538,46 +542,18 @@ def _resolve_spy_core(db: Session, movement: models.Movement) -> List[dict[str, 
 
 
 def _credit_resources_with_storage(city: models.City, resources: Dict[str, int]) -> None:
-    limit = production.get_storage_limit(city)
-    for resource in RESOURCE_FIELDS:
-        amount = max(int(resources.get(resource, 0) or 0), 0)
-        current = float(getattr(city, resource))
-        if current < limit and amount > 0:
-            setattr(city, resource, min(current + amount, limit))
-
-
-def _canonical_transport_resources(resources: Dict[str, int] | None) -> Dict[str, int]:
-    return {resource: max(int((resources or {}).get(resource, 0) or 0), 0) for resource in RESOURCE_FIELDS if int((resources or {}).get(resource, 0) or 0) > 0}
-
-
-def _lock_city_for_delivery(db: Session, city_id: int) -> models.City | None:
-    return db.query(models.City).filter(models.City.id == city_id).with_for_update().populate_existing().one_or_none()
-
-
-def _lock_transport_cities(db: Session, *city_ids: int | None) -> dict[int, models.City]:
-    locked: dict[int, models.City] = {}
-    for city_id in sorted({int(value) for value in city_ids if value is not None}):
-        city = _lock_city_for_delivery(db, city_id)
-        if city is not None:
-            locked[city_id] = city
-    return locked
-
-
-def _can_store_all(city: models.City, resources: Dict[str, int]) -> bool:
-    limit = float(production.get_storage_limit(city))
-    return all(float(getattr(city, resource)) + int(amount) <= limit for resource, amount in resources.items())
-
-
-def _credit_resources_exact(city: models.City, resources: Dict[str, int]) -> None:
+    storage_limit = production.get_storage_limit(city)
     for resource, amount in resources.items():
-        setattr(city, resource, float(getattr(city, resource)) + int(amount))
+        if resource not in RESOURCE_FIELDS:
+            continue
+        current = float(getattr(city, resource))
+        setattr(city, resource, min(storage_limit, current + int(amount)))
 
 
 def _resolve_return_core(db: Session, movement: models.Movement) -> None:
-    city = movement.target_city
+    city = movement.target_city or movement.origin_city
     if not city:
         return
-
     for unit, raw_amount in (movement.troops or {}).items():
         amount = int(raw_amount)
         if amount <= 0:
@@ -611,9 +587,9 @@ def _resolve_return_core(db: Session, movement: models.Movement) -> None:
 
 
 def _resolve_reinforce_core(db: Session, movement: models.Movement) -> None:
-    receiver = movement.target_city
     sender = movement.origin_city
-    if not receiver or not sender:
+    receiver = movement.target_city
+    if not sender or not receiver:
         return
     for unit, raw_amount in (movement.troops or {}).items():
         amount = int(raw_amount)
@@ -630,6 +606,33 @@ def _resolve_reinforce_core(db: Session, movement: models.Movement) -> None:
         _add_report(db, city_id=city_id, world_id=movement.world_id, report_type="reinforce", content=content, attacker_city_id=sender.id, defender_city_id=receiver.id)
 
 
+def _canonical_transport_resources(resources: Dict[str, int] | None) -> Dict[str, int]:
+    return {resource: max(int((resources or {}).get(resource, 0) or 0), 0) for resource in RESOURCE_FIELDS if int((resources or {}).get(resource, 0) or 0) > 0}
+
+
+def _lock_city_for_delivery(db: Session, city_id: int) -> models.City | None:
+    return db.query(models.City).filter(models.City.id == city_id).with_for_update().populate_existing().one_or_none()
+
+
+def _lock_transport_cities(db: Session, *city_ids: int | None) -> dict[int, models.City]:
+    locked: dict[int, models.City] = {}
+    for city_id in sorted({int(value) for value in city_ids if value is not None}):
+        city = _lock_city_for_delivery(db, city_id)
+        if city is not None:
+            locked[city_id] = city
+    return locked
+
+
+def _can_store_all(city: models.City, resources: Dict[str, int]) -> bool:
+    limit = float(production.get_storage_limit(city))
+    return all(float(getattr(city, resource)) + int(amount) <= limit for resource, amount in resources.items())
+
+
+def _credit_resources_exact(city: models.City, resources: Dict[str, int]) -> None:
+    for resource, amount in resources.items():
+        setattr(city, resource, float(getattr(city, resource)) + int(amount))
+
+
 def _resolve_transport_core(db: Session, movement: models.Movement) -> List[dict[str, Any]]:
     sender_id = movement.origin_city_id
     receiver_id = movement.target_city_id
@@ -641,9 +644,9 @@ def _resolve_transport_core(db: Session, movement: models.Movement) -> List[dict
     if sender is None or receiver is None:
         return []
 
-    payload = _canonical_transport_resources(movement.resources or {})
-    merchant_capacity = sum(payload.values())
-    delivered = bool(payload) and _can_store_all(receiver, payload)
+    payload = _canonical_transport_resources(movement.resources)
+    merchant_capacity = int((movement.resources or {}).get("capacity", 0) or 0)
+    delivered = _can_store_all(receiver, payload)
     if delivered:
         _credit_resources_exact(receiver, payload)
 
@@ -679,11 +682,12 @@ def _resolve_transport_return_core(db: Session, movement: models.Movement) -> tu
     target_city_id = movement.target_city_id
     if target_city_id is None:
         return True, []
-    city = _lock_city_for_delivery(db, target_city_id)
+    locked_cities = _lock_transport_cities(db, movement.origin_city_id, target_city_id)
+    city = locked_cities.get(target_city_id)
     if city is None:
         return True, []
 
-    payload = _canonical_transport_resources(movement.resources or {})
+    payload = _canonical_transport_resources(movement.resources)
     if payload and not _can_store_all(city, payload):
         return False, []
     if payload:
@@ -712,8 +716,6 @@ def _run_resolution_effect(db: Session, effect: dict[str, Any]) -> None:
 
 
 def resolve_due_movements(db: Session) -> List[models.Movement]:
-    """Resolve each due movement exactly once inside the worker transaction."""
-
     now = utc_now()
     movements = (
         db.query(models.Movement)
@@ -731,25 +733,22 @@ def resolve_due_movements(db: Session) -> List[models.Movement]:
         .with_for_update(skip_locked=True)
         .all()
     )
-    if not movements:
-        return []
 
     effects: List[dict[str, Any]] = []
     for movement in movements:
         should_complete = True
-        if movement.movement_type == "spy":
-            effects.extend(_resolve_spy_core(db, movement))
+        if movement.movement_type == "attack" and movement.target_oasis_id is not None:
+            effects.extend(_resolve_oasis_attack_core(db, movement))
         elif movement.movement_type == "attack":
-            if movement.target_oasis_id is not None:
-                effects.extend(_resolve_oasis_attack_core(db, movement))
-            else:
-                effects.extend(_resolve_attack_core(db, movement))
+            effects.extend(_resolve_attack_core(db, movement))
+        elif movement.movement_type == "spy":
+            effects.extend(_resolve_spy_core(db, movement))
         elif movement.movement_type == "reinforce":
             _resolve_reinforce_core(db, movement)
-        elif movement.movement_type == "transport":
-            effects.extend(_resolve_transport_core(db, movement))
         elif movement.movement_type == "return":
             _resolve_return_core(db, movement)
+        elif movement.movement_type == "transport":
+            effects.extend(_resolve_transport_core(db, movement))
         elif movement.movement_type == "transport_return":
             should_complete, return_effects = _resolve_transport_return_core(db, movement)
             effects.extend(return_effects)
