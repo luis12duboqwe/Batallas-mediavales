@@ -1,11 +1,14 @@
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+FORUM_TITLE_MAX_LENGTH = 160
+FORUM_POST_MAX_LENGTH = 5000
+
 
 class ForumPostBase(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=FORUM_POST_MAX_LENGTH)
 
 
 class ForumPostCreate(ForumPostBase):
@@ -23,11 +26,16 @@ class ForumPostRead(ForumPostBase):
 
 
 class ForumThreadBase(BaseModel):
-    title: str
+    title: str = Field(min_length=1, max_length=FORUM_TITLE_MAX_LENGTH)
 
 
 class ForumThreadCreate(ForumThreadBase):
-    content: str
+    content: str = Field(min_length=1, max_length=FORUM_POST_MAX_LENGTH)
+
+
+class ForumThreadModeration(BaseModel):
+    is_locked: Optional[bool] = None
+    is_pinned: Optional[bool] = None
 
 
 class ForumThreadRead(ForumThreadBase):
