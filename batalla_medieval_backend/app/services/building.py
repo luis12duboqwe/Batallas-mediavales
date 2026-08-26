@@ -228,6 +228,7 @@ def _run_completion_side_effects(db: Session, info: dict) -> None:
         achievement_service.update_achievement_progress(
             db,
             owner_id,
+            world_id,
             "build_level",
             absolute_value=info["target_level"],
         )
@@ -318,52 +319,36 @@ def process_building_queues(db: Session) -> List[dict]:
             )
             if world and world.is_active:
                 world.is_active = False
-                world.ended_at = now
-                world.winner_id = city.owner_id
+                db.add(world)
                 world_won = True
 
+        db.delete(queue_entry)
         finished_info.append(
             {
-                "city_id": queue_entry.city_id,
-                "building_type": queue_entry.building_type,
-                "target_level": building.level,
+                "city_id": city.id,
                 "owner_id": city.owner_id,
                 "world_id": city.world_id,
-                "world_won": world_won,
+                "building_type": queue_entry.building_type,
+                "target_level": building.level,
                 "expansion_points_awarded": expansion_points_awarded,
+                "world_won": world_won,
             }
         )
-        db.delete(queue_entry)
 
     db.commit()
 
     for info in finished_info:
         _run_completion_side_effects(db, info)
 
-    if finished_info:
-        logger.info(
-            "building_queues_completed",
-            extra={
-                "count": len(finished_info),
-                "cities": [item["city_id"] for item in finished_info],
-                "expansion_points_awarded": sum(
-                    item["expansion_points_awarded"] for item in finished_info
-                ),
-            },
-        )
-
-    return [
-        {
-            "city_id": info["city_id"],
-            "building_type": info["building_type"],
-            "target_level": info["target_level"],
-        }
-        for info in finished_info
-    ]
+    logger.info(
+        "building_queues_completed",
+        extra={"count": len(finished_info), "cities": [item["city_id"] for item in finished_info]},
+    )
+    return finished_info
 
 
-def cancel_building_queue(db: Session, queue_id: int, user_id: int) -> bool:
-    """Cancel a future queue and refund 80% of the exact recorded payment."""
+def cancel_upgrade(db: Session, queue_id: int, user_id: int) -> bool:
+    """Cancel a queued upgrade and refund the canonical fraction of paid cost."""
 
     queue_entry = (
         db.query(models.BuildingQueue)
@@ -372,46 +357,25 @@ def cancel_building_queue(db: Session, queue_id: int, user_id: int) -> bool:
             models.BuildingQueue.id == queue_id,
             models.City.owner_id == user_id,
         )
-        .with_for_update()
         .first()
     )
     if not queue_entry:
         return False
 
-    if _as_utc(queue_entry.finish_time) <= _as_utc(utc_now()):
-        db.rollback()
-        raise ValueError("Completed building queue can no longer be cancelled")
+    if queue_entry.finish_time <= utc_now():
+        return False
 
-    city, production_gains = production.lock_and_recalculate_resources(
-        db, queue_entry.city_id
-    )
-
-    paid_cost = queue_entry.paid_cost or calculate_upgrade_cost(
-        queue_entry.building_type,
-        queue_entry.target_level,
-    )
-    refund = {
-        resource: float(amount) * REFUND_FACTOR
-        for resource, amount in paid_cost.items()
-    }
-
-    storage_limit = production.get_storage_limit(city)
-    for resource, amount in refund.items():
-        current_value = float(getattr(city, resource))
-        if current_value >= storage_limit:
-            continue
-        setattr(city, resource, min(current_value + amount, storage_limit))
+    city, gains = production.lock_and_recalculate_resources(db, queue_entry.city_id)
+    refund = queue_entry.paid_cost or {}
+    for resource, paid_amount in refund.items():
+        if resource in balance.RESOURCE_FIELDS:
+            setattr(
+                city,
+                resource,
+                getattr(city, resource) + float(paid_amount) * REFUND_FACTOR,
+            )
 
     db.delete(queue_entry)
     db.commit()
-    production.record_resource_gains(db, city, production_gains)
-    logger.info(
-        "building_upgrade_cancelled",
-        extra={
-            "city_id": city.id,
-            "building": queue_entry.building_type,
-            "target_level": queue_entry.target_level,
-            "refund": refund,
-        },
-    )
+    production.record_resource_gains(db, city, gains)
     return True
