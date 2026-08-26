@@ -5,7 +5,8 @@ from __future__ import annotations
 from app import models
 from app.database import SessionLocal
 from app.routers.auth import get_password_hash
-from app.services import tutorial, world_membership
+from app.services import production, tutorial, world_membership
+from app.utils import utc_now
 
 PASSWORD = "G15-Ranking-Test-2026!"
 USERS = (
@@ -53,10 +54,15 @@ def main() -> None:
             city = db.query(models.City).filter(models.City.id == membership.starting_city_id).one()
             db.query(models.Building).filter(models.Building.city_id == city.id).delete(synchronize_session=False)
             db.query(models.Troop).filter(models.Troop.city_id == city.id).delete(synchronize_session=False)
-            city.wood = 1234.0
-            city.stone = 1234.0
-            city.iron = 1234.0
-            city.gold = 1234.0
+            db.flush()
+            # Keep the resource snapshot deterministic. At the storage cap a read-side
+            # production tick cannot increase any balance between pre/post claim checks.
+            storage_cap = float(production.get_storage_limit(city))
+            city.wood = storage_cap
+            city.stone = storage_cap
+            city.iron = storage_cap
+            city.gold = storage_cap
+            city.last_production = utc_now()
             db.add(city)
         db.commit()
 
