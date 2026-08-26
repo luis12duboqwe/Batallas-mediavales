@@ -14,6 +14,7 @@ USERS = (
     ("g15_beta", "g15-beta@example.com"),
 )
 MEDAL_TITLE = "G15 Honor sin ventaja"
+G15_TIE_LEVEL = 1_000_000
 
 
 def _user(db, username: str, email: str) -> models.User:
@@ -55,8 +56,10 @@ def main() -> None:
             db.query(models.Building).filter(models.Building.city_id == city.id).delete(synchronize_session=False)
             db.query(models.Troop).filter(models.Troop.city_id == city.id).delete(synchronize_session=False)
             db.flush()
-            # Keep the resource snapshot deterministic. At the storage cap a read-side
-            # production tick cannot increase any balance between pre/post claim checks.
+            # Give both fixture players the same score far above ordinary seeded
+            # progress. The assertion then exercises only the deterministic
+            # username/id tiebreaker, not assumptions about older G2-G14 users.
+            db.add(models.Building(city_id=city.id, name="town_hall", level=G15_TIE_LEVEL))
             storage_cap = float(production.get_storage_limit(city))
             city.wood = storage_cap
             city.stone = storage_cap
