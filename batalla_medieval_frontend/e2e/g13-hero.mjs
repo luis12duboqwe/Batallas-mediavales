@@ -118,6 +118,12 @@ const compactState = (snapshot, adventureId) => {
   };
 };
 
+const exactRetryState = (compact) => ({
+  hero: compact.hero,
+  items: compact.items,
+  adventure: compact.adventure,
+});
+
 try {
   await login();
   const initial = await stateSnapshot();
@@ -210,11 +216,23 @@ try {
 
   const afterRetry = await stateSnapshot();
   const afterRetryCompact = compactState(afterRetry, fixtureAdventure.id);
-  if (JSON.stringify(afterRetryCompact) !== JSON.stringify(afterUiCompact)) {
+  if (JSON.stringify(exactRetryState(afterRetryCompact)) !== JSON.stringify(exactRetryState(afterUiCompact))) {
     failures.push(
-      `Committed claim retry mutated hero/items/resources/adventure:\n` +
-      `before=${JSON.stringify(afterUiCompact)}\nafter=${JSON.stringify(afterRetryCompact)}`,
+      `Committed claim retry mutated hero/items/adventure:\n` +
+      `before=${JSON.stringify(exactRetryState(afterUiCompact))}\nafter=${JSON.stringify(exactRetryState(afterRetryCompact))}`,
     );
+  }
+
+  for (const resource of ['wood', 'stone', 'iron', 'gold']) {
+    const before = Number(afterUiCompact.resources[resource]);
+    const after = Number(afterRetryCompact.resources[resource]);
+    const drift = after - before;
+    // Reading the city legitimately accrues passive production. A duplicate
+    // adventure resource payout is at least 100 units, so sub-unit positive
+    // drift is production noise while >= 1 unit is never acceptable here.
+    if (drift < -1e-6 || drift >= 1) {
+      failures.push(`Retry changed ${resource} beyond passive production tolerance: ${before} -> ${after}`);
+    }
   }
 } catch (error) {
   failures.push(`journey-error: ${error.stack || error.message}`);
