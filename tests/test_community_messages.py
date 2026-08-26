@@ -86,3 +86,26 @@ def test_block_prevents_new_persistent_message_in_that_world(db_session, user):
         )
     assert exc.value.status_code == 403
     assert db_session.query(models.Message).count() == 0
+
+
+def test_message_context_requires_selection_when_multiple_worlds_are_joined(
+    db_session,
+    user,
+):
+    first_world = db_session.query(models.World).first()
+    second_world = models.World(
+        name="Message Ambiguous World",
+        speed_modifier=1.0,
+        resource_modifier=1.0,
+    )
+    db_session.add(second_world)
+    db_session.commit()
+    _join(db_session, user.id, first_world.id)
+    _join(db_session, user.id, second_world.id)
+    user.world_id = None
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        message_router.sent_messages(db_session, user)
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "No active world selected"
