@@ -11,17 +11,16 @@ const AllianceView = () => {
   const { alliance, loadAlliance, currentCity } = useCityStore();
   const [loading, setLoading] = useState(false);
   const [createName, setCreateName] = useState('');
-  const [activeTab, setActiveTab] = useState('general'); // general, members, diplomacy, forum
-  
-  // General Tab State
+  const [activeTab, setActiveTab] = useState('general');
+
   const [chatMessage, setChatMessage] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
   const [showMassMessageModal, setShowMassMessageModal] = useState(false);
   const [massMessageSubject, setMassMessageSubject] = useState('');
   const [massMessageContent, setMassMessageContent] = useState('');
 
-  // Members Tab State
   const [members, setMembers] = useState([]);
+  const [memberActionId, setMemberActionId] = useState(null);
   const [invitations, setInvitations] = useState([]);
   const [inviteSearch, setInviteSearch] = useState('');
   const [inviteResults, setInviteResults] = useState([]);
@@ -37,9 +36,9 @@ const AllianceView = () => {
       fetchMembers();
       const interval = setInterval(fetchChat, 5000);
       return () => clearInterval(interval);
-    } else if (currentCity) {
-      fetchInvitations();
     }
+    if (currentCity) fetchInvitations();
+    return undefined;
   }, [alliance, currentCity]);
 
   const fetchChat = () => {
@@ -66,13 +65,12 @@ const AllianceView = () => {
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!createName.trim()) return;
-    
     setLoading(true);
     try {
       await axiosClient.post('/alliance/create', {
         name: createName,
         description: 'Nueva alianza',
-        world_id: currentCity.world_id
+        world_id: currentCity.world_id,
       });
       await loadAlliance();
       setCreateName('');
@@ -86,13 +84,12 @@ const AllianceView = () => {
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!chatMessage.trim() || !alliance) return;
-
     try {
       await axiosClient.post(`/alliance/${alliance.id}/chat`, { message: chatMessage });
       setChatMessage('');
       fetchChat();
     } catch (error) {
-      console.error(error);
+      alert(error.response?.data?.detail || 'No se pudo enviar el mensaje');
     }
   };
 
@@ -101,8 +98,7 @@ const AllianceView = () => {
       await axiosClient.acceptInvitation(id);
       await loadAlliance();
     } catch (error) {
-      console.error(error);
-      alert('Error al aceptar invitación');
+      alert(error.response?.data?.detail || 'Error al aceptar invitación');
     }
   };
 
@@ -134,7 +130,7 @@ const AllianceView = () => {
 
   const handleSendMassMessage = async (e) => {
     e.preventDefault();
-    if (!massMessageSubject || !massMessageContent) return;
+    if (!massMessageSubject.trim() || !massMessageContent.trim()) return;
     try {
       await api.sendMassMessage(alliance.id, massMessageSubject, massMessageContent);
       setShowMassMessageModal(false);
@@ -142,24 +138,52 @@ const AllianceView = () => {
       setMassMessageContent('');
       alert('Mensaje enviado a todos los miembros.');
     } catch (error) {
-      console.error(error);
-      alert('Error al enviar mensaje.');
+      alert(error.response?.data?.detail || 'Error al enviar mensaje.');
     }
   };
 
-  const myRank = members.find(m => m.user_id === user?.id)?.rank || 0;
+  const handleMemberAction = async (member, action) => {
+    if (!alliance || !member?.id) return;
+    const labels = {
+      promote: 'ascender',
+      demote: 'degradar',
+      kick: 'expulsar',
+      transfer: 'transferir el liderazgo a',
+    };
+    if (!window.confirm(`¿Confirmas ${labels[action]} ${member.username}?`)) return;
+    setMemberActionId(member.id);
+    try {
+      if (action === 'promote') {
+        await axiosClient.post(`/alliance/${alliance.id}/members/${member.id}/promote`);
+      } else if (action === 'demote') {
+        await axiosClient.post(`/alliance/${alliance.id}/members/${member.id}/demote`);
+      } else if (action === 'kick') {
+        await axiosClient.delete(`/alliance/${alliance.id}/members/${member.id}`);
+      } else if (action === 'transfer') {
+        await axiosClient.post(`/alliance/${alliance.id}/leadership/transfer`, {
+          target_member_id: member.id,
+        });
+        await loadAlliance();
+      }
+      await fetchMembers();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'No se pudo completar la acción');
+    } finally {
+      setMemberActionId(null);
+    }
+  };
+
+  const myRank = Number(members.find(m => Number(m.user_id) === Number(user?.id))?.rank || 0);
   const canSendMassMessage = myRank >= 2;
 
   if (!alliance) {
     return (
       <div className="max-w-4xl mx-auto mt-10 grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Create Alliance */}
         <div className="card bg-black/40 border border-amber-900/30 p-8 text-center">
           <h1 className="text-3xl font-bold text-amber-100 mb-4">Sin Alianza</h1>
           <p className="text-gray-400 mb-8">
             No perteneces a ninguna alianza. Puedes crear una nueva y reclutar a otros señores.
           </p>
-          
           <div className="bg-gray-900/50 p-6 rounded-xl border border-gray-800 max-w-md mx-auto">
             <h3 className="text-lg font-bold text-amber-200 mb-4">Fundar una Alianza</h3>
             <form onSubmit={handleCreate} className="space-y-4">
@@ -171,8 +195,8 @@ const AllianceView = () => {
                 onChange={(e) => setCreateName(e.target.value)}
                 maxLength={20}
               />
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 className="btn btn-primary w-full bg-amber-700 hover:bg-amber-600 border-none"
                 disabled={loading || !createName.trim()}
               >
@@ -182,7 +206,6 @@ const AllianceView = () => {
           </div>
         </div>
 
-        {/* Invitations */}
         <div className="card bg-black/40 border border-amber-900/30 p-8">
           <h2 className="text-2xl font-bold text-amber-100 mb-4">Invitaciones Pendientes</h2>
           {invitations.length === 0 ? (
@@ -195,7 +218,7 @@ const AllianceView = () => {
                     <div className="font-bold text-amber-500">Alianza #{inv.alliance_id}</div>
                     <div className="text-xs text-gray-400">{formatDate(inv.created_at)}</div>
                   </div>
-                  <button 
+                  <button
                     onClick={() => handleAcceptInvitation(inv.id)}
                     className="btn btn-sm btn-success bg-green-700 border-none text-white"
                   >
@@ -211,22 +234,20 @@ const AllianceView = () => {
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col gap-6 relative">
-      {/* Header & Tabs */}
+    <div className="h-[calc(100vh-8rem)] flex flex-col gap-6 relative" data-testid="alliance-community-view">
       <div className="flex justify-between items-end border-b border-amber-900/30 pb-2">
         <div>
           <h1 className="text-3xl font-bold text-amber-100">{alliance.name}</h1>
           <p className="text-gray-400 text-sm">{alliance.description}</p>
         </div>
         <div className="tabs tabs-boxed bg-black/40">
-          <a className={`tab ${activeTab === 'general' ? 'tab-active' : ''}`} onClick={() => setActiveTab('general')}>General</a>
-          <a className={`tab ${activeTab === 'members' ? 'tab-active' : ''}`} onClick={() => setActiveTab('members')}>Miembros</a>
-          <a className={`tab ${activeTab === 'diplomacy' ? 'tab-active' : ''}`} onClick={() => setActiveTab('diplomacy')}>Diplomacia</a>
-          <a className={`tab ${activeTab === 'forum' ? 'tab-active' : ''}`} onClick={() => setActiveTab('forum')}>Foro</a>
+          <button className={`tab ${activeTab === 'general' ? 'tab-active' : ''}`} onClick={() => setActiveTab('general')}>General</button>
+          <button className={`tab ${activeTab === 'members' ? 'tab-active' : ''}`} onClick={() => setActiveTab('members')} data-testid="alliance-members-tab">Miembros</button>
+          <button className={`tab ${activeTab === 'diplomacy' ? 'tab-active' : ''}`} onClick={() => setActiveTab('diplomacy')}>Diplomacia</button>
+          <button className={`tab ${activeTab === 'forum' ? 'tab-active' : ''}`} onClick={() => setActiveTab('forum')} data-testid="alliance-forum-tab">Foro</button>
         </div>
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-hidden">
         {activeTab === 'general' && (
           <div className="h-full flex gap-6">
@@ -242,14 +263,16 @@ const AllianceView = () => {
                     <span className="text-xl font-bold text-amber-200">{alliance.diplomacy}</span>
                   </div>
                 </div>
-                <button 
-                  onClick={() => setShowInviteModal(true)}
-                  className="btn btn-sm w-full mt-4 bg-amber-800 hover:bg-amber-700 border-none"
-                >
-                  Invitar Jugador
-                </button>
+                {myRank >= 2 && (
+                  <button
+                    onClick={() => setShowInviteModal(true)}
+                    className="btn btn-sm w-full mt-4 bg-amber-800 hover:bg-amber-700 border-none"
+                  >
+                    Invitar Jugador
+                  </button>
+                )}
                 {canSendMassMessage && (
-                  <button 
+                  <button
                     onClick={() => setShowMassMessageModal(true)}
                     className="btn btn-sm w-full mt-2 bg-blue-800 hover:bg-blue-700 border-none"
                   >
@@ -261,7 +284,7 @@ const AllianceView = () => {
 
             <div className="flex-1 card bg-black/40 border border-amber-900/30 p-4 flex flex-col">
               <h3 className="text-lg font-bold text-amber-200 mb-4">Chat de Alianza</h3>
-              <div className="flex-1 overflow-y-auto space-y-3 mb-4 custom-scrollbar pr-2">
+              <div className="flex-1 overflow-y-auto space-y-3 mb-4 custom-scrollbar pr-2" data-testid="alliance-chat-history">
                 {chatMessages.map(msg => (
                   <div key={msg.id} className="bg-black/20 p-2 rounded border border-gray-800/50">
                     <div className="flex justify-between items-baseline mb-1">
@@ -279,8 +302,10 @@ const AllianceView = () => {
                   placeholder="Escribe un mensaje..."
                   value={chatMessage}
                   onChange={(e) => setChatMessage(e.target.value)}
+                  maxLength={1000}
+                  data-testid="alliance-chat-input"
                 />
-                <button type="submit" className="btn btn-sm btn-ghost text-amber-500">
+                <button type="submit" className="btn btn-sm btn-ghost text-amber-500" data-testid="alliance-chat-send">
                   ➤
                 </button>
               </form>
@@ -301,17 +326,57 @@ const AllianceView = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {members.map(member => (
-                    <tr key={member.user_id} className="hover:bg-white/5">
-                      <td className="font-bold text-gray-300">{member.username}</td>
-                      <td>
-                        {member.rank === 3 ? 'Líder' : member.rank === 2 ? 'General' : 'Miembro'}
-                      </td>
-                      <td>
-                        {/* Actions placeholder */}
-                      </td>
-                    </tr>
-                  ))}
+                  {members.map(member => {
+                    const targetRank = Number(member.rank || 0);
+                    const isSelf = Number(member.user_id) === Number(user?.id);
+                    const canManageTarget = myRank >= 2 && myRank > targetRank && !isSelf;
+                    const isBusy = memberActionId === member.id;
+                    return (
+                      <tr key={member.id} className="hover:bg-white/5" data-testid={`alliance-member-${member.user_id}`}>
+                        <td className="font-bold text-gray-300">{member.username}</td>
+                        <td>{targetRank === 3 ? 'Líder' : targetRank === 2 ? 'General' : 'Miembro'}</td>
+                        <td>
+                          <div className="flex flex-wrap gap-2">
+                            {canManageTarget && targetRank === 1 && (
+                              <button
+                                className="btn btn-xs btn-outline"
+                                disabled={isBusy}
+                                onClick={() => handleMemberAction(member, 'promote')}
+                                data-testid={`promote-member-${member.user_id}`}
+                              >Ascender</button>
+                            )}
+                            {canManageTarget && targetRank > 1 && (
+                              <button
+                                className="btn btn-xs btn-outline"
+                                disabled={isBusy}
+                                onClick={() => handleMemberAction(member, 'demote')}
+                                data-testid={`demote-member-${member.user_id}`}
+                              >Degradar</button>
+                            )}
+                            {canManageTarget && (
+                              <button
+                                className="btn btn-xs btn-error btn-outline"
+                                disabled={isBusy}
+                                onClick={() => handleMemberAction(member, 'kick')}
+                                data-testid={`kick-member-${member.user_id}`}
+                              >Expulsar</button>
+                            )}
+                            {myRank === 3 && !isSelf && (
+                              <button
+                                className="btn btn-xs btn-warning btn-outline"
+                                disabled={isBusy}
+                                onClick={() => handleMemberAction(member, 'transfer')}
+                                data-testid={`transfer-leadership-${member.user_id}`}
+                              >Hacer líder</button>
+                            )}
+                            {!canManageTarget && !(myRank === 3 && !isSelf) && (
+                              <span className="text-xs text-gray-600">Sin acciones disponibles</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -327,7 +392,6 @@ const AllianceView = () => {
         )}
       </div>
 
-      {/* Modals */}
       {showInviteModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
           <div className="bg-gray-900 border border-amber-700 p-6 rounded-lg w-96">
@@ -342,25 +406,21 @@ const AllianceView = () => {
               />
               {inviteResults.length > 0 && (
                 <div className="absolute w-full bg-gray-800 border border-gray-600 mt-1 max-h-40 overflow-y-auto z-10">
-                  {inviteResults.map(user => (
-                    <div 
-                      key={user.id}
-                      className="p-2 hover:bg-gray-700 cursor-pointer flex justify-between"
-                      onClick={() => handleInvite(user.id)}
+                  {inviteResults.map(inviteUser => (
+                    <button
+                      type="button"
+                      key={inviteUser.id}
+                      className="p-2 hover:bg-gray-700 cursor-pointer flex justify-between w-full text-left"
+                      onClick={() => handleInvite(inviteUser.id)}
                     >
-                      <span>{user.username}</span>
+                      <span>{inviteUser.username}</span>
                       <span className="text-xs text-green-500">Invitar</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
             </div>
-            <button 
-              onClick={() => setShowInviteModal(false)}
-              className="btn btn-sm btn-ghost w-full"
-            >
-              Cancelar
-            </button>
+            <button onClick={() => setShowInviteModal(false)} className="btn btn-sm btn-ghost w-full">Cancelar</button>
           </div>
         </div>
       )}
@@ -385,13 +445,7 @@ const AllianceView = () => {
               />
               <div className="flex gap-2">
                 <button type="submit" className="btn btn-primary flex-1">Enviar</button>
-                <button 
-                  type="button" 
-                  onClick={() => setShowMassMessageModal(false)}
-                  className="btn btn-ghost flex-1"
-                >
-                  Cancelar
-                </button>
+                <button type="button" onClick={() => setShowMassMessageModal(false)} className="btn btn-ghost flex-1">Cancelar</button>
               </div>
             </form>
           </div>

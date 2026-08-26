@@ -1,12 +1,15 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 RANK_MEMBER = 1
 RANK_GENERAL = 2
 RANK_LEADER = 3
+
+ALLIANCE_MASS_SUBJECT_MAX_LENGTH = 255
+ALLIANCE_MASS_CONTENT_MAX_LENGTH = 10000
 
 
 class AllianceBase(BaseModel):
@@ -43,9 +46,14 @@ class AllianceMemberRead(BaseModel):
 
 
 class AllianceMemberPublic(BaseModel):
+    id: int
     user_id: int
     username: str
     rank: int
+
+
+class AllianceLeadershipTransfer(BaseModel):
+    target_member_id: int = Field(gt=0)
 
 
 class AllianceInvitationCreate(BaseModel):
@@ -80,5 +88,5 @@ class AllianceChatMessageRead(BaseModel):
 
 
 class AllianceMassMessage(BaseModel):
-    subject: str
-    content: str
+    subject: str = Field(min_length=1, max_length=ALLIANCE_MASS_SUBJECT_MAX_LENGTH)
+    content: str = Field(min_length=1, max_length=ALLIANCE_MASS_CONTENT_MAX_LENGTH)

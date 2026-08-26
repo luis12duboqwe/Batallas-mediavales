@@ -8,7 +8,9 @@ from ..database import get_db
 from ..routers.auth import get_current_user
 from ..schemas import diplomacy as diplomacy_schema
 from ..services import alliance as alliance_service
+from ..services import community as community_service
 from ..services import diplomacy as diplomacy_service
+from ..services import social_privacy
 from .world_access import require_world_access
 
 router = APIRouter(tags=["alliance"])
@@ -34,6 +36,28 @@ def _require_alliance_world_access(
     return alliance
 
 
+def _require_capability(
+    db: Session,
+    alliance_id: int,
+    current_user: models.User,
+    capability: str,
+) -> models.AllianceMember:
+    alliance = _require_alliance_world_access(db, current_user, alliance_id)
+    membership = alliance_service.require_membership(db, alliance.id, current_user.id)
+    return community_service.require_capability(membership, capability)
+
+
+def _alliance_chat_read(message: models.ChatMessage) -> schemas.AllianceChatMessageRead:
+    return schemas.AllianceChatMessageRead(
+        id=message.id,
+        alliance_id=message.alliance_id,
+        user_id=message.user_id,
+        username=message.user.username,
+        message=message.content,
+        created_at=message.timestamp,
+    )
+
+
 @router.get("/", response_model=Optional[schemas.AllianceRead])
 def get_my_alliance(
     world_id: int | None = None,
@@ -56,7 +80,7 @@ def create_alliance(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    return alliance_service.create_alliance(db, payload, current_user)
+    return community_service.create_alliance_serialized(db, payload, current_user)
 
 
 @router.get("/{alliance_id}/members", response_model=list[schemas.AllianceMemberPublic])
@@ -76,9 +100,25 @@ def invite_player(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    membership = _require_capability(
+        db,
+        alliance_id,
+        current_user,
+        community_service.CAP_INVITE,
+    )
     target_user = db.query(models.User).filter(models.User.id == payload.user_id).first()
     if not target_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if social_privacy.interaction_blocked(
+        db,
+        current_user.id,
+        payload.user_id,
+        membership.alliance.world_id,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Social interaction blocked",
+        )
     return alliance_service.invite_member(db, alliance_id, current_user, payload.user_id)
 
 
@@ -119,6 +159,7 @@ def promote_member(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    _require_capability(db, alliance_id, current_user, community_service.CAP_MANAGE_MEMBERS)
     return alliance_service.promote_member(db, alliance_id, current_user, member_id)
 
 
@@ -129,6 +170,7 @@ def demote_member(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    _require_capability(db, alliance_id, current_user, community_service.CAP_MANAGE_MEMBERS)
     return alliance_service.demote_member(db, alliance_id, current_user, member_id)
 
 
@@ -139,7 +181,32 @@ def kick_member(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    _require_capability(db, alliance_id, current_user, community_service.CAP_MANAGE_MEMBERS)
     alliance_service.kick_member(db, alliance_id, current_user, member_id)
+
+
+@router.post(
+    "/{alliance_id}/leadership/transfer",
+    response_model=schemas.AllianceMemberRead,
+)
+def transfer_leadership(
+    alliance_id: int,
+    payload: schemas.AllianceLeadershipTransfer,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    _require_capability(
+        db,
+        alliance_id,
+        current_user,
+        community_service.CAP_TRANSFER_LEADERSHIP,
+    )
+    return community_service.transfer_leadership(
+        db,
+        alliance_id,
+        current_user.id,
+        payload.target_member_id,
+    )
 
 
 @router.patch("/{alliance_id}", response_model=schemas.AllianceRead)
@@ -149,6 +216,7 @@ def update_alliance(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    _require_capability(db, alliance_id, current_user, community_service.CAP_EDIT)
     return alliance_service.update_alliance(db, alliance_id, current_user, payload)
 
 
@@ -159,24 +227,31 @@ def send_chat_message(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    message = alliance_service.post_chat_message(db, alliance_id, current_user, payload)
-    return schemas.AllianceChatMessageRead(
-        id=message.id,
-        alliance_id=message.alliance_id,
-        user_id=message.user_id,
-        username=message.user.username,
-        message=message.message,
-        created_at=message.created_at,
+    message = community_service.post_alliance_chat_message(
+        db,
+        alliance_id,
+        current_user,
+        payload.message,
     )
+    return _alliance_chat_read(message)
 
 
 @router.get("/{alliance_id}/chat", response_model=list[schemas.AllianceChatMessageRead])
 def list_chat_messages(
     alliance_id: int,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    return alliance_service.list_chat_messages(db, alliance_id, current_user)
+    return [
+        _alliance_chat_read(message)
+        for message in community_service.list_alliance_chat_messages(
+            db,
+            alliance_id,
+            current_user,
+            limit=limit,
+        )
+    ]
 
 
 @router.post("/{alliance_id}/mass-message")
@@ -186,6 +261,7 @@ def send_mass_message(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    _require_capability(db, alliance_id, current_user, community_service.CAP_MASS_MESSAGE)
     return alliance_service.send_mass_message(
         db,
         alliance_id,
@@ -201,6 +277,7 @@ def get_diplomacy(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    _require_alliance_world_access(db, current_user, alliance_id)
     alliance_service.require_membership(db, alliance_id, current_user.id)
     return diplomacy_service.get_relations(db, alliance_id)
 
@@ -212,12 +289,7 @@ def request_diplomacy(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    membership = alliance_service.require_membership(db, alliance_id, current_user.id)
-    if membership.rank < alliance_service.RANK_GENERAL:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Insufficient rank",
-        )
+    _require_capability(db, alliance_id, current_user, community_service.CAP_DIPLOMACY)
     return diplomacy_service.request_relation(
         db,
         alliance_id,
@@ -236,12 +308,7 @@ def accept_diplomacy(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    membership = alliance_service.require_membership(db, alliance_id, current_user.id)
-    if membership.rank < alliance_service.RANK_GENERAL:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Insufficient rank",
-        )
+    _require_capability(db, alliance_id, current_user, community_service.CAP_DIPLOMACY)
     return diplomacy_service.accept_relation(db, alliance_id, diplomacy_id)
 
 
@@ -252,10 +319,5 @@ def cancel_diplomacy(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    membership = alliance_service.require_membership(db, alliance_id, current_user.id)
-    if membership.rank < alliance_service.RANK_GENERAL:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Insufficient rank",
-        )
+    _require_capability(db, alliance_id, current_user, community_service.CAP_DIPLOMACY)
     return diplomacy_service.cancel_relation(db, alliance_id, diplomacy_id)

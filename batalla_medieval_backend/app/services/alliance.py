@@ -446,6 +446,7 @@ def list_members(
     )
     return [
         schemas.AllianceMemberPublic(
+            id=membership.id,
             user_id=membership.user_id,
             username=membership.user.username,
             rank=membership.rank,
@@ -530,6 +531,7 @@ def send_mass_message(
             detail="Insufficient rank",
         )
 
+    alliance = get_alliance_or_404(db, alliance_id)
     memberships = (
         db.query(models.AllianceMember)
         .join(models.User, models.User.id == models.AllianceMember.user_id)
@@ -542,6 +544,7 @@ def send_mass_message(
         msg = models.Message(
             sender_id=sender.id,
             receiver_id=mem.user_id,
+            world_id=alliance.world_id,
             subject=f"[ALLIANCE] {subject}",
             content=content,
             timestamp=utc_now(),

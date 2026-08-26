@@ -30,6 +30,7 @@ from .alliance import (
     AllianceCreate,
     AllianceInvitationCreate,
     AllianceInvitationRead,
+    AllianceLeadershipTransfer,
     AllianceMemberPublic,
     AllianceMemberRead,
     AllianceRead,
@@ -87,6 +88,7 @@ from .forum import (
     ForumThreadCreate,
     ForumThreadRead,
     ForumThreadDetail,
+    ForumThreadModeration,
     ForumPostCreate,
     ForumPostRead,
 )
@@ -128,6 +130,7 @@ __all__ = [
     "AllianceUpdate",
     "AllianceMemberRead",
     "AllianceMemberPublic",
+    "AllianceLeadershipTransfer",
     "AllianceInvitationCreate",
     "AllianceInvitationRead",
     "AllianceChatMessageCreate",
@@ -206,6 +209,7 @@ __all__ = [
     "ForumThreadCreate",
     "ForumThreadRead",
     "ForumThreadDetail",
+    "ForumThreadModeration",
     "ForumPostCreate",
     "ForumPostRead",
 ]

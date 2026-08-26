@@ -35,6 +35,7 @@ from .chat_message import ChatMessage
 from .research import Research
 from .forum import ForumThread, ForumPost
 from .adventure import Adventure
+from .user_block import UserBlock
 
 __all__ = [
     "User",
@@ -84,4 +85,5 @@ __all__ = [
     "ForumThread",
     "ForumPost",
     "Adventure",
+    "UserBlock",
 ]

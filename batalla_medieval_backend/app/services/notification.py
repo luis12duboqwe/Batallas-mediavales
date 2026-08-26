@@ -18,12 +18,20 @@ EMAIL_NOTIFICATION_TYPES = {"attack_incoming", "building_complete", "event_start
 def create_notification(
     db: Session,
     user: models.User,
-    *,
     title: str,
     body: str,
-    notification_type: str,
+    *,
+    notification_type: str = "message_received",
     allow_email: bool = True,
 ) -> models.Notification:
+    """Persist and dispatch one notification.
+
+    ``title`` and ``body`` remain positional-or-keyword for compatibility with
+    older domain services. Newer callers should still pass the semantic
+    ``notification_type`` explicitly; message notifications use the safe
+    default when a legacy caller omits it.
+    """
+
     notification = models.Notification(
         user_id=user.id,
         title=title,
@@ -34,7 +42,6 @@ def create_notification(
     db.commit()
     db.refresh(notification)
 
-    # Send WebSocket notification
     try:
         payload = {
             "id": notification.id,
@@ -42,21 +49,15 @@ def create_notification(
             "body": notification.body,
             "type": notification.type,
             "created_at": notification.created_at.isoformat(),
-            "read": notification.read
+            "read": notification.read,
         }
-        
-        # Check if there is a running event loop
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(socket_manager.notify_user(user.id, "notification", payload))
         except RuntimeError:
-            # No running loop (e.g. sync thread), use async_to_sync or run_until_complete
-            # However, async_to_sync requires the loop to be running in main thread usually?
-            # Or it creates a new loop.
-            # A simpler way for fire-and-forget in sync context:
             asyncio.run(socket_manager.notify_user(user.id, "notification", payload))
-    except Exception as e:
-        logger.error(f"Failed to send websocket notification: {e}")
+    except Exception as exc:
+        logger.error("Failed to send websocket notification: %s", exc)
 
     if allow_email and user.email_notifications and notification_type in EMAIL_NOTIFICATION_TYPES:
         emailer.send_email(user.email, title, body)
