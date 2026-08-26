@@ -2,7 +2,9 @@
 
 ## Estado
 
-Activo. Rama: `feature/BM-0071-ranking-honor-medals`.
+Cerrado funcionalmente. Rama: `feature/BM-0071-ranking-honor-medals`.
+
+Evidencia previa al cierre documental: Validation #591 completamente verde sobre `296a2c152a83c80937b5b0dc2bc5fa9950d8dca0`. El HEAD documental final debe volver a pasar CI completo antes de fusionar.
 
 ## Objetivo
 
