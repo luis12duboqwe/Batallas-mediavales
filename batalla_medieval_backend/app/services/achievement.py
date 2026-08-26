@@ -6,13 +6,35 @@ from sqlalchemy.orm import Session
 from .. import models
 
 
+def _lock_world_membership(db: Session, user_id: int, world_id: int) -> models.PlayerWorld:
+    """Serialize medal mutations for one player/world on PostgreSQL."""
+
+    membership = (
+        db.query(models.PlayerWorld)
+        .filter(
+            models.PlayerWorld.user_id == user_id,
+            models.PlayerWorld.world_id == world_id,
+        )
+        .with_for_update()
+        .one_or_none()
+    )
+    if membership is None:
+        raise ValueError("Honor medal progress requires membership in the target world")
+    return membership
+
+
 def _ensure_progress_entries(
     db: Session,
     user_id: int,
     world_id: int,
     achievements: Iterable[models.Achievement],
+    *,
+    commit: bool = True,
 ) -> List[models.AchievementProgress]:
     achievement_ids = [achievement.id for achievement in achievements]
+    if not achievement_ids:
+        return []
+
     existing_progress = (
         db.query(models.AchievementProgress)
         .filter(
@@ -20,6 +42,7 @@ def _ensure_progress_entries(
             models.AchievementProgress.world_id == world_id,
             models.AchievementProgress.achievement_id.in_(achievement_ids),
         )
+        .with_for_update()
         .all()
     )
     progress_by_id = {progress.achievement_id: progress for progress in existing_progress}
@@ -38,6 +61,8 @@ def _ensure_progress_entries(
             created.append(progress)
             progress_by_id[achievement_id] = progress
     if created:
+        db.flush()
+    if commit:
         db.commit()
         for progress in created:
             db.refresh(progress)
@@ -45,13 +70,6 @@ def _ensure_progress_entries(
 
 
 def _resolve_unambiguous_world(db: Session, user_id: int) -> int:
-    """Compatibility bridge for legacy event producers.
-
-    A missing world is accepted only when the player belongs to exactly one
-    world. Multi-world callers must pass world_id explicitly; guessing from an
-    active UI preference could credit a medal to the wrong persistent world.
-    """
-
     world_ids = [
         int(row[0])
         for row in (
@@ -75,6 +93,9 @@ def get_user_achievements(
     achievements = db.query(models.Achievement).order_by(models.Achievement.id.asc()).all()
     if not achievements:
         return []
+    # Creating missing display rows is also a write; serialize it against event
+    # updates so a first UI read cannot race a medal-producing event.
+    _lock_world_membership(db, user.id, world_id)
     progress_entries = _ensure_progress_entries(db, user.id, world_id, achievements)
     return list(zip(achievements, progress_entries))
 
@@ -87,15 +108,7 @@ def update_achievement_progress(
     increment: int | float | None = None,
     absolute_value: int | float | None = None,
 ) -> None:
-    """Update honor progress without ever crossing world boundaries.
-
-    Preferred form::
-        update_achievement_progress(db, user_id, world_id, requirement_type, ...)
-
-    The historical form without world_id remains temporarily accepted only for
-    players with exactly one world membership. This keeps old event producers
-    safe while BM-0071 migrates them one by one.
-    """
+    """Update honor progress atomically inside exactly one world."""
 
     if len(args) == 2:
         if world_id is not None:
@@ -116,20 +129,26 @@ def update_achievement_progress(
     )
     if not achievements:
         return
+
+    # PlayerWorld is unique for (user, world), giving every medal mutation for
+    # that scope one stable lock before rows are read/created. This prevents both
+    # duplicate first inserts and lost increments under concurrent domain events.
+    _lock_world_membership(db, user_id, resolved_world_id)
     progress_entries = _ensure_progress_entries(
         db,
         user_id,
         resolved_world_id,
         achievements,
+        commit=False,
     )
 
     for achievement, progress in zip(achievements, progress_entries):
-        new_progress = progress.current_progress
+        new_progress = int(progress.current_progress or 0)
         if absolute_value is not None:
             new_progress = max(new_progress, int(absolute_value))
         if increment is not None:
             new_progress += int(increment)
-        new_progress = min(new_progress, achievement.requirement_value)
+        new_progress = min(new_progress, int(achievement.requirement_value))
         progress.current_progress = new_progress
         if progress.status != "claimed" and progress.current_progress >= achievement.requirement_value:
             progress.status = "completed"
@@ -149,6 +168,7 @@ def claim_achievement(
     if not achievement:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Honor medal not found")
 
+    _lock_world_membership(db, user.id, world_id)
     progress = (
         db.query(models.AchievementProgress)
         .filter(
