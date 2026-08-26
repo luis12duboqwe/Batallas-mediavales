@@ -17,6 +17,7 @@ class AdventureRead(AdventureBase):
     hero_id: int
     rules_version: Optional[str] = None
     outcome_seed: Optional[str] = None
+    result: Optional[dict] = None
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
