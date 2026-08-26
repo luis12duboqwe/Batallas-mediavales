@@ -42,13 +42,17 @@ async function snapshot() {
     const worldId = profile.world_id;
     const cities = await get(`${apiUrl}/city/?world_id=${worldId}`);
     const city = cities[0];
-    const troops = await get(`${apiUrl}/troops/${city.id}`);
+    const status = await get(`${apiUrl}/city/${city.id}/status?world_id=${worldId}`);
     const medals = await get(`${apiUrl}/achievement/list?world_id=${worldId}`);
     return {
       worldId,
       cityId: city.id,
-      resources: { wood: city.wood, stone: city.stone, iron: city.iron, gold: city.gold },
-      troops: troops.map((row) => ({ unit_type: row.unit_type, quantity: row.quantity })).sort((a, b) => a.unit_type.localeCompare(b.unit_type)),
+      resources: { wood: status.wood, stone: status.stone, iron: status.iron, gold: status.gold },
+      population: {
+        used: status.population_used,
+        capacity: status.population_capacity,
+        available: status.population_available,
+      },
       medal: medals.find((entry) => entry.achievement.title === 'G15 Honor sin ventaja') || null,
     };
   }, API_URL);
@@ -83,8 +87,8 @@ try {
   if (JSON.stringify(after.resources) !== JSON.stringify(before.resources)) {
     failures.push(`Claim changed resources: before=${JSON.stringify(before.resources)} after=${JSON.stringify(after.resources)}`);
   }
-  if (JSON.stringify(after.troops) !== JSON.stringify(before.troops)) {
-    failures.push(`Claim changed troops: before=${JSON.stringify(before.troops)} after=${JSON.stringify(after.troops)}`);
+  if (JSON.stringify(after.population) !== JSON.stringify(before.population)) {
+    failures.push(`Claim changed army/population capacity: before=${JSON.stringify(before.population)} after=${JSON.stringify(after.population)}`);
   }
   if ('reward_type' in after.medal.achievement || 'reward_value' in after.medal.achievement) {
     failures.push(`Reward fields leaked through API: ${JSON.stringify(after.medal.achievement)}`);
