@@ -1,0 +1,23 @@
+name: Export UI Captures
+
+on:
+  push:
+    branches:
+      - chore/ui-captures-2026-08-25
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: chore/ui-captures-2026-08-25
+      - uses: actions/upload-artifact@v6
+        with:
+          name: batallas-medievales-capturas
+          path: captures/*.jpg
+          if-no-files-found: error
+          retention-days: 1
