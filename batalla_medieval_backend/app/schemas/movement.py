@@ -13,6 +13,7 @@ class MovementBase(BaseModel):
     troops: Dict[str, int] = Field(default_factory=dict)
     resources: Dict[str, int] = Field(default_factory=dict)
     world_id: int
+    hero_id: Optional[int] = None
 
 
 class MovementCreate(MovementBase):

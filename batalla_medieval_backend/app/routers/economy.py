@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ..services import balance, espionage, market
+from ..services import balance, espionage, hero_rules, market
 
 router = APIRouter(prefix="/economy", tags=["economy"])
 
@@ -38,11 +38,9 @@ def balance_preview():
     """Return the exact versioned rules consumed by live gameplay services."""
 
     payload = balance.snapshot()
-    # BM-0065 versions espionage independently from BM-0064 combat so changing
-    # spy rules cannot silently change combat seeds/results. Replace the legacy
-    # snapshot block with the exact live espionage contract.
+    # Independently versioned subsystems are injected here without changing the
+    # historical BALANCE_VERSION used by combat/espionage seeds.
     payload["espionage"] = _espionage_rules_snapshot()
-    # BM-0066 follows the same exact-contract discipline for commerce while
-    # preserving the historical BALANCE_VERSION used by prior military seeds.
     payload["market"] = market.commerce_rules_snapshot()
+    payload["hero"] = hero_rules.snapshot()
     return payload

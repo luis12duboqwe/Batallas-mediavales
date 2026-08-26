@@ -57,13 +57,16 @@ def test_oasis_combat_conquest_reward_and_retry_are_auditable(
 
     hero = models.Hero(
         user_id=user.id,
+        world_id=world.id,
+        city_id=city.id,
         name="Conqueror",
         attack_points=10,
         defense_points=0,
-        status="home",
+        status="moving",
     )
     db_session.add(hero)
     db_session.commit()
+    db_session.refresh(hero)
     db_session.refresh(city)
 
     before = {
@@ -77,13 +80,11 @@ def test_oasis_combat_conquest_reward_and_retry_are_auditable(
         world_id=world.id,
         movement_type="attack",
         troops={"heavy_cavalry": 100},
+        hero_id=hero.id,
         arrival_time=utc_now() - timedelta(seconds=1),
         status="ongoing",
     )
     db_session.add(move)
-    db_session.commit()
-
-    hero.status = "moving"
     db_session.commit()
 
     processed = movement.resolve_due_movements(db_session)

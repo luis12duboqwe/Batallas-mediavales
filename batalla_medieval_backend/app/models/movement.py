@@ -15,9 +15,10 @@ class Movement(Base):
     target_city_id = Column(Integer, ForeignKey("cities.id"), nullable=True)
     target_oasis_id = Column(Integer, ForeignKey("oases.id"), nullable=True)
     world_id = Column(Integer, ForeignKey("worlds.id"), nullable=False)
+    hero_id = Column(Integer, ForeignKey("heroes.id", ondelete="SET NULL"), nullable=True, index=True)
     movement_type = Column(String, nullable=False)  # attack, spy, reinforce, return, transport
     troops = Column(JSON, default={})
-    resources = Column(JSON, default={})  # wood, clay, iron
+    resources = Column(JSON, default={})
     spy_count = Column(Integer, default=0)
     arrival_time = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=get_utc_now, nullable=False)
@@ -28,4 +29,5 @@ class Movement(Base):
     origin_city = relationship("City", back_populates="origin_movements", foreign_keys=[origin_city_id])
     target_city = relationship("City", back_populates="target_movements", foreign_keys=[target_city_id])
     target_oasis = relationship("Oasis")
+    hero = relationship("Hero")
     world = relationship("World", back_populates="movements")

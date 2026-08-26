@@ -214,13 +214,16 @@ export const api = {
     axiosClient.get('/troop/available', { params: { city_id: cityId, world_id: worldId } }),
   researchUnit: (cityId, worldId, unitType) => axiosClient.post('/troop/research', { city_id: cityId, unit_type: unitType }, { params: { world_id: worldId } }),
 
-  // Hero
-  getHeroItems: () => axiosClient.get('/hero/items'),
-  equipHeroItem: (itemId) => axiosClient.post(`/hero/items/${itemId}/equip`),
-  unequipHeroItem: (itemId) => axiosClient.post(`/hero/items/${itemId}/unequip`),
-  getAdventures: () => axiosClient.get('/adventure/'),
-  startAdventure: (adventureId) => axiosClient.post(`/adventure/${adventureId}/start`),
-  claimAdventure: (adventureId) => axiosClient.post(`/adventure/${adventureId}/claim`),
+  // Hero / inventory / adventures
+  getHero: (worldId) => axiosClient.get('/hero/', { params: { world_id: worldId } }),
+  distributeHeroPoints: (worldId, points) => axiosClient.post('/hero/distribute', points, { params: { world_id: worldId } }),
+  reviveHero: (worldId) => axiosClient.post('/hero/revive', {}, { params: { world_id: worldId } }),
+  getHeroItems: (worldId) => axiosClient.get('/hero/items', { params: { world_id: worldId } }),
+  equipHeroItem: (itemId, worldId) => axiosClient.post(`/hero/items/${itemId}/equip`, {}, { params: { world_id: worldId } }),
+  unequipHeroItem: (itemId, worldId) => axiosClient.post(`/hero/items/${itemId}/unequip`, {}, { params: { world_id: worldId } }),
+  getAdventures: (worldId) => axiosClient.get('/adventure/', { params: { world_id: worldId } }),
+  startAdventure: (adventureId, worldId) => axiosClient.post(`/adventure/${adventureId}/start`, {}, { params: { world_id: worldId } }),
+  claimAdventure: (adventureId, worldId) => axiosClient.post(`/adventure/${adventureId}/claim`, {}, { params: { world_id: worldId } }),
 
   // Market
   getOffers: (worldId, filterAlliance = false) => axiosClient.get('/market/offers', { params: { world_id: worldId, filter_alliance: filterAlliance } }),

@@ -15,6 +15,9 @@ class AdventureRead(AdventureBase):
 
     id: int
     hero_id: int
+    rules_version: Optional[str] = None
+    outcome_seed: Optional[str] = None
+    result: Optional[dict] = None
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -25,3 +28,5 @@ class AdventureClaimResponse(BaseModel):
     damage: int
     xp: int
     loot: Optional[dict] = None
+    rules_version: str
+    seed: str

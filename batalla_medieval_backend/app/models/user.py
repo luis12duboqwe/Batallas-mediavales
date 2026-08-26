@@ -46,7 +46,7 @@ class User(Base):
 
     current_theme_id: Mapped[Optional[int]] = mapped_column(ForeignKey("themes.id"))
 
-    hero: Mapped["Hero"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+    heroes: Mapped[List["Hero"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     cities: Mapped[List["City"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     premium_status: Mapped["PremiumStatus"] = relationship(
         back_populates="user", cascade="all, delete-orphan", uselist=False
@@ -89,3 +89,27 @@ class User(Base):
     )
     world: Mapped["World"] = relationship(back_populates="users", foreign_keys=[world_id])
     world_memberships: Mapped[List["PlayerWorld"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+    def hero_for_world(self, world_id: int):
+        """Return only this user's hero belonging to the requested world."""
+
+        resolved_world_id = int(world_id)
+        return next(
+            (hero for hero in self.heroes if int(hero.world_id) == resolved_world_id),
+            None,
+        )
+
+    @property
+    def hero(self):
+        """Compatibility accessor; authoritative callers should use world scope."""
+
+        scoped_override = getattr(self, "_bm0068_scoped_hero", None)
+        if scoped_override is not None:
+            return scoped_override
+        if self.world_id is not None:
+            active = self.hero_for_world(self.world_id)
+            if active is not None:
+                return active
+        if len(self.heroes) == 1:
+            return self.heroes[0]
+        return None

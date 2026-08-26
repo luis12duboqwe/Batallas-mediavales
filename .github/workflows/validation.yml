@@ -99,6 +99,7 @@ jobs:
           tests/test_market_concurrency.py
           tests/test_expansion_concurrency.py
           tests/test_pve_concurrency.py
+          tests/test_hero_concurrency.py
           tests/test_g3_24h_simulation.py
           tests/test_tutorial_concurrency.py
 
@@ -183,6 +184,7 @@ jobs:
           python scripts/prepare_g10_espionage_e2e.py
           python scripts/prepare_g11_commerce_e2e.py
           python scripts/prepare_g12_pve_e2e.py
+          python scripts/prepare_g13_hero_e2e.py
 
       - name: Start backend and frontend
         run: |
@@ -205,6 +207,7 @@ jobs:
           node e2e/g10-espionage.mjs
           node e2e/g11-commerce.mjs
           node e2e/g12-pve.mjs
+          node e2e/g13-hero.mjs
 
       - name: Show service logs
         if: always()

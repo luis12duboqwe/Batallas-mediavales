@@ -22,8 +22,11 @@ import MarketView from './pages/MarketView';
 import AcademyView from './pages/AcademyView';
 import ExpansionView from './pages/ExpansionView';
 import SendMovementView from './pages/SendMovementView';
+import HeroView from './pages/HeroView';
+import AdventuresView from './pages/AdventuresView';
 import TutorialOverlay from './components/TutorialOverlay';
 import { useUserStore } from './store/userStore';
+import { useCityStore } from './store/cityStore';
 import soundManager from './services/sound';
 import { useTranslation } from 'react-i18next';
 
@@ -33,8 +36,10 @@ const sidebarLinks = [
   { to: '/expansion', key: 'nav.expansion', icon: '⛺' },
   { to: '/academy', key: 'nav.academy', icon: '🎓' },
   { to: '/troops', key: 'nav.troops', icon: '⚔️' },
+  { to: '/hero', key: 'nav.hero', icon: '🦸' },
+  { to: '/adventures', key: 'nav.adventures', icon: '🧭' },
   { to: '/map', key: 'nav.map', icon: '🗺️' },
-  { to: '/movements', key: 'nav.movements', icon: '🧭' },
+  { to: '/movements', key: 'nav.movements', icon: '🥾' },
   { to: '/reports', key: 'nav.reports', icon: '📜' },
   { to: '/market', key: 'nav.market', icon: '⚖️' },
   { to: '/ranking', key: 'nav.ranking', icon: '🏆' },
@@ -136,14 +141,16 @@ const GameRoute = ({ children }) => (
 
 const App = () => {
   const { user, token, refreshCity } = useUserStore();
+  const { loadCity } = useCityStore();
   const { i18n } = useTranslation();
   const location = useLocation();
 
   useEffect(() => {
     if (token) {
       refreshCity().catch(() => {});
+      loadCity().catch(() => {});
     }
-  }, [token, refreshCity]);
+  }, [token, refreshCity, loadCity]);
 
   useEffect(() => {
     if (user?.language && i18n.resolvedLanguage !== user.language) {
@@ -181,6 +188,8 @@ const App = () => {
       <Route path="/expansion" element={<GameRoute><ExpansionView /></GameRoute>} />
       <Route path="/academy" element={<GameRoute><AcademyView /></GameRoute>} />
       <Route path="/troops" element={<GameRoute><TroopsView /></GameRoute>} />
+      <Route path="/hero" element={<GameRoute><HeroView /></GameRoute>} />
+      <Route path="/adventures" element={<GameRoute><AdventuresView /></GameRoute>} />
       <Route path="/market" element={<GameRoute><MarketView /></GameRoute>} />
       <Route path="/movements" element={<GameRoute><MovementsView /></GameRoute>} />
       <Route path="/map" element={<GameRoute><MapView /></GameRoute>} />

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..utils import utc_now
-from . import balance, event as event_service, upkeep as upkeep_service
+from . import balance, event as event_service, hero_rules, upkeep as upkeep_service
 
 # Compatibility aliases. The objects and values are owned by ``balance``.
 PRODUCTION_RATES = balance.PRODUCTION_RATES_PER_HOUR
@@ -32,8 +32,30 @@ def get_storage_limit(city: models.City) -> float:
     return balance.get_storage_capacity(warehouse_level)
 
 
+def _production_hero(db: Session, city: models.City) -> models.Hero | None:
+    if not city.owner_id or getattr(city, "settlement_type", "city") != "city":
+        return None
+    return (
+        db.query(models.Hero)
+        .filter(
+            models.Hero.user_id == city.owner_id,
+            models.Hero.world_id == city.world_id,
+            models.Hero.city_id == city.id,
+            models.Hero.status == "home",
+            models.Hero.health > 0,
+        )
+        .one_or_none()
+    )
+
+
 def get_gross_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
-    """Return resource income before troop upkeep, in units per hour."""
+    """Return resource income before troop upkeep, in units per hour.
+
+    BM-0068 adds the home hero's bounded production attribute to the existing
+    event/world/settlement/oasis calculation. The bonus is additive with oasis
+    percentages and disappears while the hero is away, dead, or assigned to a
+    different city/world.
+    """
 
     modifiers = event_service.get_active_modifiers(db, world_id=city.world_id)
     rate_multiplier = modifiers.get("production_speed", 1.0)
@@ -50,12 +72,13 @@ def get_gross_production_per_hour(db: Session, city: models.City) -> Dict[str, f
         if oasis.resource_type in oasis_bonuses:
             oasis_bonuses[oasis.resource_type] += oasis.bonus_percent / 100.0
 
+    hero_bonus = hero_rules.production_bonus(_production_hero(db, city))
     total_multiplier = rate_multiplier * world_modifier * settlement_multiplier
 
     production = {}
     for resource, rate in PRODUCTION_RATES.items():
-        bonus = oasis_bonuses.get(resource, 0.0)
-        production[resource] = rate * total_multiplier * (1.0 + bonus)
+        oasis_bonus = oasis_bonuses.get(resource, 0.0)
+        production[resource] = rate * total_multiplier * (1.0 + oasis_bonus + hero_bonus)
 
     return production
 
@@ -189,7 +212,6 @@ def _commit_recalculation_safely(
         )
 
         if elapsed_hours == 0:
-            # Release the PostgreSQL row lock even when there is no tick to write.
             db.commit()
             db.refresh(locked_city)
             return (locked_city, gains) if return_gains else locked_city
@@ -225,8 +247,6 @@ def _commit_recalculation_safely(
             record_resource_gains(db, locked_city, gains)
             return (locked_city, gains) if return_gains else locked_city
 
-        # A concurrent mutation changed the authoritative row after our read.
-        # Discard the stale calculation and retry from the committed state.
         db.rollback()
         db.expire_all()
 

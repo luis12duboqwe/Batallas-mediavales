@@ -21,10 +21,9 @@ class WorldBase(BaseModel):
 
 
 class WorldCreate(WorldBase):
-    # BM-0067 needs room for 8 managed barbarians + 20 oases. A 10x10
-    # deterministic map has ample non-water capacity while retaining margin for
-    # player cities. The constraint belongs on creation only so legacy worlds
-    # can still be read and migrated instead of failing response validation.
+    # BM-0067 needs room for 8 managed barbarians + 20 oases. Keep this
+    # creation-only constraint while BM-0068 evolves world-scoped heroes.
+    # WorldRead intentionally remains permissive for legacy tiny worlds.
     map_size: int = Field(default=100, ge=10)
 
 

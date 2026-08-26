@@ -104,30 +104,30 @@ try {
     '/map',
     '/movements',
     '/reports',
+    '/hero',
+    '/adventures',
   ];
   for (const route of acceptedRoutes) {
     await page.goto(`${BASE_URL}${route}`, { waitUntil: 'networkidle' });
     if (page.url().includes('/login')) {
       failures.push(`Unexpected logout while opening ${route}`);
     }
-  }
-
-  await page.goto(`${BASE_URL}/hero`, { waitUntil: 'networkidle' });
-  if (new URL(page.url()).pathname !== '/') {
-    failures.push(`Postponed route /hero did not redirect to /: ${page.url()}`);
+    if (new URL(page.url()).pathname !== route) {
+      failures.push(`Accepted route ${route} did not remain accessible: ${page.url()}`);
+    }
   }
 
   const visibleText = await page.locator('body').innerText();
-  for (const forbidden of ['Hero', 'Aventuras', 'Tienda', 'Simulador']) {
+  for (const forbidden of ['Tienda', 'Simulador']) {
     if (visibleText.includes(forbidden)) {
-      failures.push(`Postponed navigation leaked into MVP UI: ${forbidden}`);
+      failures.push(`Postponed navigation leaked into accepted UI: ${forbidden}`);
     }
   }
 
   if (failures.length > 0) {
     throw new Error(failures.join('\n'));
   }
-  console.log('Browser smoke passed: durable session and authenticated realtime are stable, no console errors or HTTP 4xx/5xx');
+  console.log('Browser smoke passed: durable session, realtime and the accepted BM-0068 routes are stable with no console errors or HTTP 4xx/5xx');
 } finally {
   await browser.close();
 }
