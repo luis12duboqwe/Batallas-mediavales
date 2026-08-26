@@ -7,13 +7,17 @@ from .. import models
 
 
 def _ensure_progress_entries(
-    db: Session, user_id: int, achievements: Iterable[models.Achievement]
+    db: Session,
+    user_id: int,
+    world_id: int,
+    achievements: Iterable[models.Achievement],
 ) -> List[models.AchievementProgress]:
     achievement_ids = [achievement.id for achievement in achievements]
     existing_progress = (
         db.query(models.AchievementProgress)
         .filter(
             models.AchievementProgress.user_id == user_id,
+            models.AchievementProgress.world_id == world_id,
             models.AchievementProgress.achievement_id.in_(achievement_ids),
         )
         .all()
@@ -26,6 +30,7 @@ def _ensure_progress_entries(
             progress = models.AchievementProgress(
                 user_id=user_id,
                 achievement_id=achievement_id,
+                world_id=world_id,
                 current_progress=0,
                 status="pending",
             )
@@ -39,17 +44,22 @@ def _ensure_progress_entries(
     return [progress_by_id[aid] for aid in achievement_ids]
 
 
-def get_user_achievements(db: Session, user: models.User) -> list[tuple[models.Achievement, models.AchievementProgress]]:
-    achievements = db.query(models.Achievement).all()
+def get_user_achievements(
+    db: Session,
+    user: models.User,
+    world_id: int,
+) -> list[tuple[models.Achievement, models.AchievementProgress]]:
+    achievements = db.query(models.Achievement).order_by(models.Achievement.id.asc()).all()
     if not achievements:
         return []
-    progress_entries = _ensure_progress_entries(db, user.id, achievements)
+    progress_entries = _ensure_progress_entries(db, user.id, world_id, achievements)
     return list(zip(achievements, progress_entries))
 
 
 def update_achievement_progress(
     db: Session,
     user_id: int,
+    world_id: int,
     requirement_type: str,
     *,
     increment: int | float | None = None,
@@ -58,11 +68,12 @@ def update_achievement_progress(
     achievements = (
         db.query(models.Achievement)
         .filter(models.Achievement.requirement_type == requirement_type)
+        .order_by(models.Achievement.id.asc())
         .all()
     )
     if not achievements:
         return
-    progress_entries = _ensure_progress_entries(db, user_id, achievements)
+    progress_entries = _ensure_progress_entries(db, user_id, world_id, achievements)
 
     for achievement, progress in zip(achievements, progress_entries):
         new_progress = progress.current_progress
@@ -78,31 +89,43 @@ def update_achievement_progress(
     db.commit()
 
 
-def claim_achievement(db: Session, user: models.User, achievement_id: int) -> models.AchievementProgress:
+def claim_achievement(
+    db: Session,
+    user: models.User,
+    world_id: int,
+    achievement_id: int,
+) -> models.AchievementProgress:
+    """Record an earned honor medal without granting gameplay advantages."""
+
     achievement = db.query(models.Achievement).filter(models.Achievement.id == achievement_id).first()
     if not achievement:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Achievement not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Honor medal not found")
 
     progress = (
         db.query(models.AchievementProgress)
         .filter(
             models.AchievementProgress.achievement_id == achievement_id,
             models.AchievementProgress.user_id == user.id,
+            models.AchievementProgress.world_id == world_id,
         )
-        .first()
+        .with_for_update()
+        .one_or_none()
     )
     if not progress or progress.status != "completed":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Achievement not ready to claim")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Honor medal not ready to claim")
 
     progress.status = "claimed"
     db.add(progress)
-
-    log_entry = models.Log(
-        user_id=user.id,
-        action="claim_achievement",
-        details=f"Claimed achievement {achievement.title} and received {achievement.reward_value} {achievement.reward_type}",
+    db.add(
+        models.Log(
+            user_id=user.id,
+            action="claim_honor_medal",
+            details=(
+                f"Claimed honor medal {achievement.title} in world {world_id}; "
+                "no resources, troops, production, speed or combat bonus granted"
+            ),
+        )
     )
-    db.add(log_entry)
     db.commit()
     db.refresh(progress)
     return progress
