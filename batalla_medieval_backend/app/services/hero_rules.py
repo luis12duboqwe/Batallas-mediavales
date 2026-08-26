@@ -62,20 +62,64 @@ def _equipped_bonus(hero, *bonus_types: str) -> float:
     return total
 
 
-def attack_bonus(hero) -> float:
+def _attack_attribute_bonus(hero) -> float:
     if hero is None or float(getattr(hero, "health", 0.0)) <= 0:
         return 0.0
-    value = max(int(getattr(hero, "attack_points", 0)), 0) * HERO_ATTACK_BONUS_PER_POINT
-    value += _equipped_bonus(hero, "attack_all", "attack_infantry")
+    return max(int(getattr(hero, "attack_points", 0)), 0) * HERO_ATTACK_BONUS_PER_POINT
+
+
+def _defense_attribute_bonus(hero) -> float:
+    if hero is None or float(getattr(hero, "health", 0.0)) <= 0:
+        return 0.0
+    return max(int(getattr(hero, "defense_points", 0)), 0) * HERO_DEFENSE_BONUS_PER_POINT
+
+
+def attack_bonus_for_category(hero, category: str) -> float:
+    """Return the bounded attack bonus that applies to one troop category."""
+
+    if hero is None or float(getattr(hero, "health", 0.0)) <= 0:
+        return 0.0
+    normalized = str(category).strip().lower()
+    value = _attack_attribute_bonus(hero)
+    value += _equipped_bonus(hero, "attack_all", f"attack_{normalized}")
     return min(value, HERO_MAX_ATTACK_BONUS)
 
 
-def defense_bonus(hero) -> float:
+def defense_bonus_for_category(hero, category: str) -> float:
+    """Return the bounded defense bonus against one troop category."""
+
     if hero is None or float(getattr(hero, "health", 0.0)) <= 0:
         return 0.0
-    value = max(int(getattr(hero, "defense_points", 0)), 0) * HERO_DEFENSE_BONUS_PER_POINT
-    value += _equipped_bonus(hero, "defense_all", "defense_infantry")
+    normalized = str(category).strip().lower()
+    value = _defense_attribute_bonus(hero)
+    value += _equipped_bonus(hero, "defense_all", f"defense_{normalized}")
     return min(value, HERO_MAX_DEFENSE_BONUS)
+
+
+def attack_bonus(hero) -> float:
+    """Compatibility scalar for the infantry attack path and legacy reports."""
+
+    return attack_bonus_for_category(hero, "infantry")
+
+
+def defense_bonus(hero) -> float:
+    """Compatibility scalar for the infantry defense path and legacy reports."""
+
+    return defense_bonus_for_category(hero, "infantry")
+
+
+def attack_bonuses(hero) -> dict[str, float]:
+    return {
+        category: attack_bonus_for_category(hero, category)
+        for category in ("infantry", "cavalry", "siege")
+    }
+
+
+def defense_bonuses(hero) -> dict[str, float]:
+    return {
+        category: defense_bonus_for_category(hero, category)
+        for category in ("infantry", "cavalry", "siege")
+    }
 
 
 def production_bonus(hero) -> float:
