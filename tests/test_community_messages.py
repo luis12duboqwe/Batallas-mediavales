@@ -151,3 +151,10 @@ def test_alliance_mass_messages_are_persisted_in_alliance_world(db_session, user
     assert len(messages) == 2
     assert {message.receiver_id for message in messages} == {user.id, peer.id}
     assert {message.world_id for message in messages} == {world.id}
+
+
+def test_alliance_mass_message_schema_rejects_unbounded_payloads():
+    with pytest.raises(Exception):
+        schemas.AllianceMassMessage(subject="x" * 256, content="ok")
+    with pytest.raises(Exception):
+        schemas.AllianceMassMessage(subject="ok", content="x" * 10001)
