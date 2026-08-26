@@ -43,6 +43,7 @@ class AllianceMemberRead(BaseModel):
 
 
 class AllianceMemberPublic(BaseModel):
+    id: int
     user_id: int
     username: str
     rank: int
