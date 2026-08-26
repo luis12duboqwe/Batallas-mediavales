@@ -32,28 +32,30 @@ _base_defense_values = _impl._defense_values
 
 
 def _split_attack_by_type(troops, hero=None):
-    """Return army attack after the bounded BM-0068 hero multiplier."""
+    """Return army attack with category-scoped, bounded BM-0068 bonuses."""
 
     attack_by_type, total_attack = _base_split_attack_by_type(troops, None)
     if hero is None or getattr(hero, "status", None) != "moving" or float(getattr(hero, "health", 0.0)) <= 0:
         return attack_by_type, total_attack
 
-    multiplier = 1.0 + hero_rules.attack_bonus(hero)
-    return (
-        {category: value * multiplier for category, value in attack_by_type.items()},
-        total_attack * multiplier,
-    )
+    boosted = {
+        category: value * (1.0 + hero_rules.attack_bonus_for_category(hero, category))
+        for category, value in attack_by_type.items()
+    }
+    return boosted, sum(boosted.values())
 
 
 def _defense_values(defender_troops, hero=None):
-    """Return army defenses after the bounded BM-0068 hero multiplier."""
+    """Return defenses with category-scoped, bounded BM-0068 bonuses."""
 
     defenses = _base_defense_values(defender_troops, None)
     if hero is None or getattr(hero, "status", None) != "home" or float(getattr(hero, "health", 0.0)) <= 0:
         return defenses
 
-    multiplier = 1.0 + hero_rules.defense_bonus(hero)
-    return {category: value * multiplier for category, value in defenses.items()}
+    return {
+        category: value * (1.0 + hero_rules.defense_bonus_for_category(hero, category))
+        for category, value in defenses.items()
+    }
 
 
 # ``combat_rounds._resolve_rounds`` resolves these names at runtime inside its
@@ -87,6 +89,8 @@ def build_battle_report_content(attacker_city, defender_city, battle_result):
     report["defender_hero_bonus"] = float(
         battle_result.get("defender_hero_bonus", 0.0) or 0.0
     )
+    report["attacker_hero_bonuses"] = battle_result.get("attacker_hero_bonuses", {})
+    report["defender_hero_bonuses"] = battle_result.get("defender_hero_bonuses", {})
     return json.dumps(report, sort_keys=True)
 
 
@@ -112,10 +116,13 @@ def resolve_battle(*args, **kwargs):
     try:
         result = _impl.resolve_battle(*args, **kwargs)
         result["hero_rules_version"] = hero_rules.HERO_RULES_VERSION
-        if kwargs.get("attacker_hero") is not None:
-            result["attacker_hero_bonus"] = hero_rules.attack_bonus(kwargs["attacker_hero"])
+        attacker_hero = kwargs.get("attacker_hero")
+        if attacker_hero is not None:
+            result["attacker_hero_bonus"] = hero_rules.attack_bonus(attacker_hero)
+            result["attacker_hero_bonuses"] = hero_rules.attack_bonuses(attacker_hero)
         if defender_hero is not None:
             result["defender_hero_bonus"] = hero_rules.defense_bonus(defender_hero)
+            result["defender_hero_bonuses"] = hero_rules.defense_bonuses(defender_hero)
         return result
     finally:
         if defender_owner is not None and defender_hero is not None:
@@ -172,6 +179,7 @@ def resolve_oasis_battle(*args, **kwargs):
     result["hero_rules_version"] = hero_rules.HERO_RULES_VERSION
     if attacker_hero is not None:
         result["attacker_hero_bonus"] = hero_rules.attack_bonus(attacker_hero)
+        result["attacker_hero_bonuses"] = hero_rules.attack_bonuses(attacker_hero)
     if attacker_city is not None and oasis is not None:
         result = _credit_oasis_reward(
             attacker_city,
@@ -192,4 +200,5 @@ def build_oasis_report_content(attacker_city, oasis, battle_result):
     report["attacker_hero_bonus"] = float(
         battle_result.get("attacker_hero_bonus", 0.0) or 0.0
     )
+    report["attacker_hero_bonuses"] = battle_result.get("attacker_hero_bonuses", {})
     return json.dumps(report, sort_keys=True)
