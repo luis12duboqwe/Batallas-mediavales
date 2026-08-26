@@ -3,6 +3,7 @@ from fastapi import HTTPException
 
 from app import models, schemas
 from app.routers import message as message_router
+from app.services import alliance as alliance_service
 from app.services import social_privacy
 
 
@@ -109,3 +110,44 @@ def test_message_context_requires_selection_when_multiple_worlds_are_joined(
         message_router.sent_messages(db_session, user)
     assert exc.value.status_code == 400
     assert exc.value.detail == "No active world selected"
+
+
+def test_alliance_mass_messages_are_persisted_in_alliance_world(db_session, user):
+    world = db_session.query(models.World).first()
+    peer = models.User(
+        username="mass_message_peer",
+        email="mass-message-peer@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(peer)
+    db_session.flush()
+    alliance = models.Alliance(
+        name="Mass Message World Alliance",
+        world_id=world.id,
+        leader_id=user.id,
+        diplomacy="neutral",
+    )
+    db_session.add(alliance)
+    db_session.flush()
+    db_session.add_all(
+        [
+            models.AllianceMember(alliance_id=alliance.id, user_id=user.id, rank=3),
+            models.AllianceMember(alliance_id=alliance.id, user_id=peer.id, rank=1),
+        ]
+    )
+    db_session.commit()
+
+    result = alliance_service.send_mass_message(
+        db_session,
+        alliance.id,
+        user,
+        "Orden del día",
+        "Defender el paso norte.",
+    )
+
+    assert result == {"count": 2}
+    messages = db_session.query(models.Message).order_by(models.Message.id.asc()).all()
+    assert len(messages) == 2
+    assert {message.receiver_id for message in messages} == {user.id, peer.id}
+    assert {message.world_id for message in messages} == {world.id}
