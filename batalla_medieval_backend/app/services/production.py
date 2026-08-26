@@ -84,7 +84,12 @@ def get_gross_production_per_hour(db: Session, city: models.City) -> Dict[str, f
 
 
 def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
-    """Return net resource rates after committed troop upkeep."""
+    """Return net resource rates after committed troop upkeep.
+
+    Upkeep is paid only in gold and follows troops while they are deployed or
+    returning. Training queues reserve future upkeep for admission control but
+    do not consume gold until their troops actually finish training.
+    """
 
     production = get_gross_production_per_hour(db, city)
     production[upkeep_service.UPKEEP_RESOURCE] -= (
@@ -94,6 +99,14 @@ def get_production_per_hour(db: Session, city: models.City) -> Dict[str, float]:
 
 
 def lock_city_for_update(db: Session, city: models.City | int) -> models.City:
+    """Reload and row-lock a city for an economic transaction.
+
+    ``populate_existing`` is intentional: routers frequently pass a City that
+    was loaded before the transaction begins. After waiting for another writer,
+    the resource values must be refreshed from the committed database row before
+    validating a spend.
+    """
+
     city_id = city if isinstance(city, int) else city.id
     locked_city = (
         db.query(models.City)
@@ -107,7 +120,13 @@ def lock_city_for_update(db: Session, city: models.City | int) -> models.City:
     return locked_city
 
 
-def _calculate_recalculation(db: Session, city: models.City, now) -> tuple[dict[str, float], dict[str, float], float, float]:
+def _calculate_recalculation(
+    db: Session,
+    city: models.City,
+    now,
+) -> tuple[dict[str, float], dict[str, float], float, float]:
+    """Calculate one production tick without mutating the mapped City row."""
+
     last_prod = _ensure_timezone(city.last_production or now)
     elapsed_hours = max((now - last_prod).total_seconds() / 3600.0, 0.0)
     if elapsed_hours == 0:
@@ -126,6 +145,7 @@ def _calculate_recalculation(db: Session, city: models.City, now) -> tuple[dict[
     for resource, rate in production_rates.items():
         produced = rate * elapsed_hours
         current_value = float(getattr(city, resource))
+
         if produced >= 0:
             if current_value >= storage_limit:
                 new_value = current_value
@@ -136,6 +156,7 @@ def _calculate_recalculation(db: Session, city: models.City, now) -> tuple[dict[
         else:
             new_value = max(current_value + produced, 0.0)
             actual_gain = 0.0
+
         new_resources[resource] = new_value
         gains[resource] = actual_gain
 
@@ -144,7 +165,12 @@ def _calculate_recalculation(db: Session, city: models.City, now) -> tuple[dict[
     return new_resources, gains, new_loyalty, elapsed_hours
 
 
-def _apply_recalculation(city: models.City, new_resources: dict[str, float], new_loyalty: float, now) -> None:
+def _apply_recalculation(
+    city: models.City,
+    new_resources: dict[str, float],
+    new_loyalty: float,
+    now,
+) -> None:
     for resource, value in new_resources.items():
         setattr(city, resource, value)
     city.loyalty = new_loyalty
@@ -155,15 +181,35 @@ def _same_timestamp_condition(column, value):
     return column.is_(None) if value is None else column == value
 
 
-def _commit_recalculation_safely(db: Session, city: models.City, return_gains: bool):
+def _commit_recalculation_safely(
+    db: Session,
+    city: models.City,
+    return_gains: bool,
+):
+    """Commit a lazy production tick without allowing stale-read lost updates.
+
+    PostgreSQL serializes on ``FOR UPDATE``. SQLite ignores that clause, and a
+    browser can have overlapping GET requests that loaded the city before an
+    economic POST committed. The compare-and-swap predicate below additionally
+    verifies every resource balance, loyalty and ``last_production`` observed by
+    the tick. If another transaction pays a cost or otherwise advances the city,
+    the stale UPDATE affects zero rows, is rolled back, reloads the latest state
+    and retries instead of restoring the old balance.
+    """
+
     city_id = city.id
     for _ in range(_RECALCULATION_RETRIES):
         locked_city = lock_city_for_update(db, city_id)
-        baseline_resources = {resource: float(getattr(locked_city, resource)) for resource in PRODUCTION_RATES}
+        baseline_resources = {
+            resource: float(getattr(locked_city, resource))
+            for resource in PRODUCTION_RATES
+        }
         baseline_loyalty = float(locked_city.loyalty)
         baseline_last_production = locked_city.last_production
         now = utc_now()
-        new_resources, gains, new_loyalty, elapsed_hours = _calculate_recalculation(db, locked_city, now)
+        new_resources, gains, new_loyalty, elapsed_hours = _calculate_recalculation(
+            db, locked_city, now
+        )
 
         if elapsed_hours == 0:
             db.commit()
@@ -173,10 +219,19 @@ def _commit_recalculation_safely(db: Session, city: models.City, return_gains: b
         conditions = [
             models.City.id == city_id,
             models.City.loyalty == baseline_loyalty,
-            _same_timestamp_condition(models.City.last_production, baseline_last_production),
+            _same_timestamp_condition(
+                models.City.last_production, baseline_last_production
+            ),
         ]
-        conditions.extend(getattr(models.City, resource) == baseline_resources[resource] for resource in PRODUCTION_RATES)
-        values = {**new_resources, "loyalty": new_loyalty, "last_production": now}
+        conditions.extend(
+            getattr(models.City, resource) == baseline_resources[resource]
+            for resource in PRODUCTION_RATES
+        )
+        values = {
+            **new_resources,
+            "loyalty": new_loyalty,
+            "last_production": now,
+        }
 
         with db.no_autoflush:
             result = db.execute(
@@ -198,12 +253,35 @@ def _commit_recalculation_safely(db: Session, city: models.City, return_gains: b
     raise RuntimeError("Could not recalculate city resources after concurrent updates")
 
 
-def recalculate_resources(db: Session, city: models.City, return_gains: bool = False, *, commit: bool = True) -> models.City | tuple[models.City, Dict[str, float]]:
+def recalculate_resources(
+    db: Session,
+    city: models.City,
+    return_gains: bool = False,
+    *,
+    commit: bool = True,
+) -> models.City | tuple[models.City, Dict[str, float]]:
+    """Accrue passive resources and continuously pay troop upkeep.
+
+    Positive production remains capped by storage. Net gold may become negative
+    when an existing army is no longer economically sustainable (for example,
+    after losing a gold oasis); in that case gold drains to zero but never
+    becomes debt. The elapsed interval is still consumed, preventing backlog
+    exploits when resources are capped or depleted.
+
+    ``commit=False`` is used inside larger economic transactions so callers can
+    keep a PostgreSQL row lock until validation, payment and the domain record
+    are committed together. Committing lazy/read-side ticks use an optimistic
+    compare-and-swap in addition to the row lock so SQLite/browser concurrency
+    cannot restore a stale resource snapshot over a just-committed spend.
+    """
+
     if commit:
         return _commit_recalculation_safely(db, city, return_gains)
 
     now = utc_now()
-    new_resources, gains, new_loyalty, elapsed_hours = _calculate_recalculation(db, city, now)
+    new_resources, gains, new_loyalty, elapsed_hours = _calculate_recalculation(
+        db, city, now
+    )
     if elapsed_hours == 0:
         return (city, gains) if return_gains else city
 
@@ -213,14 +291,25 @@ def recalculate_resources(db: Session, city: models.City, return_gains: bool = F
     return (city, gains) if return_gains else city
 
 
-def lock_and_recalculate_resources(db: Session, city: models.City | int) -> tuple[models.City, Dict[str, float]]:
+def lock_and_recalculate_resources(
+    db: Session, city: models.City | int
+) -> tuple[models.City, Dict[str, float]]:
+    """Acquire the city row lock and accrue production without releasing it."""
+
     locked_city = lock_city_for_update(db, city)
-    locked_city, gains = recalculate_resources(db, locked_city, return_gains=True, commit=False)
+    locked_city, gains = recalculate_resources(
+        db,
+        locked_city,
+        return_gains=True,
+        commit=False,
+    )
     return locked_city, gains
 
 
-def record_resource_gains(db: Session, city: models.City, gains: Dict[str, float]) -> None:
-    """Record honor-medal progress in the same world as the producing city."""
+def record_resource_gains(
+    db: Session, city: models.City, gains: Dict[str, float]
+) -> None:
+    """Record achievement progress after the enclosing transaction commits."""
 
     generated_total = sum(max(float(value), 0.0) for value in gains.values())
     if generated_total <= 0 or not city.owner_id:
@@ -246,13 +335,18 @@ def _validate_cost(cost: Dict[str, float]) -> None:
 
 
 def check_cost(city: models.City, cost: Dict[str, float]) -> bool:
+    """Check if the city has enough resources to pay the cost."""
+
     _validate_cost(cost)
     return all(getattr(city, resource) >= amount for resource, amount in cost.items())
 
 
 def pay_cost(city: models.City, cost: Dict[str, float]):
+    """Deduct resources from a row-locked city without allowing negatives."""
+
     if not check_cost(city, cost):
         raise ValueError("Insufficient resources")
+
     for resource, amount in cost.items():
         new_value = getattr(city, resource) - amount
         if new_value < 0:
