@@ -152,7 +152,7 @@ def create_alliance(
 
     from .achievement import update_achievement_progress
 
-    update_achievement_progress(db, founder.id, "join_alliance", absolute_value=1)
+    update_achievement_progress(db, founder.id, "join_alliance", world_id=alliance.world_id, absolute_value=1)
     return alliance
 
 
@@ -262,7 +262,7 @@ def accept_invitation(
 
     from .achievement import update_achievement_progress
 
-    update_achievement_progress(db, user.id, "join_alliance", absolute_value=1)
+    update_achievement_progress(db, user.id, "join_alliance", world_id=alliance.world_id, absolute_value=1)
     quest_service.handle_event(db, user, "alliance_joined")
     return membership
 
