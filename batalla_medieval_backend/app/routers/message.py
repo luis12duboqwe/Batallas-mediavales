@@ -113,7 +113,7 @@ def send_message(
     if not _user_in_world(db, receiver.id, world_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Players do not share the active world",
+            detail="Players do not share a world",
         )
     if social_privacy.interaction_blocked(
         db,
