@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
+from ..schemas import privacy as privacy_schema
+from ..services import community as community_service
+from ..services import social_privacy
 from ..services.chat_manager import chat_manager
 from ..utils import utc_now
 
@@ -55,6 +58,17 @@ def _user_in_world(db: Session, user_id: int, world_id: int) -> bool:
     )
 
 
+def _normalize_content(content: object) -> str:
+    normalized = str(content or "").strip()
+    if not normalized:
+        raise ValueError("Message content required")
+    if len(normalized) > community_service.MAX_CHAT_MESSAGE_LENGTH:
+        raise ValueError(
+            f"Message exceeds {community_service.MAX_CHAT_MESSAGE_LENGTH} characters"
+        )
+    return chat_manager.filter_content(normalized)
+
+
 @router.websocket("/{channel}")
 async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depends(get_db)):
     token = websocket.query_params.get("token")
@@ -100,6 +114,14 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
         if not _user_in_world(db, receiver_id, world_id):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
+        if social_privacy.interaction_blocked(
+            db,
+            current_user.id,
+            receiver_id,
+            world_id,
+        ):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
 
     await websocket.accept()
     try:
@@ -118,16 +140,34 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
     try:
         while True:
             data = await websocket.receive_json()
-            content = data.get("content") if isinstance(data, dict) else None
-            if not content:
-                await websocket.send_json({"error": "Message content required"})
+            raw_content = data.get("content") if isinstance(data, dict) else None
+            try:
+                filtered_content = _normalize_content(raw_content)
+            except ValueError as exc:
+                await websocket.send_json({"error": str(exc)})
                 continue
+
+            # Re-check privacy on every private send so a block takes effect on
+            # an already-open socket without waiting for reconnection.
+            if channel == "private" and receiver_id is not None:
+                if social_privacy.interaction_blocked(
+                    db,
+                    current_user.id,
+                    receiver_id,
+                    world_id,
+                ):
+                    await websocket.send_json({"error": "Private interaction blocked"})
+                    continue
+
+            if channel == "alliance":
+                current_alliance_id = _get_alliance_id(db, current_user.id, world_id)
+                if current_alliance_id != alliance_id:
+                    await websocket.send_json({"error": "Alliance membership changed"})
+                    continue
 
             if not chat_manager.allow_message(current_user.id):
                 await websocket.send_json({"error": "Rate limit exceeded"})
                 continue
-
-            filtered_content = chat_manager.filter_content(str(content))
 
             chat_message = models.ChatMessage(
                 user_id=current_user.id,
@@ -195,6 +235,8 @@ def get_chat_history(
     elif channel == "private":
         if not user_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id required")
+        if user_id == current_user.id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot chat with yourself")
         if not _user_in_world(db, user_id, world_id):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Players do not share active world")
         query = query.filter(
@@ -216,6 +258,8 @@ def private_history(
     world_id = _get_active_world_id(db, current_user)
     if world_id is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Active world not joined")
+    if user_id == current_user.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot chat with yourself")
     if not _user_in_world(db, user_id, world_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Players do not share active world")
 
@@ -230,3 +274,36 @@ def private_history(
     )
     messages = query.order_by(models.ChatMessage.timestamp.desc()).limit(limit).all()
     return list(reversed(messages))
+
+
+@router.post("/blocks", response_model=privacy_schema.UserBlockRead)
+def block_user(
+    payload: privacy_schema.UserBlockCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return social_privacy.block_user(
+        db,
+        current_user.id,
+        payload.user_id,
+        payload.world_id,
+    )
+
+
+@router.delete("/blocks/{world_id}/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def unblock_user(
+    world_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    social_privacy.unblock_user(db, current_user.id, user_id, world_id)
+
+
+@router.get("/blocks/{world_id}", response_model=list[privacy_schema.UserBlockRead])
+def list_blocks(
+    world_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return social_privacy.list_blocks(db, current_user.id, world_id)
