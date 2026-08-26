@@ -12,25 +12,50 @@ router = APIRouter(tags=["message"])
 
 
 def _active_world_id(db: Session, user: models.User) -> int:
-    if user.world_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No active world selected",
+    """Resolve the unambiguous social world for persistent messaging.
+
+    Normal gameplay uses ``user.world_id``. Legacy/test users that have joined
+    exactly one world but have not selected it explicitly are also safe to
+    resolve because no cross-world choice exists. Multiple joined worlds still
+    require an explicit active selection.
+    """
+
+    if user.world_id is not None:
+        membership = (
+            db.query(models.PlayerWorld.id)
+            .filter(
+                models.PlayerWorld.user_id == user.id,
+                models.PlayerWorld.world_id == user.world_id,
+            )
+            .first()
         )
-    membership = (
-        db.query(models.PlayerWorld.id)
-        .filter(
-            models.PlayerWorld.user_id == user.id,
-            models.PlayerWorld.world_id == user.world_id,
+        if membership is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Active world not joined",
+            )
+        return int(user.world_id)
+
+    joined_worlds = [
+        int(world_id)
+        for (world_id,) in (
+            db.query(models.PlayerWorld.world_id)
+            .filter(models.PlayerWorld.user_id == user.id)
+            .order_by(models.PlayerWorld.world_id.asc())
+            .all()
         )
-        .first()
-    )
-    if membership is None:
+    ]
+    if len(joined_worlds) == 1:
+        return joined_worlds[0]
+    if not joined_worlds:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Active world not joined",
+            detail="Player has not joined a world",
         )
-    return int(user.world_id)
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="No active world selected",
+    )
 
 
 def _user_in_world(db: Session, user_id: int, world_id: int) -> bool:
