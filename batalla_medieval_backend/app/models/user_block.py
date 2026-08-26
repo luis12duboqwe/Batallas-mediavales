@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -14,6 +14,8 @@ class UserBlock(Base):
             "world_id",
             name="uq_user_block_pair_world",
         ),
+        Index("ix_user_blocks_blocker_world", "blocker_id", "world_id"),
+        Index("ix_user_blocks_blocked_world", "blocked_id", "world_id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
