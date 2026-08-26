@@ -2,6 +2,7 @@ import pytest
 
 from app import models
 from app.services import achievement
+from app.services import movement as movement_service
 
 
 def _medal(db_session, *, requirement_type="build_level", requirement_value=1):
@@ -126,3 +127,50 @@ def test_legacy_medal_event_rejects_ambiguous_multiworld_user(db_session, user, 
             "join_alliance",
             absolute_value=1,
         )
+
+
+def test_battle_medal_effect_uses_explicit_movement_world(db_session, user, city):
+    _ensure_membership(db_session, user.id, city.world_id)
+    medal = _medal(db_session, requirement_type="win_battles", requirement_value=1)
+    second_world = models.World(
+        name="Battle Honor Isolation World",
+        speed_modifier=1.0,
+        resource_modifier=1.0,
+    )
+    db_session.add(second_world)
+    db_session.flush()
+    db_session.add(models.PlayerWorld(user_id=user.id, world_id=second_world.id))
+    db_session.commit()
+
+    movement_service._run_resolution_effect(
+        db_session,
+        {
+            "type": "achievement",
+            "user_id": user.id,
+            "world_id": city.world_id,
+            "requirement_type": "win_battles",
+            "increment": 1,
+        },
+    )
+
+    scoped = (
+        db_session.query(models.AchievementProgress)
+        .filter_by(
+            user_id=user.id,
+            achievement_id=medal.id,
+            world_id=city.world_id,
+        )
+        .one()
+    )
+    assert scoped.status == "completed"
+    assert scoped.current_progress == 1
+    assert (
+        db_session.query(models.AchievementProgress)
+        .filter_by(
+            user_id=user.id,
+            achievement_id=medal.id,
+            world_id=second_world.id,
+        )
+        .count()
+        == 0
+    )
