@@ -4,6 +4,8 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from ..utils import utc_now
+from .chat_manager import chat_manager
 
 CAP_INVITE = "alliance.invite"
 CAP_MANAGE_MEMBERS = "alliance.manage_members"
@@ -13,6 +15,8 @@ CAP_DIPLOMACY = "alliance.diplomacy"
 CAP_MASS_MESSAGE = "alliance.mass_message"
 CAP_MODERATE_CHAT = "alliance.moderate_chat"
 CAP_MODERATE_FORUM = "alliance.moderate_forum"
+
+MAX_CHAT_MESSAGE_LENGTH = 1000
 
 ALL_CAPABILITIES = frozenset(
     {
@@ -66,6 +70,28 @@ def require_capability(
             detail="Insufficient alliance permission",
         )
     return membership
+
+
+def create_alliance_serialized(
+    db: Session,
+    payload: schemas.AllianceCreate,
+    founder: models.User,
+) -> models.Alliance:
+    """Serialize same-user alliance creation before delegating to legacy domain logic."""
+
+    from . import alliance as alliance_service
+
+    try:
+        locked_founder = (
+            db.query(models.User)
+            .filter(models.User.id == founder.id)
+            .with_for_update()
+            .one()
+        )
+        return alliance_service.create_alliance(db, payload, locked_founder)
+    except Exception:
+        db.rollback()
+        raise
 
 
 def transfer_leadership(
@@ -144,3 +170,96 @@ def transfer_leadership(
     except Exception:
         db.rollback()
         raise
+
+
+def _current_membership(
+    db: Session,
+    alliance_id: int,
+    user_id: int,
+) -> models.AllianceMember:
+    membership = (
+        db.query(models.AllianceMember)
+        .filter(
+            models.AllianceMember.alliance_id == alliance_id,
+            models.AllianceMember.user_id == user_id,
+        )
+        .first()
+    )
+    if membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not a member of this alliance",
+        )
+    return membership
+
+
+def _normalize_chat_content(content: str) -> str:
+    normalized = str(content).strip()
+    if not normalized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message content required",
+        )
+    if len(normalized) > MAX_CHAT_MESSAGE_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Message exceeds {MAX_CHAT_MESSAGE_LENGTH} characters",
+        )
+    return chat_manager.filter_content(normalized)
+
+
+def post_alliance_chat_message(
+    db: Session,
+    alliance_id: int,
+    author: models.User,
+    content: str,
+) -> models.ChatMessage:
+    """Persist HTTP alliance chat in the same source of truth as WebSocket chat."""
+
+    membership = _current_membership(db, alliance_id, author.id)
+    alliance = membership.alliance
+    if not chat_manager.allow_message(author.id):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded",
+        )
+
+    message = models.ChatMessage(
+        user_id=author.id,
+        world_id=alliance.world_id,
+        alliance_id=alliance.id,
+        channel="alliance",
+        receiver_id=None,
+        content=_normalize_chat_content(content),
+        timestamp=utc_now(),
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+    return message
+
+
+def list_alliance_chat_messages(
+    db: Session,
+    alliance_id: int,
+    viewer: models.User,
+    *,
+    limit: int = 100,
+) -> list[models.ChatMessage]:
+    """Read the canonical alliance chat only for a current member."""
+
+    membership = _current_membership(db, alliance_id, viewer.id)
+    alliance = membership.alliance
+    safe_limit = max(1, min(int(limit), 100))
+    messages = (
+        db.query(models.ChatMessage)
+        .filter(
+            models.ChatMessage.world_id == alliance.world_id,
+            models.ChatMessage.alliance_id == alliance.id,
+            models.ChatMessage.channel == "alliance",
+        )
+        .order_by(models.ChatMessage.timestamp.desc())
+        .limit(safe_limit)
+        .all()
+    )
+    return list(reversed(messages))
