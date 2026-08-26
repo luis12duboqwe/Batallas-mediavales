@@ -2,6 +2,7 @@ import pytest
 from fastapi import HTTPException
 
 from app import models, schemas
+from app.schemas import forum as forum_schema
 from app.services import forum
 
 
@@ -113,10 +114,10 @@ def test_thread_listing_is_bounded_and_stable(db_session, user):
 def test_forum_schema_rejects_oversized_payloads():
     with pytest.raises(Exception):
         schemas.ForumThreadCreate(
-            title="x" * (schemas.forum.FORUM_TITLE_MAX_LENGTH + 1),
+            title="x" * (forum_schema.FORUM_TITLE_MAX_LENGTH + 1),
             content="ok",
         )
     with pytest.raises(Exception):
         schemas.ForumPostCreate(
-            content="x" * (schemas.forum.FORUM_POST_MAX_LENGTH + 1),
+            content="x" * (forum_schema.FORUM_POST_MAX_LENGTH + 1),
         )
