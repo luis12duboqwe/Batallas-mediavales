@@ -44,6 +44,29 @@ def _ensure_progress_entries(
     return [progress_by_id[aid] for aid in achievement_ids]
 
 
+def _resolve_unambiguous_world(db: Session, user_id: int) -> int:
+    """Compatibility bridge for legacy event producers.
+
+    A missing world is accepted only when the player belongs to exactly one
+    world. Multi-world callers must pass world_id explicitly; guessing from an
+    active UI preference could credit a medal to the wrong persistent world.
+    """
+
+    world_ids = [
+        int(row[0])
+        for row in (
+            db.query(models.PlayerWorld.world_id)
+            .filter(models.PlayerWorld.user_id == user_id)
+            .distinct()
+            .order_by(models.PlayerWorld.world_id.asc())
+            .all()
+        )
+    ]
+    if len(world_ids) != 1:
+        raise ValueError("Honor medal progress requires an explicit world_id")
+    return world_ids[0]
+
+
 def get_user_achievements(
     db: Session,
     user: models.User,
@@ -59,12 +82,32 @@ def get_user_achievements(
 def update_achievement_progress(
     db: Session,
     user_id: int,
-    world_id: int,
-    requirement_type: str,
-    *,
+    *args,
+    world_id: int | None = None,
     increment: int | float | None = None,
     absolute_value: int | float | None = None,
 ) -> None:
+    """Update honor progress without ever crossing world boundaries.
+
+    Preferred form::
+        update_achievement_progress(db, user_id, world_id, requirement_type, ...)
+
+    The historical form without world_id remains temporarily accepted only for
+    players with exactly one world membership. This keeps old event producers
+    safe while BM-0071 migrates them one by one.
+    """
+
+    if len(args) == 2:
+        if world_id is not None:
+            raise TypeError("world_id supplied twice")
+        resolved_world_id = int(args[0])
+        requirement_type = str(args[1])
+    elif len(args) == 1:
+        resolved_world_id = int(world_id) if world_id is not None else _resolve_unambiguous_world(db, user_id)
+        requirement_type = str(args[0])
+    else:
+        raise TypeError("update_achievement_progress requires requirement_type and world context")
+
     achievements = (
         db.query(models.Achievement)
         .filter(models.Achievement.requirement_type == requirement_type)
@@ -73,7 +116,12 @@ def update_achievement_progress(
     )
     if not achievements:
         return
-    progress_entries = _ensure_progress_entries(db, user_id, world_id, achievements)
+    progress_entries = _ensure_progress_entries(
+        db,
+        user_id,
+        resolved_world_id,
+        achievements,
+    )
 
     for achievement, progress in zip(achievements, progress_entries):
         new_progress = progress.current_progress
