@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -38,8 +39,9 @@ def get_hero(db: Session, user_id: int, world_id: int | None = None) -> models.H
     """Return/create exactly one hero for a user inside one world."""
 
     resolved_world_id = _resolve_world_id(db, user_id, world_id)
-    # Serialize first creation per account so concurrent GETs cannot race the
-    # (user_id, world_id) unique constraint.
+    # PostgreSQL serializes first creation through the user row. SQLite ignores
+    # FOR UPDATE, so the unique constraint plus the IntegrityError replay below
+    # is also required for parallel UI GETs such as /hero and /hero/items.
     db.query(models.User).filter(models.User.id == user_id).with_for_update().one()
     hero = (
         db.query(models.Hero)
@@ -73,7 +75,25 @@ def get_hero(db: Session, user_id: int, world_id: int | None = None) -> models.H
         status="home",
     )
     db.add(hero)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Another request can win the first-create race on dialects where the
+        # User FOR UPDATE lock is ineffective (notably SQLite in Browser E2E).
+        # Roll back our failed INSERT and replay the canonical row. Any other
+        # integrity failure is re-raised rather than being hidden.
+        db.rollback()
+        existing = (
+            db.query(models.Hero)
+            .filter(
+                models.Hero.user_id == user_id,
+                models.Hero.world_id == resolved_world_id,
+            )
+            .one_or_none()
+        )
+        if existing is None:
+            raise
+        return existing
     db.refresh(hero)
     return hero
 
