@@ -9,17 +9,121 @@ permissions:
   contents: read
 
 jobs:
-  package:
+  capture:
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: test
+      DATABASE_URL: sqlite:////tmp/batalla-medieval-capture-clean.db
+      SECRET_KEY: test-only-secret-key-for-ui-capture-clean
+      CORS_ORIGINS: http://127.0.0.1:4173
+      FRONTEND_URL: http://127.0.0.1:4173
+      PYTHONPATH: batalla_medieval_backend
+      VITE_API_URL: http://127.0.0.1:8000
+      VITE_SOCKET_URL: http://127.0.0.1:8000
+      E2E_BASE_URL: http://127.0.0.1:4173
     steps:
       - uses: actions/checkout@v7
         with:
           ref: chore/ui-captures-2026-08-25
 
-      - name: Package screenshots
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: batalla_medieval_backend/requirements.txt
+
+      - name: Install backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r batalla_medieval_backend/requirements.txt
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: batalla_medieval_frontend/package-lock.json
+
+      - name: Install frontend and browser
+        working-directory: batalla_medieval_frontend
+        run: |
+          npm ci
+          npm install --no-save --package-lock=false @playwright/test@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Prepare game data
+        run: |
+          alembic -c batalla_medieval_backend/alembic.ini upgrade head
+          python -m app.seed
+          python scripts/prepare_g2_e2e.py
+          python scripts/prepare_g6_expansion_e2e.py
+          python scripts/prepare_g7_research_e2e.py
+          python scripts/prepare_g8_unit_upkeep_e2e.py
+          python scripts/prepare_g9_combat_e2e.py
+          python scripts/prepare_g10_espionage_e2e.py
+          python scripts/prepare_g11_commerce_e2e.py
+          python scripts/prepare_g12_pve_e2e.py
+
+      - name: Start game
+        run: |
+          python -m uvicorn app.main:socket_app --app-dir batalla_medieval_backend --host 127.0.0.1 --port 8000 >/tmp/bm-backend.log 2>&1 &
+          (cd batalla_medieval_frontend && npm run build && npm run preview -- --host 127.0.0.1 --port 4173 >/tmp/bm-frontend.log 2>&1) &
+          curl --fail --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:8000/health
+          curl --fail --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:4173/login
+
+      - name: Capture unobstructed UI
+        working-directory: batalla_medieval_frontend
+        run: |
+          rm -rf ../captures-clean
+          mkdir -p ../captures-clean
+          node --input-type=module <<'NODE'
+          import { chromium } from '@playwright/test';
+          const base = 'http://127.0.0.1:4173';
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+          const page = await context.newPage();
+
+          await page.goto(`${base}/login`, { waitUntil: 'networkidle' });
+          const inputs = page.locator('form input');
+          await inputs.nth(0).fill('g2_browser');
+          await inputs.nth(1).fill('G2-Browser-Test-2026!');
+          await page.getByRole('button', { name: 'Entrar' }).click();
+          await page.waitForURL(`${base}/`, { timeout: 20000 });
+          await page.waitForLoadState('networkidle');
+
+          const skipIntro = page.getByRole('button', { name: /Saltar intro/i });
+          if (await skipIntro.isVisible().catch(() => false)) {
+            await skipIntro.click();
+            await skipIntro.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
+          }
+          await page.waitForTimeout(1500);
+
+          const shots = [
+            ['01-ciudad.jpg', '/'],
+            ['02-edificios.jpg', '/buildings'],
+            ['03-tropas.jpg', '/troops'],
+            ['04-mapa.jpg', '/map'],
+            ['05-mercado.jpg', '/market'],
+            ['06-informes.jpg', '/reports'],
+          ];
+
+          for (const [name, route] of shots) {
+            await page.goto(`${base}${route}`, { waitUntil: 'networkidle' });
+            await page.waitForTimeout(3000);
+            const lingeringIntro = page.getByRole('button', { name: /Saltar intro/i });
+            if (await lingeringIntro.isVisible().catch(() => false)) {
+              await lingeringIntro.click();
+              await page.waitForTimeout(1200);
+            }
+            await page.screenshot({ path: `../captures-clean/${name}`, type: 'jpeg', quality: 75, fullPage: false });
+          }
+
+          await browser.close();
+          NODE
+
+      - name: Upload screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: batallas-medievales-capturas
-          path: captures/*.jpg
+          name: batallas-medievales-capturas-limpias
+          path: captures-clean/*.jpg
           if-no-files-found: error
           retention-days: 7
