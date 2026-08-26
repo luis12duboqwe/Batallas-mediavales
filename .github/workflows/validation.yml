@@ -102,6 +102,7 @@ jobs:
           tests/test_hero_concurrency.py
           tests/test_g3_24h_simulation.py
           tests/test_tutorial_concurrency.py
+          tests/test_community_concurrency.py
 
   frontend:
     name: Frontend
