@@ -17,15 +17,18 @@ def upgrade() -> None:
     with op.batch_alter_table("achievement_progress") as batch_op:
         batch_op.add_column(sa.Column("world_id", sa.Integer(), nullable=True))
 
-    # Preserve legacy progress only when the user's world can be resolved
-    # unambiguously. Ambiguous multi-world rows are intentionally not copied
-    # into every world because that would leak progress across servers.
+    # Legacy progress was account-global. Preserve it only where there is one
+    # defensible destination: the user's selected active world when that world
+    # is an actual membership, otherwise their sole world membership. Never
+    # duplicate one legacy medal into multiple worlds because that would turn
+    # ambiguous account-global history into cross-world progress.
     bind = op.get_bind()
     rows = bind.execute(
         sa.text(
             """
-            SELECT ap.id, ap.user_id
+            SELECT ap.id, ap.user_id, u.world_id AS active_world_id
             FROM achievement_progress ap
+            JOIN users u ON u.id = ap.user_id
             WHERE ap.world_id IS NULL
             """
         )
@@ -45,12 +48,18 @@ def upgrade() -> None:
                 {"user_id": row.user_id},
             ).fetchall()
         ]
-        if len(world_ids) == 1:
+        destination = None
+        if row.active_world_id is not None and int(row.active_world_id) in world_ids:
+            destination = int(row.active_world_id)
+        elif len(world_ids) == 1:
+            destination = world_ids[0]
+
+        if destination is not None:
             bind.execute(
                 sa.text(
                     "UPDATE achievement_progress SET world_id = :world_id WHERE id = :id"
                 ),
-                {"world_id": world_ids[0], "id": row.id},
+                {"world_id": destination, "id": row.id},
             )
         else:
             bind.execute(
