@@ -10,6 +10,7 @@ from ..schemas import diplomacy as diplomacy_schema
 from ..services import alliance as alliance_service
 from ..services import community as community_service
 from ..services import diplomacy as diplomacy_service
+from ..services import social_privacy
 from .world_access import require_world_access
 
 router = APIRouter(tags=["alliance"])
@@ -99,10 +100,25 @@ def invite_player(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    _require_capability(db, alliance_id, current_user, community_service.CAP_INVITE)
+    membership = _require_capability(
+        db,
+        alliance_id,
+        current_user,
+        community_service.CAP_INVITE,
+    )
     target_user = db.query(models.User).filter(models.User.id == payload.user_id).first()
     if not target_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if social_privacy.interaction_blocked(
+        db,
+        current_user.id,
+        payload.user_id,
+        membership.alliance.world_id,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Social interaction blocked",
+        )
     return alliance_service.invite_member(db, alliance_id, current_user, payload.user_id)
 
 
