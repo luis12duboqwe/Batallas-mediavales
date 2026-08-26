@@ -3,6 +3,7 @@ from fastapi import HTTPException
 
 from app import models, schemas
 from app.services import community
+from app.services.chat_manager import chat_manager
 
 
 def _make_alliance_with_members(db_session, world, leader_user, member_user):
@@ -164,3 +165,81 @@ def test_transfer_rejects_member_from_another_alliance(db_session, user):
             outsider.id,
         )
     assert exc.value.status_code == 404
+
+
+def test_http_alliance_chat_uses_canonical_chat_message_store(db_session, user):
+    world = db_session.query(models.World).first()
+    member_user = models.User(
+        username="community_chat_member",
+        email="community-chat-member@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(member_user)
+    db_session.flush()
+    alliance, _, member = _make_alliance_with_members(
+        db_session,
+        world,
+        user,
+        member_user,
+    )
+    chat_manager.last_message_at.pop(member_user.id, None)
+
+    message = community.post_alliance_chat_message(
+        db_session,
+        alliance.id,
+        member_user,
+        "  hola badword  ",
+    )
+
+    assert message.channel == "alliance"
+    assert message.world_id == world.id
+    assert message.alliance_id == alliance.id
+    assert message.content == "hola ***"
+    assert db_session.query(models.ChatMessage).filter_by(id=message.id).one()
+    assert db_session.query(models.AllianceChatMessage).count() == 0
+
+    history = community.list_alliance_chat_messages(
+        db_session,
+        alliance.id,
+        user,
+    )
+    assert [entry.id for entry in history] == [message.id]
+
+    db_session.delete(member)
+    db_session.commit()
+    with pytest.raises(HTTPException) as exc:
+        community.list_alliance_chat_messages(
+            db_session,
+            alliance.id,
+            member_user,
+        )
+    assert exc.value.status_code == 403
+
+
+def test_alliance_chat_rejects_empty_and_oversized_content(db_session, user):
+    world = db_session.query(models.World).first()
+    member_user = models.User(
+        username="community_chat_limits",
+        email="community-chat-limits@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(member_user)
+    db_session.flush()
+    alliance, _, _ = _make_alliance_with_members(db_session, world, user, member_user)
+
+    chat_manager.last_message_at.pop(member_user.id, None)
+    with pytest.raises(HTTPException) as empty_exc:
+        community.post_alliance_chat_message(db_session, alliance.id, member_user, "   ")
+    assert empty_exc.value.status_code == 400
+
+    chat_manager.last_message_at.pop(member_user.id, None)
+    with pytest.raises(HTTPException) as long_exc:
+        community.post_alliance_chat_message(
+            db_session,
+            alliance.id,
+            member_user,
+            "x" * (community.MAX_CHAT_MESSAGE_LENGTH + 1),
+        )
+    assert long_exc.value.status_code == 422
