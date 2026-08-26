@@ -3,7 +3,7 @@ import json
 import pytest
 
 from app import models
-from app.services import balance, combat
+from app.services import balance, combat, hero, hero_rules
 
 
 def _restore_resources(city, snapshot):
@@ -217,3 +217,50 @@ def test_round_count_is_bounded_even_for_long_stalemates(db_session, city, secon
         "mutual_destruction",
         "stalemate",
     }
+
+
+def test_defender_hero_levels_when_combat_awards_xp(db_session, city):
+    defender_user = models.User(
+        username="defender_hero_xp",
+        email="defender-hero-xp@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(defender_user)
+    db_session.flush()
+    defender_city = models.City(
+        name="Defender Hero XP City",
+        owner_id=defender_user.id,
+        world_id=city.world_id,
+        x=6,
+        y=6,
+    )
+    db_session.add(defender_city)
+    db_session.commit()
+    db_session.refresh(defender_city)
+
+    defender_hero = hero.get_hero(db_session, defender_user.id, city.world_id)
+    defender_hero.level = 1
+    defender_hero.xp = hero_rules.HERO_XP_TABLE[1] - 1
+    defender_hero.status = "home"
+    defender_hero.health = hero_rules.HERO_MAX_HEALTH
+    db_session.add(
+        models.Troop(
+            city_id=defender_city.id,
+            unit_type="basic_infantry",
+            quantity=100,
+        )
+    )
+    db_session.commit()
+
+    result = combat.resolve_battle(
+        city,
+        defender_city,
+        {"basic_infantry": 25},
+        defender_hero=defender_hero,
+        seed="bm0068-defender-xp-level",
+    )
+
+    assert sum(result["attacker_losses"].values()) > 0
+    assert defender_hero.level == 2
+    assert 0 <= defender_hero.xp < hero_rules.HERO_XP_TABLE[2]
