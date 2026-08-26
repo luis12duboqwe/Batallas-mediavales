@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 RANK_MEMBER = 1
@@ -46,6 +46,10 @@ class AllianceMemberPublic(BaseModel):
     user_id: int
     username: str
     rank: int
+
+
+class AllianceLeadershipTransfer(BaseModel):
+    target_member_id: int = Field(gt=0)
 
 
 class AllianceInvitationCreate(BaseModel):
