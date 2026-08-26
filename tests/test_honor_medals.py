@@ -11,8 +11,6 @@ def _medal(db_session, *, requirement_type="build_level", requirement_value=1):
         category="honor",
         requirement_type=requirement_type,
         requirement_value=requirement_value,
-        # Legacy persistence columns remain populated for schema compatibility,
-        # but BM-0071 never exposes or applies them.
         reward_type="resources",
         reward_value="999999",
     )
@@ -22,7 +20,19 @@ def _medal(db_session, *, requirement_type="build_level", requirement_value=1):
     return medal
 
 
+def _ensure_membership(db_session, user_id: int, world_id: int) -> None:
+    if (
+        db_session.query(models.PlayerWorld)
+        .filter_by(user_id=user_id, world_id=world_id)
+        .one_or_none()
+        is None
+    ):
+        db_session.add(models.PlayerWorld(user_id=user_id, world_id=world_id))
+        db_session.commit()
+
+
 def test_claim_honor_medal_does_not_change_gameplay_state(db_session, user, city):
+    _ensure_membership(db_session, user.id, city.world_id)
     medal = _medal(db_session)
     troop = models.Troop(city_id=city.id, unit_type="basic_infantry", quantity=7)
     db_session.add(troop)
@@ -65,6 +75,7 @@ def test_claim_honor_medal_does_not_change_gameplay_state(db_session, user, city
 
 
 def test_honor_progress_is_isolated_per_world(db_session, user, city):
+    _ensure_membership(db_session, user.id, city.world_id)
     medal = _medal(db_session, requirement_type="train_troops", requirement_value=2)
     second_world = models.World(
         name="Honor Isolation World",
@@ -96,6 +107,7 @@ def test_honor_progress_is_isolated_per_world(db_session, user, city):
 
 
 def test_legacy_medal_event_rejects_ambiguous_multiworld_user(db_session, user, city):
+    _ensure_membership(db_session, user.id, city.world_id)
     _medal(db_session, requirement_type="join_alliance", requirement_value=1)
     second_world = models.World(
         name="Ambiguous Honor World",
