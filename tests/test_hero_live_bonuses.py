@@ -35,16 +35,21 @@ def test_attack_and_defense_items_modify_live_combat_with_versioned_caps(
     db_session.expire(hero_obj, ["items"])
 
     troops = {"basic_infantry": 10}
-    base_distribution, base_attack = combat._split_attack_by_type(troops, None)
+    base_distribution, _ = combat._split_attack_by_type(troops, None)
     boosted_distribution, boosted_attack = combat._split_attack_by_type(troops, hero_obj)
     expected_attack_bonus = 0.02 + 0.15
 
     assert hero_rules.attack_bonus(hero_obj) == pytest.approx(expected_attack_bonus)
-    assert boosted_attack == pytest.approx(base_attack * (1 + expected_attack_bonus))
-    for category in base_distribution:
-        assert boosted_distribution[category] == pytest.approx(
-            base_distribution[category] * (1 + expected_attack_bonus)
-        )
+    assert hero_rules.attack_bonus_for_category(hero_obj, "infantry") == pytest.approx(0.17)
+    assert hero_rules.attack_bonus_for_category(hero_obj, "cavalry") == pytest.approx(0.02)
+    assert hero_rules.attack_bonus_for_category(hero_obj, "siege") == pytest.approx(0.02)
+    expected_total_attack = 0.0
+    for category, base_value in base_distribution.items():
+        category_bonus = hero_rules.attack_bonus_for_category(hero_obj, category)
+        expected_value = base_value * (1 + category_bonus)
+        assert boosted_distribution[category] == pytest.approx(expected_value)
+        expected_total_attack += expected_value
+    assert boosted_attack == pytest.approx(expected_total_attack)
 
     hero_obj.status = "home"
     db_session.commit()
@@ -55,9 +60,13 @@ def test_attack_and_defense_items_modify_live_combat_with_versioned_caps(
     expected_defense_bonus = 0.02 + 0.20
 
     assert hero_rules.defense_bonus(hero_obj) == pytest.approx(expected_defense_bonus)
-    for category in base_defense:
+    assert hero_rules.defense_bonus_for_category(hero_obj, "infantry") == pytest.approx(0.22)
+    assert hero_rules.defense_bonus_for_category(hero_obj, "cavalry") == pytest.approx(0.02)
+    assert hero_rules.defense_bonus_for_category(hero_obj, "siege") == pytest.approx(0.02)
+    for category, base_value in base_defense.items():
+        category_bonus = hero_rules.defense_bonus_for_category(hero_obj, category)
         assert boosted_defense[category] == pytest.approx(
-            base_defense[category] * (1 + expected_defense_bonus)
+            base_value * (1 + category_bonus)
         )
 
     assert hero_rules.HERO_RULES_VERSION == "2026.08.25-bm0068-v1"
