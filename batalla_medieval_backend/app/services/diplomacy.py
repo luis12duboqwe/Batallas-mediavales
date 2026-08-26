@@ -59,23 +59,36 @@ def _require_same_world_pair(
     return alliance, target
 
 
-def _find_pair(db: Session, alliance_id: int, target_id: int):
-    return (
-        db.query(models.Diplomacy)
-        .filter(
-            or_(
-                (
-                    (models.Diplomacy.alliance_a_id == alliance_id)
-                    & (models.Diplomacy.alliance_b_id == target_id)
-                ),
-                (
-                    (models.Diplomacy.alliance_a_id == target_id)
-                    & (models.Diplomacy.alliance_b_id == alliance_id)
-                ),
-            )
+def _find_pair(db: Session, alliance_id: int, target_id: int, *, lock: bool = False):
+    query = db.query(models.Diplomacy).filter(
+        or_(
+            (
+                (models.Diplomacy.alliance_a_id == alliance_id)
+                & (models.Diplomacy.alliance_b_id == target_id)
+            ),
+            (
+                (models.Diplomacy.alliance_a_id == target_id)
+                & (models.Diplomacy.alliance_b_id == alliance_id)
+            ),
         )
+    )
+    if lock:
+        query = query.with_for_update()
+    return query.first()
+
+
+def _relation_identity(db: Session, diplomacy_id: int) -> tuple[int, int]:
+    row = (
+        db.query(
+            models.Diplomacy.alliance_a_id,
+            models.Diplomacy.alliance_b_id,
+        )
+        .filter(models.Diplomacy.id == diplomacy_id)
         .first()
     )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Relation not found")
+    return int(row[0]), int(row[1])
 
 
 def get_relations(db: Session, alliance_id: int):
@@ -110,7 +123,7 @@ def request_relation(
 
     try:
         _lock_same_world_pair(db, alliance_id, target_id)
-        existing = _find_pair(db, alliance_id, target_id)
+        existing = _find_pair(db, alliance_id, target_id, lock=True)
         if existing:
             if relation_type == "war":
                 # War is unilateral and declaring it again is idempotent.
@@ -157,18 +170,19 @@ def request_relation(
 
 def accept_relation(db: Session, alliance_id: int, diplomacy_id: int):
     try:
+        alliance_a_id, alliance_b_id = _relation_identity(db, diplomacy_id)
+        _lock_same_world_pair(db, alliance_a_id, alliance_b_id)
         relation = (
             db.query(models.Diplomacy)
             .filter(models.Diplomacy.id == diplomacy_id)
             .with_for_update()
             .one_or_none()
         )
-        if not relation:
+        if relation is None:
             raise HTTPException(status_code=404, detail="Relation not found")
         if relation.alliance_b_id != alliance_id:
             raise HTTPException(status_code=403, detail="Only the target alliance can accept")
 
-        _lock_same_world_pair(db, relation.alliance_a_id, relation.alliance_b_id)
         if relation.status in {"nap", "ally"}:
             # Safe replay by the same target alliance after a successful response.
             db.commit()
@@ -189,18 +203,19 @@ def accept_relation(db: Session, alliance_id: int, diplomacy_id: int):
 
 def cancel_relation(db: Session, alliance_id: int, diplomacy_id: int):
     try:
+        alliance_a_id, alliance_b_id = _relation_identity(db, diplomacy_id)
+        _lock_same_world_pair(db, alliance_a_id, alliance_b_id)
         relation = (
             db.query(models.Diplomacy)
             .filter(models.Diplomacy.id == diplomacy_id)
             .with_for_update()
             .one_or_none()
         )
-        if not relation:
+        if relation is None:
             raise HTTPException(status_code=404, detail="Relation not found")
         if alliance_id not in {relation.alliance_a_id, relation.alliance_b_id}:
             raise HTTPException(status_code=403, detail="Not involved in this relation")
 
-        _lock_same_world_pair(db, relation.alliance_a_id, relation.alliance_b_id)
         db.delete(relation)
         db.commit()
         return {"detail": "Relation cancelled"}
