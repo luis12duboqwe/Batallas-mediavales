@@ -1,7 +1,8 @@
 import pytest
 
-from app import models
+from app import models, schemas
 from app.services import achievement
+from app.services import alliance as alliance_service
 from app.services import movement as movement_service
 
 
@@ -151,6 +152,52 @@ def test_battle_medal_effect_uses_explicit_movement_world(db_session, user, city
             "requirement_type": "win_battles",
             "increment": 1,
         },
+    )
+
+    scoped = (
+        db_session.query(models.AchievementProgress)
+        .filter_by(
+            user_id=user.id,
+            achievement_id=medal.id,
+            world_id=city.world_id,
+        )
+        .one()
+    )
+    assert scoped.status == "completed"
+    assert scoped.current_progress == 1
+    assert (
+        db_session.query(models.AchievementProgress)
+        .filter_by(
+            user_id=user.id,
+            achievement_id=medal.id,
+            world_id=second_world.id,
+        )
+        .count()
+        == 0
+    )
+
+
+def test_alliance_join_medal_uses_explicit_alliance_world(db_session, user, city):
+    _ensure_membership(db_session, user.id, city.world_id)
+    medal = _medal(db_session, requirement_type="join_alliance", requirement_value=1)
+    second_world = models.World(
+        name="Alliance Honor Isolation World",
+        speed_modifier=1.0,
+        resource_modifier=1.0,
+    )
+    db_session.add(second_world)
+    db_session.flush()
+    db_session.add(models.PlayerWorld(user_id=user.id, world_id=second_world.id))
+    db_session.commit()
+
+    alliance_service.create_alliance(
+        db_session,
+        schemas.AllianceCreate(
+            name="G15 Honor Alliance",
+            description="World-scoped honor regression fixture",
+            world_id=city.world_id,
+        ),
+        user,
     )
 
     scoped = (
