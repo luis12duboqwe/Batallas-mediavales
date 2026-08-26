@@ -2,6 +2,7 @@ from datetime import timedelta
 
 import pytest
 
+from app.schemas.adventure import AdventureRead
 from app.services import adventure, hero, hero_rules
 
 
@@ -28,6 +29,10 @@ def test_adventure_flow_is_auditable_and_retry_safe(db_session, user, city):
     db_session.commit()
 
     first = adventure.claim_adventure(db_session, adv.id, hero_obj)
+    db_session.refresh(adv)
+    serialized = AdventureRead.model_validate(adv)
+    assert serialized.result == first
+
     db_session.refresh(hero_obj)
     xp_after_first = hero_obj.xp
     health_after_first = hero_obj.health
