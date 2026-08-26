@@ -58,6 +58,19 @@ def _defense_values(defender_troops, hero=None):
     }
 
 
+def _normalize_hero_xp(hero) -> None:
+    """Advance every level already earned by a live in-memory hero."""
+
+    if hero is None:
+        return
+    while (
+        int(getattr(hero, "level", 1)) < hero_rules.HERO_MAX_LEVEL
+        and int(getattr(hero, "xp", 0)) >= hero_rules.HERO_XP_TABLE[int(hero.level)]
+    ):
+        hero.xp -= hero_rules.HERO_XP_TABLE[int(hero.level)]
+        hero.level += 1
+
+
 # ``combat_rounds._resolve_rounds`` resolves these names at runtime inside its
 # own module. Install the adapters once so direct and compatibility callers use
 # the same authoritative BM-0068 behavior.
@@ -115,6 +128,10 @@ def resolve_battle(*args, **kwargs):
         defender_owner._bm0068_scoped_hero = defender_hero
     try:
         result = _impl.resolve_battle(*args, **kwargs)
+        # BM-0064 credits defender XP directly on the hero object. BM-0068 owns
+        # the level table, so normalize the accumulated XP before the caller's
+        # surrounding worker transaction persists the battle.
+        _normalize_hero_xp(defender_hero)
         result["hero_rules_version"] = hero_rules.HERO_RULES_VERSION
         attacker_hero = kwargs.get("attacker_hero")
         if attacker_hero is not None:
