@@ -46,6 +46,17 @@ def _require_capability(
     return community_service.require_capability(membership, capability)
 
 
+def _alliance_chat_read(message: models.ChatMessage) -> schemas.AllianceChatMessageRead:
+    return schemas.AllianceChatMessageRead(
+        id=message.id,
+        alliance_id=message.alliance_id,
+        user_id=message.user_id,
+        username=message.user.username,
+        message=message.content,
+        created_at=message.timestamp,
+    )
+
+
 @router.get("/", response_model=Optional[schemas.AllianceRead])
 def get_my_alliance(
     world_id: int | None = None,
@@ -68,7 +79,7 @@ def create_alliance(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    return alliance_service.create_alliance(db, payload, current_user)
+    return community_service.create_alliance_serialized(db, payload, current_user)
 
 
 @router.get("/{alliance_id}/members", response_model=list[schemas.AllianceMemberPublic])
@@ -200,24 +211,31 @@ def send_chat_message(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    message = alliance_service.post_chat_message(db, alliance_id, current_user, payload)
-    return schemas.AllianceChatMessageRead(
-        id=message.id,
-        alliance_id=message.alliance_id,
-        user_id=message.user_id,
-        username=message.user.username,
-        message=message.message,
-        created_at=message.created_at,
+    message = community_service.post_alliance_chat_message(
+        db,
+        alliance_id,
+        current_user,
+        payload.message,
     )
+    return _alliance_chat_read(message)
 
 
 @router.get("/{alliance_id}/chat", response_model=list[schemas.AllianceChatMessageRead])
 def list_chat_messages(
     alliance_id: int,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    return alliance_service.list_chat_messages(db, alliance_id, current_user)
+    return [
+        _alliance_chat_read(message)
+        for message in community_service.list_alliance_chat_messages(
+            db,
+            alliance_id,
+            current_user,
+            limit=limit,
+        )
+    ]
 
 
 @router.post("/{alliance_id}/mass-message")
