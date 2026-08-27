@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timezone
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -17,6 +19,81 @@ ALLOWED_TRANSITIONS = {
     "closed": {"archived"},
     "archived": set(),
 }
+
+
+def require_world_open(db: Session, world_id: int, *, lock: bool = False) -> models.World:
+    query = db.query(models.World).filter(
+        models.World.id == world_id,
+        models.World.lifecycle_status == "open",
+    )
+    if lock:
+        query = query.with_for_update().populate_existing()
+    world = query.one_or_none()
+    if world is None:
+        raise ValueError("World is not open")
+    return world
+
+
+def _aware(value):
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)
+
+
+def _shift_world_clocks(db: Session, world: models.World, pause_seconds: float) -> None:
+    if pause_seconds <= 0:
+        return
+    from datetime import timedelta
+
+    delta = timedelta(seconds=pause_seconds)
+
+    movements = (
+        db.query(models.Movement)
+        .filter(
+            models.Movement.world_id == world.id,
+            models.Movement.status == "ongoing",
+        )
+        .with_for_update()
+        .all()
+    )
+    for item in movements:
+        item.arrival_time = item.arrival_time + delta
+
+    cities = (
+        db.query(models.City)
+        .filter(models.City.world_id == world.id)
+        .with_for_update()
+        .all()
+    )
+    city_ids = [city.id for city in cities]
+    for city in cities:
+        if city.last_production is not None:
+            city.last_production = city.last_production + delta
+
+    if city_ids:
+        for model in (models.BuildingQueue, models.TroopQueue, models.ResearchQueue):
+            rows = (
+                db.query(model)
+                .filter(model.city_id.in_(city_ids))
+                .with_for_update()
+                .all()
+            )
+            for row in rows:
+                row.finish_time = row.finish_time + delta
+
+    adventures = (
+        db.query(models.Adventure)
+        .join(models.Hero, models.Adventure.hero_id == models.Hero.id)
+        .filter(
+            models.Hero.world_id == world.id,
+            models.Adventure.status == "active",
+            models.Adventure.started_at.is_not(None),
+        )
+        .with_for_update()
+        .all()
+    )
+    for adv in adventures:
+        adv.started_at = adv.started_at + delta
 
 
 def status_of(world: models.World) -> str:
@@ -66,6 +143,10 @@ def transition_world(
         if target_status == "paused":
             world.pause_started_at = now
         elif target_status == "open":
+            pause_started_at = _aware(world.pause_started_at)
+            if current == "paused" and pause_started_at is not None:
+                pause_seconds = max((now - pause_started_at).total_seconds(), 0.0)
+                _shift_world_clocks(db, world, pause_seconds)
             world.pause_started_at = None
         elif target_status == "closed":
             if world.ended_at is None:
