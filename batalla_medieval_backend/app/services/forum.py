@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..utils import utc_now
+from . import world_lifecycle
 
 MAX_THREADS_PAGE = 100
 
@@ -111,6 +112,10 @@ def create_thread(
     """Create thread and opening post in one transaction."""
 
     try:
+        alliance = db.query(models.Alliance).filter(models.Alliance.id == alliance_id).one_or_none()
+        if alliance is None:
+            raise HTTPException(status_code=404, detail="Alliance not found")
+        world_lifecycle.require_world_open(db, alliance.world_id)
         now = utc_now()
         thread = models.ForumThread(
             alliance_id=alliance_id,
@@ -151,6 +156,8 @@ def create_reply(
         )
         if not thread:
             raise HTTPException(status_code=404, detail="Thread not found")
+        alliance = db.query(models.Alliance).filter(models.Alliance.id == thread.alliance_id).one()
+        world_lifecycle.require_world_open(db, alliance.world_id)
         if thread.is_locked:
             raise HTTPException(status_code=400, detail="Thread is locked")
 
@@ -194,6 +201,8 @@ def moderate_thread(
         )
         if thread is None:
             raise HTTPException(status_code=404, detail="Thread not found")
+        alliance = db.query(models.Alliance).filter(models.Alliance.id == thread.alliance_id).one()
+        world_lifecycle.require_world_open(db, alliance.world_id)
         if payload.is_locked is None and payload.is_pinned is None:
             raise HTTPException(status_code=400, detail="No moderation change supplied")
         if payload.is_locked is not None:
