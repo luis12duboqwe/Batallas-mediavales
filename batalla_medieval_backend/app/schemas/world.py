@@ -44,6 +44,7 @@ class WorldRead(WorldBase):
 
 
 class WorldLifecycleTransition(BaseModel):
+    expected_status: WorldLifecycleStatus
     target_status: WorldLifecycleStatus
     reason: str = Field(min_length=1, max_length=1000)
 
