@@ -25,6 +25,7 @@ def require_world_open(db: Session, world_id: int, *, lock: bool = False) -> mod
     query = db.query(models.World).filter(
         models.World.id == world_id,
         models.World.lifecycle_status == "open",
+        models.World.is_active.is_(True),
     )
     if lock:
         query = query.with_for_update().populate_existing()
@@ -112,6 +113,11 @@ def _shift_world_clocks(db: Session, world: models.World, pause_seconds: float) 
 def status_of(world: models.World) -> str:
     status = getattr(world, "lifecycle_status", None)
     if status in WORLD_STATES:
+        # During the BM-0072 compatibility window, disagreement with the
+        # legacy flag fails closed instead of making an inactive legacy world
+        # playable. Lifecycle transitions always keep both fields aligned.
+        if status == "open" and world.is_active is False:
+            return "closed" if world.ended_at is not None else "paused"
         return str(status)
     if world.is_active:
         return "open"
