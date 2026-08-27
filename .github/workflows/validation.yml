@@ -96,6 +96,7 @@ jobs:
           tests/test_tutorial_concurrency.py
           tests/test_community_concurrency.py
           tests/test_honor_medal_concurrency.py
+          tests/test_world_lifecycle_concurrency.py
 
   frontend:
     name: Frontend
