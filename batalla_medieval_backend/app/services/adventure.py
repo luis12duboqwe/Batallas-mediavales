@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..utils import utc_now
-from . import balance, hero as hero_service, hero_rules, production
+from . import balance, hero as hero_service, hero_rules, production, world_lifecycle
 
 # Compatibility alias for older imports/tests. Canonical numbers live in hero_rules.
 DIFFICULTY_CONFIG = hero_rules.ADVENTURE_CONFIG
@@ -117,6 +117,7 @@ def start_adventure(db: Session, adventure_id: int, hero: models.Hero) -> models
         db.rollback()
         raise ValueError("Hero already has an active adventure")
 
+    world_lifecycle.require_world_open(db, locked_hero.world_id)
     started_at = utc_now()
     adv.started_at = started_at
     adv.status = "active"
@@ -207,6 +208,7 @@ def claim_adventure(db: Session, adventure_id: int, hero: models.Hero) -> dict[s
         raise ValueError("Adventure not found")
     if adv.result is not None and adv.status in {"completed", "failed"}:
         return deepcopy(adv.result)
+    world_lifecycle.require_world_open(db, locked_hero.world_id)
     if adv.status != "active":
         db.rollback()
         raise ValueError("Adventure not active")
