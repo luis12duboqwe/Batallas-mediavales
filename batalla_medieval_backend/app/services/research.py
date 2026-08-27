@@ -129,7 +129,12 @@ def process_research_queues(db: Session) -> list[dict]:
     now = utc_now()
     due = (
         db.query(models.ResearchQueue)
-        .filter(models.ResearchQueue.finish_time <= now)
+        .join(models.City, models.ResearchQueue.city_id == models.City.id)
+        .join(models.World, models.City.world_id == models.World.id)
+        .filter(
+            models.ResearchQueue.finish_time <= now,
+            models.World.lifecycle_status == "open",
+        )
         .order_by(models.ResearchQueue.id.asc())
         .with_for_update(skip_locked=True)
         .all()
