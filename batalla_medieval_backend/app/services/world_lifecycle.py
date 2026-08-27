@@ -47,13 +47,7 @@ def _aware(value):
     return value.replace(tzinfo=timezone.utc)
 
 
-def _shift_world_clocks(db: Session, world: models.World, pause_seconds: float) -> None:
-    if pause_seconds <= 0:
-        return
-    from datetime import timedelta
-
-    delta = timedelta(seconds=pause_seconds)
-
+def _lock_world_clock_rows(db: Session, world: models.World):
     movements = (
         db.query(models.Movement)
         .filter(
@@ -63,8 +57,6 @@ def _shift_world_clocks(db: Session, world: models.World, pause_seconds: float) 
         .with_for_update()
         .all()
     )
-    for item in movements:
-        item.arrival_time = item.arrival_time + delta
 
     cities = (
         db.query(models.City)
@@ -73,20 +65,16 @@ def _shift_world_clocks(db: Session, world: models.World, pause_seconds: float) 
         .all()
     )
     city_ids = [city.id for city in cities]
-    for city in cities:
-        if city.last_production is not None:
-            city.last_production = city.last_production + delta
 
+    queue_rows = []
     if city_ids:
         for model in (models.BuildingQueue, models.TroopQueue, models.ResearchQueue):
-            rows = (
+            queue_rows.extend(
                 db.query(model)
                 .filter(model.city_id.in_(city_ids))
                 .with_for_update()
                 .all()
             )
-            for row in rows:
-                row.finish_time = row.finish_time + delta
 
     adventures = (
         db.query(models.Adventure)
@@ -99,6 +87,24 @@ def _shift_world_clocks(db: Session, world: models.World, pause_seconds: float) 
         .with_for_update()
         .all()
     )
+    return movements, cities, queue_rows, adventures
+
+
+def _shift_world_clocks(db: Session, world: models.World, pause_seconds: float) -> None:
+    if pause_seconds <= 0:
+        return
+    from datetime import timedelta
+
+    delta = timedelta(seconds=pause_seconds)
+    movements, cities, queue_rows, adventures = _lock_world_clock_rows(db, world)
+
+    for item in movements:
+        item.arrival_time = item.arrival_time + delta
+    for city in cities:
+        if city.last_production is not None:
+            city.last_production = city.last_production + delta
+    for row in queue_rows:
+        row.finish_time = row.finish_time + delta
     for adv in adventures:
         adv.started_at = adv.started_at + delta
 
@@ -154,6 +160,11 @@ def transition_world(
 
         now = utc_now()
         if target_status == "paused":
+            # Establish a hard pause barrier. If a worker already owns one of
+            # these rows, this transition waits for it to finish before the
+            # paused state can commit. If the transition wins first, later
+            # workers see a non-open world and skip the rows.
+            _lock_world_clock_rows(db, world)
             world.pause_started_at = now
         elif target_status == "open":
             pause_started_at = _aware(world.pause_started_at)
