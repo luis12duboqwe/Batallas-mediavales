@@ -261,11 +261,15 @@ def process_building_queues(db: Session) -> List[dict]:
     now = utc_now()
     finished_queues = (
         db.query(models.BuildingQueue)
-        .join(models.City, models.BuildingQueue.city_id == models.City.id)
-        .join(models.World, models.City.world_id == models.World.id)
         .filter(
             models.BuildingQueue.finish_time <= now,
-            models.World.lifecycle_status == "open",
+            models.BuildingQueue.city_id.in_(
+                db.query(models.City.id).filter(
+                    models.City.world_id.in_(
+                        db.query(models.World.id).filter(models.World.lifecycle_status == "open")
+                    )
+                )
+            ),
         )
         .options(selectinload(models.BuildingQueue.city))
         .order_by(models.BuildingQueue.id.asc())
