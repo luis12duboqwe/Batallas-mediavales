@@ -32,7 +32,7 @@ const AdminPanel = () => {
 
   const loadWorlds = async () => {
       try {
-          const response = await api.getWorlds();
+          const response = await api.adminGetWorlds();
           setWorlds(response.data || []);
           if (!selectedWorldId && response.data?.length) {
               setSelectedWorldId(String(response.data[0].id));
