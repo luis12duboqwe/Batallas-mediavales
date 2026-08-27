@@ -321,6 +321,7 @@ def record_resource_gains(
         db,
         city.owner_id,
         "resources_collected",
+        world_id=city.world_id,
         increment=int(generated_total),
     )
 

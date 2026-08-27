@@ -177,6 +177,7 @@ def _run_training_side_effects(db: Session, info: dict) -> None:
             db,
             owner_id,
             "train_troops",
+            world_id=world_id,
             increment=info["amount"],
         )
         ranking.recalculate_player_and_alliance_scores(db, owner_id, world_id)

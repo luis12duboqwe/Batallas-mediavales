@@ -28,47 +28,72 @@ def calculate_city_points(city: models.City) -> int:
     return building_points + troop_points
 
 
-def _calculate_building_points(db: Session, user_id: int, world_id: int) -> int:
-    total_levels = (
-        db.query(func.coalesce(func.sum(models.Building.level), 0))
-        .join(models.City, models.Building.city_id == models.City.id)
-        .filter(models.City.owner_id == user_id, models.City.world_id == world_id)
-        .scalar()
-    )
-    return int(total_levels) * 5
-
-
-def _calculate_troop_points(db: Session, user_id: int, world_id: int) -> int:
-    troop_totals = (
-        db.query(models.Troop.unit_type, func.coalesce(func.sum(models.Troop.quantity), 0))
-        .join(models.City, models.Troop.city_id == models.City.id)
-        .filter(models.City.owner_id == user_id, models.City.world_id == world_id)
-        .group_by(models.Troop.unit_type)
+def _building_points_map(db: Session, world_id: int) -> Dict[int, int]:
+    rows = (
+        db.query(
+            models.City.owner_id,
+            func.coalesce(func.sum(models.Building.level), 0),
+        )
+        .join(models.Building, models.Building.city_id == models.City.id)
+        .filter(
+            models.City.world_id == world_id,
+            models.City.owner_id.isnot(None),
+        )
+        .group_by(models.City.owner_id)
         .all()
     )
-    points = 0
-    for unit_type, quantity in troop_totals:
-        points += int(quantity) * TROOP_VALUES.get(unit_type, 1)
+    return {int(user_id): int(total_levels) * 5 for user_id, total_levels in rows}
+
+
+def _troop_points_map(db: Session, world_id: int) -> Dict[int, int]:
+    rows = (
+        db.query(
+            models.City.owner_id,
+            models.Troop.unit_type,
+            func.coalesce(func.sum(models.Troop.quantity), 0),
+        )
+        .join(models.Troop, models.Troop.city_id == models.City.id)
+        .filter(
+            models.City.world_id == world_id,
+            models.City.owner_id.isnot(None),
+        )
+        .group_by(models.City.owner_id, models.Troop.unit_type)
+        .all()
+    )
+    points: Dict[int, int] = {}
+    for user_id, unit_type, quantity in rows:
+        uid = int(user_id)
+        points[uid] = points.get(uid, 0) + int(quantity) * TROOP_VALUES.get(unit_type, 1)
     return points
 
 
+def _world_points_map(db: Session, world_id: int) -> Dict[int, int]:
+    building_points = _building_points_map(db, world_id)
+    troop_points = _troop_points_map(db, world_id)
+    user_ids = set(building_points) | set(troop_points)
+    return {
+        user_id: building_points.get(user_id, 0) + troop_points.get(user_id, 0)
+        for user_id in user_ids
+    }
+
+
 def calculate_player_points(db: Session, user: models.User, world_id: int) -> int:
-    building_points = _calculate_building_points(db, user.id, world_id)
-    troop_points = _calculate_troop_points(db, user.id, world_id)
-    return building_points + troop_points
+    return _world_points_map(db, world_id).get(user.id, 0)
 
 
 def _get_user_points_map(db: Session, users: List[models.User], world_id: int) -> Dict[int, int]:
-    return {user.id: calculate_player_points(db, user, world_id) for user in users}
+    points = _world_points_map(db, world_id)
+    return {user.id: points.get(user.id, 0) for user in users}
 
 
 def calculate_alliance_points(db: Session, alliance: models.Alliance, world_id: int) -> int:
-    users = [member.user for member in alliance.members]
-    user_points = _get_user_points_map(db, users, world_id)
-    return sum(user_points.values())
+    if alliance.world_id != world_id:
+        return 0
+    user_points = _world_points_map(db, world_id)
+    return sum(user_points.get(member.user_id, 0) for member in alliance.members)
 
 
-def get_player_ranking(db: Session, world_id: int) -> List[Dict[str, int | str | int]]:
+def get_player_ranking(db: Session, world_id: int) -> List[Dict[str, int | str]]:
     users = (
         db.query(models.User)
         .join(models.City, models.City.owner_id == models.User.id)
@@ -76,45 +101,52 @@ def get_player_ranking(db: Session, world_id: int) -> List[Dict[str, int | str |
         .distinct()
         .all()
     )
+    points = _world_points_map(db, world_id)
     ranking = [
         {
             "user_id": user.id,
             "username": user.username,
-            "points": calculate_player_points(db, user, world_id),
-            "attacker_points": user.attacker_points,
-            "defender_points": user.defender_points,
+            "points": points.get(user.id, 0),
             "world_id": world_id,
         }
         for user in users
     ]
-    ranking.sort(key=lambda entry: entry["points"], reverse=True)
+    ranking.sort(
+        key=lambda entry: (
+            -int(entry["points"]),
+            str(entry["username"]).casefold(),
+            int(entry["user_id"]),
+        )
+    )
+    for position, entry in enumerate(ranking, start=1):
+        entry["rank"] = position
     return ranking
 
 
-def get_alliance_ranking(db: Session, world_id: int) -> List[Dict[str, int | str | int]]:
+def get_alliance_ranking(db: Session, world_id: int) -> List[Dict[str, int | str]]:
     alliances = db.query(models.Alliance).filter(models.Alliance.world_id == world_id).all()
-    users = (
-        db.query(models.User)
-        .join(models.City, models.City.owner_id == models.User.id)
-        .filter(models.City.world_id == world_id)
-        .distinct()
-        .all()
-    )
-    user_points = _get_user_points_map(db, users, world_id)
+    user_points = _world_points_map(db, world_id)
 
     ranking = []
     for alliance in alliances:
-        points = sum(user_points.get(member.user_id, 0) for member in alliance.members)
         ranking.append(
             {
                 "alliance_id": alliance.id,
                 "name": alliance.name,
-                "points": points,
+                "points": sum(user_points.get(member.user_id, 0) for member in alliance.members),
                 "world_id": world_id,
             }
         )
 
-    ranking.sort(key=lambda entry: entry["points"], reverse=True)
+    ranking.sort(
+        key=lambda entry: (
+            -int(entry["points"]),
+            str(entry["name"]).casefold(),
+            int(entry["alliance_id"]),
+        )
+    )
+    for position, entry in enumerate(ranking, start=1):
+        entry["rank"] = position
     return ranking
 
 
@@ -125,7 +157,8 @@ def recalculate_player_and_alliance_scores(db: Session, user_id: int, world_id: 
 
     calculate_player_points(db, user, world_id)
     for membership in user.alliances:
-        calculate_alliance_points(db, membership.alliance, world_id)
+        if membership.alliance.world_id == world_id:
+            calculate_alliance_points(db, membership.alliance, world_id)
 
 
 def search_players(db: Session, world_id: int, query: str) -> List[models.User]:
@@ -134,7 +167,7 @@ def search_players(db: Session, world_id: int, query: str) -> List[models.User]:
         .join(models.City, models.City.owner_id == models.User.id)
         .filter(
             models.City.world_id == world_id,
-            models.User.username.ilike(f"%{query}%")
+            models.User.username.ilike(f"%{query}%"),
         )
         .distinct()
         .limit(20)

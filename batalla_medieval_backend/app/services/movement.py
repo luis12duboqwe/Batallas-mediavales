@@ -472,7 +472,7 @@ def _resolve_attack_core(db: Session, movement: models.Movement) -> List[dict[st
     if original_defender_owner_id:
         effects.append({"type": "notification", "user_id": original_defender_owner_id, "title": "Has recibido un informe de batalla", "body": f"Tu ciudad {defender.name} ha sido atacada. Hay un nuevo informe disponible.", "notification_type": "report_ready", "allow_email": False})
     if attacker.owner_id and sum(result.get("defender_survivors", {}).values()) == 0:
-        effects.append({"type": "achievement", "user_id": attacker.owner_id, "requirement_type": "win_battles", "increment": 1})
+        effects.append({"type": "achievement", "user_id": attacker.owner_id, "world_id": movement.world_id, "requirement_type": "win_battles", "increment": 1})
     return effects
 
 
@@ -704,7 +704,7 @@ def _run_resolution_effect(db: Session, effect: dict[str, Any]) -> None:
             notification_service.create_notification(db, user, title=effect["title"], body=effect["body"], notification_type=effect["notification_type"], allow_email=effect.get("allow_email", True))
     elif effect_type == "achievement":
         from .achievement import update_achievement_progress
-        update_achievement_progress(db, effect["user_id"], effect["requirement_type"], increment=effect.get("increment"))
+        update_achievement_progress(db, effect["user_id"], effect["requirement_type"], world_id=effect["world_id"], increment=effect.get("increment"))
     elif effect_type == "spy_audit":
         user = db.query(models.User).filter(models.User.id == effect["user_id"]).first()
         if user:

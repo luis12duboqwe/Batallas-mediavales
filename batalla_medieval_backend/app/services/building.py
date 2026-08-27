@@ -228,6 +228,7 @@ def _run_completion_side_effects(db: Session, info: dict) -> None:
         achievement_service.update_achievement_progress(
             db,
             owner_id,
+            world_id,
             "build_level",
             absolute_value=info["target_level"],
         )

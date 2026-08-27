@@ -7,6 +7,7 @@ from .middleware.language import LanguageMiddleware
 from .services import socket_manager
 from .routers import (
     admin,
+    achievement,
     alliance,
     anticheat,
     auth,
@@ -59,6 +60,7 @@ app.add_middleware(
 app.add_middleware(LanguageMiddleware)
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+app.include_router(achievement.router)
 app.include_router(city.router, prefix="/city", tags=["City"])
 app.include_router(building.router, prefix="/building", tags=["Building"])
 app.include_router(troop.router, prefix="/troop", tags=["Troop"])

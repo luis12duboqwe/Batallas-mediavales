@@ -7,19 +7,19 @@ class AchievementBase(BaseModel):
     category: str
     requirement_type: str
     requirement_value: int
-    reward_type: str
-    reward_value: str
 
 
 class AchievementRead(AchievementBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    honor_only: bool = True
 
 
 class AchievementProgressRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    world_id: int
     status: str
     current_progress: int
 
