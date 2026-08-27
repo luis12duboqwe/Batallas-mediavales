@@ -124,7 +124,7 @@ def request_relation(
 
     try:
         alliance, _target = _lock_same_world_pair(db, alliance_id, target_id)
-        world_lifecycle.require_world_open(db, alliance.world_id)
+        world_lifecycle.require_world_open_http(db, alliance.world_id)
         existing = _find_pair(db, alliance_id, target_id, lock=True)
         if existing:
             if relation_type == "war":
@@ -174,7 +174,7 @@ def accept_relation(db: Session, alliance_id: int, diplomacy_id: int):
     try:
         alliance_a_id, alliance_b_id = _relation_identity(db, diplomacy_id)
         alliance, _target = _lock_same_world_pair(db, alliance_a_id, alliance_b_id)
-        world_lifecycle.require_world_open(db, alliance.world_id)
+        world_lifecycle.require_world_open_http(db, alliance.world_id)
         relation = (
             db.query(models.Diplomacy)
             .filter(models.Diplomacy.id == diplomacy_id)
