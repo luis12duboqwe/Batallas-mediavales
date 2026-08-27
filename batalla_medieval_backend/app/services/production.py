@@ -200,6 +200,11 @@ def _commit_recalculation_safely(
     city_id = city.id
     for _ in range(_RECALCULATION_RETRIES):
         locked_city = lock_city_for_update(db, city_id)
+        if getattr(getattr(locked_city, "world", None), "lifecycle_status", "open") != "open":
+            gains = {resource: 0.0 for resource in PRODUCTION_RATES}
+            db.commit()
+            return (locked_city, gains) if return_gains else locked_city
+
         baseline_resources = {
             resource: float(getattr(locked_city, resource))
             for resource in PRODUCTION_RATES
@@ -274,6 +279,11 @@ def recalculate_resources(
     compare-and-swap in addition to the row lock so SQLite/browser concurrency
     cannot restore a stale resource snapshot over a just-committed spend.
     """
+
+    world_status = getattr(getattr(city, "world", None), "lifecycle_status", "open")
+    if world_status != "open":
+        gains = {resource: 0.0 for resource in PRODUCTION_RATES}
+        return (city, gains) if return_gains else city
 
     if commit:
         return _commit_recalculation_safely(db, city, return_gains)
