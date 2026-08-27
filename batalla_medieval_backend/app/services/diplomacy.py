@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..utils import utc_now
+from . import world_lifecycle
 
 RELATION_TYPES = frozenset({"nap", "ally", "war"})
 PENDING_TYPES = frozenset({"pending_nap", "pending_ally"})
@@ -122,7 +123,8 @@ def request_relation(
         raise HTTPException(status_code=400, detail="Invalid diplomacy status")
 
     try:
-        _lock_same_world_pair(db, alliance_id, target_id)
+        alliance, _target = _lock_same_world_pair(db, alliance_id, target_id)
+        world_lifecycle.require_world_open(db, alliance.world_id)
         existing = _find_pair(db, alliance_id, target_id, lock=True)
         if existing:
             if relation_type == "war":
@@ -171,7 +173,8 @@ def request_relation(
 def accept_relation(db: Session, alliance_id: int, diplomacy_id: int):
     try:
         alliance_a_id, alliance_b_id = _relation_identity(db, diplomacy_id)
-        _lock_same_world_pair(db, alliance_a_id, alliance_b_id)
+        alliance, _target = _lock_same_world_pair(db, alliance_a_id, alliance_b_id)
+        world_lifecycle.require_world_open(db, alliance.world_id)
         relation = (
             db.query(models.Diplomacy)
             .filter(models.Diplomacy.id == diplomacy_id)
