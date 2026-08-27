@@ -53,7 +53,7 @@ const WorldSelector = () => {
     <div className="space-y-4">
       <div>
         <h2 className="text-2xl font-bold mb-2">Seleccionar Mundo</h2>
-        <p className="text-gray-400 text-sm">Elige o únete a un mundo activo</p>
+        <p className="text-gray-400 text-sm">Elige o únete a un mundo abierto</p>
       </div>
 
       {worlds.length === 0 && (
@@ -68,6 +68,7 @@ const WorldSelector = () => {
           return (
             <div
               key={world.id}
+              data-testid={`world-selector-${world.id}`}
               className={`card p-5 cursor-pointer transition hover:scale-105 ${
                 isActive ? 'border-2 border-yellow-500 shadow-yellow-500/50' : ''
               }`}
@@ -76,6 +77,7 @@ const WorldSelector = () => {
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <h3 className="text-xl font-bold">{world.name}</h3>
+                  <span className="text-xs uppercase tracking-wide text-green-400" data-testid={`world-status-${world.id}`}>{world.lifecycle_status || 'open'}</span>
                   {isActive && <span className="badge mt-1">Mundo activo</span>}
                 </div>
                 <div className="text-2xl">🌍</div>
