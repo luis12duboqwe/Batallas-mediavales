@@ -33,8 +33,8 @@ class WorldRead(WorldBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    lifecycle_status: WorldLifecycleStatus
-    lifecycle_changed_at: datetime
+    lifecycle_status: WorldLifecycleStatus = "open"
+    lifecycle_changed_at: Optional[datetime] = None
     pause_started_at: Optional[datetime] = None
     created_at: datetime
     ended_at: Optional[datetime] = None
