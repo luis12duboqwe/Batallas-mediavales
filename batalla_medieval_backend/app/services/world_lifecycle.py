@@ -110,6 +110,7 @@ def transition_world(
     world_id: int,
     *,
     target_status: str,
+    expected_status: str | None = None,
     reason: str,
     admin_user: models.User,
 ) -> models.World:
@@ -131,6 +132,11 @@ def transition_world(
             raise HTTPException(status_code=404, detail="World not found")
 
         current = status_of(world)
+        if expected_status is not None and current != expected_status:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Stale world lifecycle state: expected {expected_status}, found {current}",
+            )
         if current == target_status:
             return world
         if target_status not in ALLOWED_TRANSITIONS[current]:
