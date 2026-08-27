@@ -81,7 +81,7 @@ try {
   await waitForExperienceReady(adminPage);
   await adminPage.getByTestId('world-lifecycle-admin').waitFor({ state: 'visible', timeout: 10000 });
 
-  const worlds = await api(adminPage, '/worlds/');
+  const worlds = await api(adminPage, '/worlds/admin/catalogue');
   if (worlds.status !== 200) throw new Error(`world catalogue failed: ${worlds.status}`);
   const fixtureWorld = worlds.body.find((world) => world.name === WORLD_NAME);
   if (!fixtureWorld) throw new Error('G16 lifecycle world fixture missing');
@@ -131,7 +131,7 @@ try {
   const closedJoin = await api(playerPage, `/worlds/${worldId}/join`, { method: 'POST' });
   if (closedJoin.status !== 404) failures.push(`Closed world allowed join/select: ${closedJoin.status}`);
 
-  const closedCatalogue = await api(adminPage, '/worlds/');
+  const closedCatalogue = await api(adminPage, '/worlds/admin/catalogue');
   const closedWorld = closedCatalogue.body.find((world) => Number(world.id) === Number(worldId));
   if (closedWorld?.lifecycle_status !== 'closed' || !closedWorld?.ended_at) {
     failures.push(`Close did not persist terminal metadata: ${JSON.stringify(closedWorld)}`);
@@ -139,7 +139,7 @@ try {
 
   await adminTransition('archived', 'G16 archivar histórico');
 
-  const archivedCatalogue = await api(adminPage, '/worlds/');
+  const archivedCatalogue = await api(adminPage, '/worlds/admin/catalogue');
   const archivedWorld = archivedCatalogue.body.find((world) => Number(world.id) === Number(worldId));
   if (archivedWorld?.lifecycle_status !== 'archived') {
     failures.push(`Archive state not persisted: ${JSON.stringify(archivedWorld)}`);
