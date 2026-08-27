@@ -34,6 +34,13 @@ def require_world_open(db: Session, world_id: int, *, lock: bool = False) -> mod
     return world
 
 
+def require_world_open_http(db: Session, world_id: int, *, lock: bool = False) -> models.World:
+    try:
+        return require_world_open(db, world_id, lock=lock)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="World is not open") from exc
+
+
 def _aware(value):
     if value is None or value.tzinfo is not None:
         return value
