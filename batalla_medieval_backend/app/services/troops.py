@@ -199,7 +199,12 @@ def process_troop_queues(db: Session) -> List[dict]:
     now = utc_now()
     finished_queues = (
         db.query(models.TroopQueue)
-        .filter(models.TroopQueue.finish_time <= now)
+        .join(models.City, models.TroopQueue.city_id == models.City.id)
+        .join(models.World, models.City.world_id == models.World.id)
+        .filter(
+            models.TroopQueue.finish_time <= now,
+            models.World.lifecycle_status == "open",
+        )
         .options(selectinload(models.TroopQueue.city))
         .order_by(models.TroopQueue.id.asc())
         .with_for_update(skip_locked=True)
