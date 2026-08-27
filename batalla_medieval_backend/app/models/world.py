@@ -19,7 +19,7 @@ class World(Base):
     created_at = Column(DateTime, default=get_utc_now)
     # Legacy compatibility flag. BM-0072 makes lifecycle_status authoritative.
     is_active = Column(Boolean, default=True)
-    lifecycle_status = Column(String(16), default="open", nullable=False)
+    lifecycle_status = Column(String(16), default="open", nullable=False, index=True)
     lifecycle_changed_at = Column(DateTime, default=get_utc_now, nullable=False)
     pause_started_at = Column(DateTime, nullable=True)
     ended_at = Column(DateTime, nullable=True)
