@@ -1,7 +1,10 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+WorldLifecycleStatus = Literal["draft", "open", "paused", "closed", "archived"]
 
 
 class WorldWinner(BaseModel):
@@ -21,16 +24,18 @@ class WorldBase(BaseModel):
 
 
 class WorldCreate(WorldBase):
-    # BM-0067 needs room for 8 managed barbarians + 20 oases. Keep this
-    # creation-only constraint while BM-0068 evolves world-scoped heroes.
-    # WorldRead intentionally remains permissive for legacy tiny worlds.
     map_size: int = Field(default=100, ge=10)
+    # Administration may explicitly open a world at creation, but draft is safe.
+    lifecycle_status: Literal["draft", "open"] = "draft"
 
 
 class WorldRead(WorldBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    lifecycle_status: WorldLifecycleStatus
+    lifecycle_changed_at: datetime
+    pause_started_at: Optional[datetime] = None
     created_at: datetime
     ended_at: Optional[datetime] = None
     winner_id: Optional[int] = None
@@ -38,8 +43,13 @@ class WorldRead(WorldBase):
     winner: Optional[WorldWinner] = None
 
 
+class WorldLifecycleTransition(BaseModel):
+    target_status: WorldLifecycleStatus
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 class ActiveWorldSnapshot(BaseModel):
-    """Persisted selector state plus the currently active world catalogue."""
+    """Persisted selector state plus the currently open world catalogue."""
 
     current_world_id: Optional[int] = None
     worlds: list[WorldRead]

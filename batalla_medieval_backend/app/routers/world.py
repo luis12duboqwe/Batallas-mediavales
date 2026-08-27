@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
-from ..services import world_gen, world_membership
+from ..services import world_gen, world_lifecycle, world_membership
 
 router = APIRouter(prefix="/worlds", tags=["worlds"])
 
@@ -27,7 +27,8 @@ def create_world(
         name=payload.name,
         speed_modifier=payload.speed_modifier,
         resource_modifier=payload.resource_modifier,
-        is_active=payload.is_active,
+        is_active=payload.lifecycle_status == "open",
+        lifecycle_status=payload.lifecycle_status,
         special_rules=payload.special_rules,
         map_size=payload.map_size,
     )
@@ -35,6 +36,24 @@ def create_world(
     db.commit()
     db.refresh(world)
     return world
+
+
+@router.patch("/{world_id}/lifecycle", response_model=schemas.WorldRead)
+def transition_world_lifecycle(
+    world_id: int,
+    payload: schemas.WorldLifecycleTransition,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only administrators can transition worlds")
+    return world_lifecycle.transition_world(
+        db,
+        world_id,
+        target_status=payload.target_status,
+        reason=payload.reason,
+        admin_user=current_user,
+    )
 
 
 def _join_or_select_world(
@@ -67,7 +86,7 @@ def join_world(
 def get_active_world(
     db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
 ):
-    worlds = db.query(models.World).filter(models.World.is_active.is_(True)).all()
+    worlds = db.query(models.World).filter(models.World.lifecycle_status == "open").all()
     return {"current_world_id": current_user.world_id, "worlds": worlds}
 
 
