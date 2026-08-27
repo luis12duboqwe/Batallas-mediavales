@@ -25,7 +25,7 @@ def upgrade() -> None:
             """
             UPDATE worlds
             SET lifecycle_status = CASE
-                WHEN is_active = 1 THEN 'open'
+                WHEN is_active THEN 'open'
                 WHEN ended_at IS NOT NULL THEN 'closed'
                 ELSE 'paused'
             END,
@@ -47,7 +47,7 @@ def downgrade() -> None:
         sa.text(
             """
             UPDATE worlds
-            SET is_active = CASE WHEN lifecycle_status = 'open' THEN 1 ELSE 0 END
+            SET is_active = CASE WHEN lifecycle_status = 'open' THEN TRUE ELSE FALSE END
             """
         )
     )
