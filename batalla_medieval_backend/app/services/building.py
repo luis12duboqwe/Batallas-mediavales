@@ -16,7 +16,7 @@ from . import balance
 from . import expansion as expansion_service
 from . import notification as notification_service
 from . import premium as premium_service
-from . import production, quest as quest_service, ranking
+from . import production, quest as quest_service, ranking, world_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,8 @@ def get_available_buildings(db: Session, city: models.City) -> List[dict]:
 
 def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.BuildingQueue:
     """Quote, pay and queue one building target level atomically."""
+
+    world_lifecycle.require_world_open(db, city.world_id)
 
     if building_name not in BUILDING_COSTS:
         raise ValueError(f"Unknown building type: {building_name}")
@@ -383,6 +385,9 @@ def cancel_building_queue(db: Session, queue_id: int, user_id: int) -> bool:
     )
     if not queue_entry:
         return False
+
+    queue_city = db.query(models.City).filter(models.City.id == queue_entry.city_id).one()
+    world_lifecycle.require_world_open(db, queue_city.world_id)
 
     if _as_utc(queue_entry.finish_time) <= _as_utc(utc_now()):
         db.rollback()
