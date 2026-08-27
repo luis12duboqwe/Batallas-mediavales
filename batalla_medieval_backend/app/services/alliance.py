@@ -361,6 +361,7 @@ def promote_member(
     target_member_id: int,
 ) -> models.AllianceMember:
     alliance = get_alliance_or_404(db, alliance_id)
+    world_lifecycle.require_world_open(db, alliance.world_id)
     actor_membership = require_membership(db, alliance.id, actor.id)
     target_membership = (
         db.query(models.AllianceMember)
@@ -391,6 +392,7 @@ def demote_member(
     target_member_id: int,
 ) -> models.AllianceMember:
     alliance = get_alliance_or_404(db, alliance_id)
+    world_lifecycle.require_world_open(db, alliance.world_id)
     actor_membership = require_membership(db, alliance.id, actor.id)
     target_membership = (
         db.query(models.AllianceMember)
@@ -421,6 +423,7 @@ def kick_member(
     target_member_id: int,
 ) -> None:
     alliance = get_alliance_or_404(db, alliance_id)
+    world_lifecycle.require_world_open(db, alliance.world_id)
     actor_membership = require_membership(db, alliance.id, actor.id)
     target_membership = (
         db.query(models.AllianceMember)
@@ -442,7 +445,6 @@ def list_members(
     alliance_id: int,
 ) -> List[schemas.AllianceMemberPublic]:
     alliance = get_alliance_or_404(db, alliance_id)
-    world_lifecycle.require_world_open(db, alliance.world_id)
     memberships = (
         db.query(models.AllianceMember)
         .join(models.User, models.User.id == models.AllianceMember.user_id)
