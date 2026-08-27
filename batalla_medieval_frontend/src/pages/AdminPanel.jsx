@@ -44,7 +44,6 @@ const AdminPanel = () => {
 
   useEffect(() => {
       loadWorlds();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectedLifecycleWorld = worlds.find(world => String(world.id) === String(selectedWorldId));
