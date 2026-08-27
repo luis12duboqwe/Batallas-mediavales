@@ -726,7 +726,12 @@ def resolve_due_movements(db: Session) -> List[models.Movement]:
             selectinload(models.Movement.target_city).selectinload(models.City.buildings),
             selectinload(models.Movement.target_oasis),
         )
-        .filter(models.Movement.arrival_time <= now, models.Movement.status == "ongoing")
+        .join(models.World, models.Movement.world_id == models.World.id)
+        .filter(
+            models.Movement.arrival_time <= now,
+            models.Movement.status == "ongoing",
+            models.World.lifecycle_status == "open",
+        )
         .order_by(models.Movement.id.asc())
         .with_for_update(skip_locked=True)
         .all()
