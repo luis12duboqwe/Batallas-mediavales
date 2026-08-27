@@ -17,6 +17,7 @@ from . import event as event_service
 from . import notification as notification_service
 from . import production
 from . import quest as quest_service
+from . import world_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,7 @@ def send_movement(
 ) -> models.Movement:
     """Validate, reserve and persist a player movement atomically."""
 
+    world_lifecycle.require_world_open(db, origin_city.world_id)
     _validate_target_type(movement_type, target_city_id, target_oasis_id)
     normalized_troops = _normalize_troops(troops)
     normalized_resources = _normalize_resources(resources)
