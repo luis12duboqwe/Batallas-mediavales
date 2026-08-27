@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 
 from app import models
 from app.routers.auth import create_access_token
@@ -127,3 +128,81 @@ def test_invalid_transition_does_not_mutate_world(db_session, user, city):
     db_session.refresh(city.world)
     assert city.world.lifecycle_status == "open"
     assert city.world.is_active is True
+
+
+def test_pause_resume_shifts_pending_world_clocks(db_session, user, city):
+    user.is_admin = True
+    city.world.lifecycle_status = "open"
+    city.world.is_active = True
+    now = city.last_production
+    movement = models.Movement(
+        origin_city_id=city.id,
+        target_city_id=city.id,
+        world_id=city.world_id,
+        movement_type="return",
+        troops={},
+        resources={},
+        arrival_time=now + timedelta(minutes=30),
+        status="ongoing",
+    )
+    build = models.BuildingQueue(
+        city_id=city.id,
+        building_type="warehouse",
+        target_level=2,
+        finish_time=now + timedelta(minutes=40),
+    )
+    db_session.add_all([movement, build])
+    db_session.commit()
+
+    paused = world_lifecycle.transition_world(
+        db_session,
+        city.world_id,
+        target_status="paused",
+        reason="Freeze timers",
+        admin_user=user,
+    )
+    movement_before = movement.arrival_time
+    build_before = build.finish_time
+    production_before = city.last_production
+
+    paused.pause_started_at = paused.pause_started_at - timedelta(minutes=15)
+    db_session.commit()
+
+    reopened = world_lifecycle.transition_world(
+        db_session,
+        city.world_id,
+        target_status="open",
+        reason="Resume timers",
+        admin_user=user,
+    )
+    db_session.refresh(movement)
+    db_session.refresh(build)
+    db_session.refresh(city)
+
+    assert reopened.lifecycle_status == "open"
+    assert movement.arrival_time >= movement_before + timedelta(minutes=15)
+    assert build.finish_time >= build_before + timedelta(minutes=15)
+    assert city.last_production >= production_before + timedelta(minutes=15)
+
+
+def test_paused_world_production_does_not_advance(db_session, user, city):
+    user.is_admin = True
+    city.world.lifecycle_status = "open"
+    city.world.is_active = True
+    db_session.commit()
+    world_lifecycle.transition_world(
+        db_session,
+        city.world_id,
+        target_status="paused",
+        reason="Freeze production",
+        admin_user=user,
+    )
+    db_session.refresh(city)
+    before = (city.wood, city.stone, city.iron, city.gold, city.last_production)
+
+    from app.services import production
+
+    production.recalculate_resources(db_session, city)
+    db_session.refresh(city)
+    after = (city.wood, city.stone, city.iron, city.gold, city.last_production)
+    assert after == before
