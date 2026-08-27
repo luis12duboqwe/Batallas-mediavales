@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..utils import utc_now
-from . import balance, production, unit_catalog
+from . import balance, production, unit_catalog, world_lifecycle
 
 logger = logging.getLogger(__name__)
 REFUND_FACTOR = balance.QUEUE_REFUND_FACTOR
@@ -56,6 +56,8 @@ def queue_research(
     tech_name: str,
 ) -> models.ResearchQueue:
     """Charge and queue one technology without unlocking it early."""
+
+    world_lifecycle.require_world_open(db, city.world_id)
 
     definition = unit_catalog.get_unit(tech_name)
     if not definition["researchable"]:
@@ -210,6 +212,9 @@ def cancel_research_queue(db: Session, queue_id: int, user_id: int) -> bool:
     )
     if queue_entry is None:
         return False
+
+    queue_city = db.query(models.City).filter(models.City.id == queue_entry.city_id).one()
+    world_lifecycle.require_world_open(db, queue_city.world_id)
 
     if _as_utc(queue_entry.finish_time) <= _as_utc(utc_now()):
         db.rollback()
