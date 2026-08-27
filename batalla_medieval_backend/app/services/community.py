@@ -219,7 +219,7 @@ def post_alliance_chat_message(
 
     membership = _current_membership(db, alliance_id, author.id)
     alliance = membership.alliance
-    world_lifecycle.require_world_open(db, alliance.world_id)
+    world_lifecycle.require_world_open_http(db, alliance.world_id)
     if not chat_manager.allow_message(author.id):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
