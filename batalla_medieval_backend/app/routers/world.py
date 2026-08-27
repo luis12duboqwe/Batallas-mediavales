@@ -11,8 +11,23 @@ router = APIRouter(prefix="/worlds", tags=["worlds"])
 
 @router.get("/", response_model=list[schemas.WorldRead])
 def list_worlds(db: Session = Depends(get_db)):
-    # Return all worlds so users can see history/winners
-    return db.query(models.World).order_by(models.World.is_active.desc(), models.World.created_at.desc()).all()
+    # Public catalogue includes playable and historical worlds, never drafts.
+    return (
+        db.query(models.World)
+        .filter(models.World.lifecycle_status != "draft")
+        .order_by(models.World.is_active.desc(), models.World.created_at.desc())
+        .all()
+    )
+
+
+@router.get("/admin/catalogue", response_model=list[schemas.WorldRead])
+def list_admin_worlds(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only administrators can list draft worlds")
+    return db.query(models.World).order_by(models.World.created_at.desc()).all()
 
 
 @router.post("/create", response_model=schemas.WorldRead)
