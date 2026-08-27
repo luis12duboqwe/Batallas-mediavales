@@ -47,21 +47,23 @@ async function login(page, username) {
 }
 
 async function api(page, path, options = {}) {
-  return page.evaluate(async ({ apiUrl, path, options }) => {
-    const token = localStorage.getItem('bm_token');
-    const response = await fetch(`${apiUrl}${path}`, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
-    });
-    const text = await response.text();
-    let body = null;
-    try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-    return { status: response.status, body };
-  }, { apiUrl: API_URL, path, options });
+  const token = await page.evaluate(() => localStorage.getItem('bm_token'));
+  const requestOptions = {
+    method: options.method || 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  };
+  if (options.body) {
+    requestOptions.data = JSON.parse(options.body);
+  }
+  const response = await page.context().request.fetch(`${API_URL}${path}`, requestOptions);
+  const text = await response.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+  return { status: response.status(), body };
 }
 
 async function adminTransition(target, reason) {
@@ -97,7 +99,7 @@ try {
   const worldCard = playerPage.getByTestId(`world-selector-${worldId}`);
   await worldCard.waitFor({ state: 'visible', timeout: 10000 });
   const selectorStatus = await playerPage.getByTestId(`world-status-${worldId}`).innerText();
-  if (selectorStatus.trim() !== 'open') failures.push(`Selector exposed wrong state: ${selectorStatus}`);
+  if (selectorStatus.trim().toLowerCase() !== 'open') failures.push(`Selector exposed wrong state: ${selectorStatus}`);
 
   await worldCard.getByRole('button', { name: 'Unirse' }).click();
   await playerPage.getByText('Mundo activo', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
