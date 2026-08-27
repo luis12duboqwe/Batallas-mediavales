@@ -51,6 +51,7 @@ def transition_world_lifecycle(
         db,
         world_id,
         target_status=payload.target_status,
+        expected_status=payload.expected_status,
         reason=payload.reason,
         admin_user=current_user,
     )
