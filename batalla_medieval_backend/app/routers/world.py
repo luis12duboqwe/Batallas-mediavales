@@ -103,7 +103,9 @@ def get_active_world(
     db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
 ):
     worlds = db.query(models.World).filter(models.World.lifecycle_status == "open").all()
-    return {"current_world_id": current_user.world_id, "worlds": worlds}
+    open_ids = {world.id for world in worlds}
+    current_world_id = current_user.world_id if current_user.world_id in open_ids else None
+    return {"current_world_id": current_world_id, "worlds": worlds}
 
 
 @router.post("/active", response_model=schemas.PlayerWorldRead)
