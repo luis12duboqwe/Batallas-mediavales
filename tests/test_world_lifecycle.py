@@ -206,3 +206,48 @@ def test_paused_world_production_does_not_advance(db_session, user, city):
     db_session.refresh(city)
     after = (city.wood, city.stone, city.iron, city.gold, city.last_production)
     assert after == before
+
+
+def test_due_workers_do_not_resolve_while_world_is_paused(db_session, user, city):
+    from app.services import building, movement
+
+    user.is_admin = True
+    city.world.lifecycle_status = "open"
+    city.world.is_active = True
+    db_session.commit()
+
+    now = city.last_production
+    movement_row = models.Movement(
+        origin_city_id=city.id,
+        target_city_id=city.id,
+        world_id=city.world_id,
+        movement_type="return",
+        troops={},
+        resources={},
+        arrival_time=now - timedelta(seconds=1),
+        status="ongoing",
+    )
+    queue_row = models.BuildingQueue(
+        city_id=city.id,
+        building_type="warehouse",
+        target_level=2,
+        finish_time=now - timedelta(seconds=1),
+    )
+    db_session.add_all([movement_row, queue_row])
+    db_session.commit()
+
+    world_lifecycle.transition_world(
+        db_session,
+        city.world_id,
+        target_status="paused",
+        reason="Worker freeze regression",
+        admin_user=user,
+    )
+
+    assert building.process_building_queues(db_session) == []
+    assert movement.resolve_due_movements(db_session) == []
+
+    db_session.refresh(movement_row)
+    db_session.refresh(queue_row)
+    assert movement_row.status == "ongoing"
+    assert queue_row.id is not None
