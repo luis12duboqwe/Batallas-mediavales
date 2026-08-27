@@ -1,4 +1,5 @@
 import threading
+import time
 
 import pytest
 from fastapi import HTTPException
@@ -77,3 +78,91 @@ def test_concurrent_stale_lifecycle_transitions_only_one_confirms(
         .count()
         == 1
     )
+
+
+def test_pause_waits_for_inflight_world_clock_row_lock(db_session, user, city):
+    user.is_admin = True
+    world = city.world
+    world.lifecycle_status = "open"
+    world.is_active = True
+    movement = models.Movement(
+        origin_city_id=city.id,
+        target_city_id=city.id,
+        world_id=world.id,
+        movement_type="return",
+        troops={},
+        resources={},
+        arrival_time=city.last_production,
+        status="ongoing",
+    )
+    db_session.add(movement)
+    db_session.commit()
+    world_id = world.id
+    user_id = user.id
+    movement_id = movement.id
+
+    locked = threading.Event()
+    release = threading.Event()
+    pause_started = threading.Event()
+    pause_done = threading.Event()
+    errors: list[str] = []
+
+    def hold_worker_row() -> None:
+        session = SessionLocal()
+        try:
+            (
+                session.query(models.Movement)
+                .filter(models.Movement.id == movement_id)
+                .with_for_update()
+                .one()
+            )
+            locked.set()
+            assert release.wait(timeout=5), "Timed out waiting to release worker row"
+            session.commit()
+        except Exception as exc:
+            session.rollback()
+            errors.append(f"holder: {exc}")
+        finally:
+            session.close()
+
+    def pause_world() -> None:
+        session = SessionLocal()
+        try:
+            admin_user = session.query(models.User).filter_by(id=user_id).one()
+            pause_started.set()
+            world_lifecycle.transition_world(
+                session,
+                world_id,
+                target_status="paused",
+                expected_status="open",
+                reason="BM-0072 worker barrier regression",
+                admin_user=admin_user,
+            )
+            pause_done.set()
+        except Exception as exc:
+            session.rollback()
+            errors.append(f"pause: {exc}")
+        finally:
+            session.close()
+
+    holder = threading.Thread(target=hold_worker_row)
+    holder.start()
+    assert locked.wait(timeout=5), "Worker row was not locked"
+
+    pauser = threading.Thread(target=pause_world)
+    pauser.start()
+    assert pause_started.wait(timeout=5), "Pause transition did not start"
+    time.sleep(0.2)
+    assert not pause_done.is_set(), "Pause committed while worker still owned a clock row"
+
+    release.set()
+    holder.join(timeout=10)
+    pauser.join(timeout=10)
+    assert not holder.is_alive()
+    assert not pauser.is_alive()
+    assert errors == []
+    assert pause_done.is_set()
+
+    db_session.expire_all()
+    persisted = db_session.query(models.World).filter_by(id=world_id).one()
+    assert persisted.lifecycle_status == "paused"
