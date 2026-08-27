@@ -187,6 +187,12 @@ export const api = {
   acceptInvitation: (invitationId) => axiosClient.post(`/alliance/invitations/${invitationId}/accept`),
   invitePlayer: (allianceId, userId) => axiosClient.post(`/alliance/${allianceId}/invite`, { user_id: userId }),
   getWorlds: () => axiosClient.get('/worlds/'),
+  transitionWorldLifecycle: (worldId, expectedStatus, targetStatus, reason) =>
+    axiosClient.patch(`/worlds/${worldId}/lifecycle`, {
+      expected_status: expectedStatus,
+      target_status: targetStatus,
+      reason,
+    }),
   getActiveWorld: () => axiosClient.get('/worlds/active'),
   setActiveWorld: (worldId) => axiosClient.post('/worlds/active', { world_id: worldId }),
   joinWorld: (worldId) => axiosClient.post(`/worlds/${worldId}/join`),
