@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 
 from ..database import Base
@@ -19,7 +19,8 @@ class ForumThread(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=get_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=get_utc_now, onupdate=get_utc_now)
 
-    author = relationship("User")
+    author = relationship("User", foreign_keys=[author_id])
+    moderated_by = relationship("User", foreign_keys=[moderated_by_id])
     posts = relationship("ForumPost", back_populates="thread", cascade="all, delete-orphan")
 
 class ForumPost(Base):
@@ -30,6 +31,10 @@ class ForumPost(Base):
     author_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    is_hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    moderation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    moderated_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    moderated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime, default=get_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=get_utc_now, onupdate=get_utc_now)
