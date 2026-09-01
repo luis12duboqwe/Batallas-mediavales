@@ -3,15 +3,15 @@
 Fecha: 2026-08-27  
 Rama: `feature/BM-0072-world-lifecycle`  
 PR: #107  
-HEAD funcional validado: `41e7fd66d9c5f3fc387db9f83a6809db46b5a6a7`  
-Validation: #657 / run `33097455698`
+HEAD funcional validado tras review: `630e0fa2c690d72e686e4049f97a25bda79f4240`  
+Validation: #666 / run `33467484530`
 
 ## Resultado
 
-El corte funcional de BM-0072 quedó completamente verde antes del cierre documental.
+El corte funcional de BM-0072 quedó completamente verde después de atender la revisión final y antes del nuevo cierre documental.
 
 - Frontend: ✅ lint + build.
-- Backend: ✅ 270 passed, 30 skipped, 5 warnings; cobertura total 78%.
+- Backend: ✅ 272 passed, 31 skipped, 5 warnings; cobertura total 78%.
 - Migraciones: ✅ `0015_world_lifecycle` upgrade, seed canónico idempotente, autogenerate check y downgrade.
 - PostgreSQL concurrency: ✅, incluidas transiciones compare-and-set y barrera de pausa frente a workers en curso.
 - Dependency and security audit: ✅.
@@ -69,3 +69,23 @@ G16 comprueba con dos sesiones de navegador:
 ## Nota sobre HEAD final
 
 Este documento y el cambio de estado del plan se versionan después del corte funcional verde. Por política del proyecto, el commit documental resultante también debe pasar Validation completo sobre su SHA exacto antes de quitar Draft/fusionar.
+
+
+## Correcciones de revisión final
+
+Validation #666 cubre cuatro observaciones adicionales encontradas al marcar el PR listo:
+
+1. **Serialización de mutaciones con lifecycle**: el guard de mundo abierto conserva un lock de fila hasta commit; aventuras adquieren el lock del mundo antes que héroe/aventura para evitar mutaciones posteriores a una pausa y evitar inversión de orden de locks.
+2. **Victoria por Maravilla**: completar la Maravilla sincroniza `lifecycle_status="closed"`, `is_active=False`, `lifecycle_changed_at`, `ended_at`, ganador y pausa nula.
+3. **Timestamp efectivo de pausa**: `pause_started_at` se registra después de adquirir la barrera de filas de reloj, por lo que el tiempo esperando a workers no se suma a la duración pausada.
+4. **Lectura individual histórica pura**: `GET /city/{city_id}` no genera progreso de quest cuando el mundo no está abierto o no existen ganancias positivas.
+
+Pruebas añadidas:
+- carrera PostgreSQL pausa ↔ inicio de aventura;
+- timestamp de pausa posterior a la liberación del worker;
+- victoria por Maravilla cerrando el lifecycle canónico;
+- lectura individual de ciudad archivada sin side-effects.
+
+Browser E2E mantuvo G2–G16 verde y G16 volvió a registrar:
+
+`G16 BM-0072 world lifecycle browser journey passed`
