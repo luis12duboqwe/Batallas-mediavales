@@ -83,6 +83,7 @@ from .wiki import (
     WikiArticleUpdate,
 )
 from .chat import ChatMessageRead, ChatMessageCreate
+from .support import SupportCaseAdminUpdate, SupportCaseCreate, SupportCaseRead
 from .map import MapResponse, MapTile
 from .forum import (
     ForumThreadCreate,
@@ -207,6 +208,9 @@ __all__ = [
     "WIKI_CATEGORIES",
     "ChatMessageRead",
     "ChatMessageCreate",
+    "SupportCaseCreate",
+    "SupportCaseAdminUpdate",
+    "SupportCaseRead",
     "ForumThreadCreate",
     "ForumThreadRead",
     "ForumThreadDetail",
