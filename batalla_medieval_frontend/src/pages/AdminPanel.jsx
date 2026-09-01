@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api/axiosClient';
 
 const AdminPanel = () => {
   const [targetCityId, setTargetCityId] = useState('');
   const [message, setMessage] = useState('');
+  const [worlds, setWorlds] = useState([]);
+  const [selectedWorldId, setSelectedWorldId] = useState('');
+  const [lifecycleReason, setLifecycleReason] = useState('');
   
   // Resources
   const [res, setRes] = useState({ wood: 1000, stone: 1000, iron: 1000, gold: 1000 });
@@ -26,6 +29,51 @@ const AdminPanel = () => {
   const [deleteUserId, setDeleteUserId] = useState('');
 
   const log = (msg) => setMessage(prev => prev + '\n' + msg);
+
+  const loadWorlds = async () => {
+      try {
+          const response = await api.adminGetWorlds();
+          setWorlds(response.data || []);
+          if (!selectedWorldId && response.data?.length) {
+              setSelectedWorldId(String(response.data[0].id));
+          }
+      } catch (e) {
+          log('Error al cargar mundos: ' + (e.response?.data?.detail || e.message));
+      }
+  };
+
+  useEffect(() => {
+      loadWorlds();
+  }, []);
+
+  const selectedLifecycleWorld = worlds.find(world => String(world.id) === String(selectedWorldId));
+
+  const transitionWorld = async (targetStatus) => {
+      if (!selectedLifecycleWorld) return log('Selecciona un mundo');
+      if (!lifecycleReason.trim()) return log('El motivo de transición es obligatorio');
+      try {
+          const response = await api.transitionWorldLifecycle(
+              selectedLifecycleWorld.id,
+              selectedLifecycleWorld.lifecycle_status,
+              targetStatus,
+              lifecycleReason.trim(),
+          );
+          log(`Mundo ${selectedLifecycleWorld.id}: ${selectedLifecycleWorld.lifecycle_status} → ${response.data.lifecycle_status}`);
+          setLifecycleReason('');
+          await loadWorlds();
+      } catch (e) {
+          log('Error lifecycle: ' + (e.response?.data?.detail || e.message));
+          await loadWorlds();
+      }
+  };
+
+  const allowedLifecycleTargets = {
+      draft: ['open'],
+      open: ['paused', 'closed'],
+      paused: ['open', 'closed'],
+      closed: ['archived'],
+      archived: [],
+  };
 
   const updateResources = async () => {
       if (!targetCityId) return log('City ID required');
@@ -95,6 +143,52 @@ const AdminPanel = () => {
       <div className="p-6 space-y-8 max-w-6xl mx-auto pb-20">
           <h1 className="text-3xl font-bold text-red-500">Panel de Administración</h1>
           
+          <section className="card bg-gray-900 p-5 border border-amber-700/50" data-testid="world-lifecycle-admin">
+              <div className="flex flex-col md:flex-row md:items-end gap-4">
+                  <div className="flex-1">
+                      <h2 className="text-xl font-bold text-amber-400 mb-3">Ciclo de vida de mundos</h2>
+                      <label className="block text-gray-400 mb-1 text-sm">Mundo</label>
+                      <select
+                          value={selectedWorldId}
+                          onChange={e => setSelectedWorldId(e.target.value)}
+                          className="select w-full bg-black/50 border-gray-600"
+                          data-testid="world-lifecycle-select"
+                      >
+                          {worlds.map(world => (
+                              <option key={world.id} value={world.id}>
+                                  {world.name} — {world.lifecycle_status}
+                              </option>
+                          ))}
+                      </select>
+                  </div>
+                  <div className="flex-1">
+                      <label className="block text-gray-400 mb-1 text-sm">Motivo obligatorio</label>
+                      <input
+                          value={lifecycleReason}
+                          onChange={e => setLifecycleReason(e.target.value)}
+                          className="input w-full bg-black/50 border-gray-600"
+                          placeholder="Motivo de la transición"
+                          data-testid="world-lifecycle-reason"
+                      />
+                  </div>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <span className="badge badge-outline" data-testid="world-lifecycle-current">
+                      Estado: {selectedLifecycleWorld?.lifecycle_status || '—'}
+                  </span>
+                  {(allowedLifecycleTargets[selectedLifecycleWorld?.lifecycle_status] || []).map(target => (
+                      <button
+                          key={target}
+                          onClick={() => transitionWorld(target)}
+                          className="btn btn-sm bg-amber-700 hover:bg-amber-600 text-white border-none"
+                          data-testid={`world-lifecycle-to-${target}`}
+                      >
+                          Cambiar a {target}
+                      </button>
+                  ))}
+              </div>
+          </section>
+
           {/* Target City Selector */}
           <div className="bg-gray-900 p-4 rounded border border-red-900 flex items-center gap-4">
               <div className="flex-1">

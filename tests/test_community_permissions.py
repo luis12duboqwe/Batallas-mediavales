@@ -243,3 +243,55 @@ def test_alliance_chat_rejects_empty_and_oversized_content(db_session, user):
             "x" * (community.MAX_CHAT_MESSAGE_LENGTH + 1),
         )
     assert long_exc.value.status_code == 422
+
+
+def test_paused_world_blocks_community_writes_but_keeps_history_readable(
+    db_session,
+    user,
+):
+    world = db_session.query(models.World).first()
+    world.lifecycle_status = "open"
+    world.is_active = True
+    member_user = models.User(
+        username="community_paused_member",
+        email="community-paused-member@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(member_user)
+    db_session.flush()
+    alliance, _, _ = _make_alliance_with_members(
+        db_session,
+        world,
+        user,
+        member_user,
+    )
+    chat_manager.last_message_at.pop(member_user.id, None)
+    before = community.post_alliance_chat_message(
+        db_session,
+        alliance.id,
+        member_user,
+        "mensaje antes de pausa",
+    )
+
+    world.lifecycle_status = "paused"
+    world.is_active = False
+    db_session.commit()
+    chat_manager.last_message_at.pop(member_user.id, None)
+
+    with pytest.raises(HTTPException) as exc:
+        community.post_alliance_chat_message(
+            db_session,
+            alliance.id,
+            member_user,
+            "mensaje bloqueado",
+        )
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "World is not open"
+
+    history = community.list_alliance_chat_messages(
+        db_session,
+        alliance.id,
+        member_user,
+    )
+    assert [entry.id for entry in history] == [before.id]

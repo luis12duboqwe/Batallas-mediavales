@@ -75,7 +75,7 @@ from .premium import (
     PremiumStatusRead,
     PremiumUseAction,
 )
-from .world import ActiveWorldSnapshot, PlayerWorldRead, WorldCreate, WorldRead, WorldSelect
+from .world import ActiveWorldSnapshot, PlayerWorldRead, WorldCreate, WorldLifecycleTransition, WorldRead, WorldSelect
 from .wiki import (
     WIKI_CATEGORIES,
     WikiArticleCreate,
@@ -195,6 +195,7 @@ __all__ = [
     "MapBookmarkRead",
     "WorldCreate",
     "WorldRead",
+    "WorldLifecycleTransition",
     "WorldSelect",
     "PlayerWorldRead",
     "ActiveWorldSnapshot",

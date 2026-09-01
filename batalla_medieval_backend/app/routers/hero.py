@@ -6,7 +6,7 @@ from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services import hero as hero_service
 from ..services import hero_rules
-from .world_access import require_world_access
+from .world_access import require_open_world_access, require_world_access
 
 router = APIRouter(
     prefix="/hero",
@@ -55,6 +55,7 @@ def distribute_points(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
     try:
         hero = hero_service.get_hero(db, current_user.id, world_id)
@@ -75,6 +76,7 @@ def revive_hero(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
     try:
         hero = hero_service.get_hero(db, current_user.id, world_id)
@@ -102,6 +104,7 @@ def equip_item(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
     try:
         hero = hero_service.get_hero(db, current_user.id, world_id)
@@ -116,6 +119,7 @@ def unequip_item(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
     try:
         hero = hero_service.get_hero(db, current_user.id, world_id)

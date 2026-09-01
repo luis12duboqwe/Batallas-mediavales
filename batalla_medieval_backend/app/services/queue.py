@@ -65,7 +65,16 @@ def _settle_due_training_economy(
     now = utc_now()
     due_queues = (
         db.query(models.TroopQueue)
-        .filter(models.TroopQueue.finish_time <= now)
+        .filter(
+            models.TroopQueue.finish_time <= now,
+            models.TroopQueue.city_id.in_(
+                db.query(models.City.id).filter(
+                    models.City.world_id.in_(
+                        db.query(models.World.id).filter(models.World.lifecycle_status == "open")
+                    )
+                )
+            ),
+        )
         .order_by(models.TroopQueue.id.asc())
         .with_for_update(skip_locked=True)
         .all()
@@ -89,6 +98,9 @@ def _settle_due_movement_economy(
         .filter(
             models.Movement.arrival_time <= now,
             models.Movement.status == "ongoing",
+            models.Movement.world_id.in_(
+                db.query(models.World.id).filter(models.World.lifecycle_status == "open")
+            ),
         )
         .order_by(models.Movement.id.asc())
         .with_for_update(skip_locked=True)

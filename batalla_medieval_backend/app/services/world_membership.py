@@ -56,12 +56,16 @@ def require_world_membership(
 def _get_locked_active_world(db: Session, world_id: int) -> models.World:
     world = (
         db.query(models.World)
-        .filter(models.World.id == world_id, models.World.is_active.is_(True))
+        .filter(
+            models.World.id == world_id,
+            models.World.lifecycle_status == "open",
+            models.World.is_active.is_(True),
+        )
         .with_for_update()
         .one_or_none()
     )
     if world is None:
-        raise WorldNotAvailableError("World not found or inactive")
+        raise WorldNotAvailableError("World not found or not open")
     return world
 
 

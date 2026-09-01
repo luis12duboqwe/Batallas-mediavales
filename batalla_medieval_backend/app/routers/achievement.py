@@ -5,7 +5,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services import achievement as achievement_service
-from .world_access import require_world_access
+from .world_access import require_open_world_access, require_world_access
 
 router = APIRouter(prefix="/achievement", tags=["achievement"])
 
@@ -34,6 +34,7 @@ def claim_achievement(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
     _: models.PlayerWorld = Depends(require_world_access),
+    _open: models.PlayerWorld = Depends(require_open_world_access),
 ):
     progress = achievement_service.claim_achievement(
         db,

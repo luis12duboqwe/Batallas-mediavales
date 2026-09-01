@@ -31,7 +31,11 @@ def _lock_membership(db: Session, *, user_id: int, world_id: int) -> models.Play
 def _lock_active_world(db: Session, world_id: int) -> models.World:
     world = (
         db.query(models.World)
-        .filter(models.World.id == world_id, models.World.is_active.is_(True))
+        .filter(
+            models.World.id == world_id,
+            models.World.lifecycle_status == "open",
+            models.World.is_active.is_(True),
+        )
         .with_for_update()
         .one_or_none()
     )

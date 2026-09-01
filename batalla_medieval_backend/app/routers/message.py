@@ -6,7 +6,7 @@ from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services import notification as notification_service
 from ..services import premium as premium_service
-from ..services import social_privacy
+from ..services import social_privacy, world_lifecycle
 
 router = APIRouter(tags=["message"])
 
@@ -105,6 +105,10 @@ def send_message(
     current_user: models.User = Depends(get_current_user),
 ):
     world_id = _active_world_id(db, current_user)
+    try:
+        world_lifecycle.require_world_open(db, world_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="World is not open") from exc
     receiver = db.query(models.User).filter(models.User.id == payload.receiver_id).first()
     if not receiver:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receiver not found")

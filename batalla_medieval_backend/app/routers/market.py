@@ -8,7 +8,7 @@ from ..database import get_db
 from ..routers.auth import get_current_user
 from ..routers.responses import error_response
 from ..services import market
-from .world_access import require_world_access
+from .world_access import require_open_world_access, require_world_access
 
 router = APIRouter(dependencies=[Depends(require_world_access)])
 
@@ -36,6 +36,7 @@ def create_offer(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
     city = get_city_or_404(db, city_id, current_user, world_id)
     return market.create_offer(db, city, payload)
@@ -63,6 +64,7 @@ def npc_trade(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
     city = get_city_or_404(db, city_id, current_user, world_id)
     return market.npc_trade(db, city, offer_type, request_type, amount)
@@ -75,6 +77,7 @@ def accept_offer(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
     city = get_city_or_404(db, city_id, current_user, world_id)
     market.accept_offer(db, city, offer_id)
@@ -88,6 +91,7 @@ def cancel_offer(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
     city = get_city_or_404(db, city_id, current_user, world_id)
     market.cancel_offer(db, city, offer_id)
@@ -101,6 +105,7 @@ def send_resources(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
     city = get_city_or_404(db, city_id, current_user, world_id)
     market.send_resources(db, city, payload)

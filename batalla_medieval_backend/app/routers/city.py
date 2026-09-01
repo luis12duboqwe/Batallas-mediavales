@@ -50,7 +50,8 @@ def list_cities(
     )
     for city in cities:
         city, gains = production.recalculate_resources(db, city, return_gains=True)
-        quest_service.handle_event(db, current_user, "resources_collected", gains)
+        if getattr(city.world, "lifecycle_status", "open") == "open" and any(float(value) > 0 for value in gains.values()):
+            quest_service.handle_event(db, current_user, "resources_collected", gains)
         _decorate_population_capacity(city)
         city.is_protected = protection.is_user_protected(city.owner)
     return cities
@@ -75,7 +76,8 @@ def get_city(
     if not city:
         raise HTTPException(status_code=404, detail="City not found")
     city, gains = production.recalculate_resources(db, city, return_gains=True)
-    quest_service.handle_event(db, current_user, "resources_collected", gains)
+    if getattr(city.world, "lifecycle_status", "open") == "open" and any(float(value) > 0 for value in gains.values()):
+        quest_service.handle_event(db, current_user, "resources_collected", gains)
     _decorate_population_capacity(city)
     city.is_protected = protection.is_user_protected(city.owner)
     return city

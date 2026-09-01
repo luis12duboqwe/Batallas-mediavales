@@ -375,3 +375,32 @@ def test_expansion_status_is_world_scoped(db_session, user, city):
     assert status["city_count"] == 1
     assert status["camp_count"] == 1
     assert status["point_costs"] == balance.SETTLEMENT_EXPANSION_POINT_COSTS
+
+
+def test_world_wonder_victory_closes_canonical_lifecycle(db_session, user, city):
+    city.world.lifecycle_status = "open"
+    city.world.is_active = True
+    maximum = balance.get_building_max_level("world_wonder")
+    wonder = models.Building(
+        city_id=city.id,
+        name="world_wonder",
+        level=maximum - 1,
+    )
+    queue = models.BuildingQueue(
+        city_id=city.id,
+        building_type="world_wonder",
+        target_level=maximum,
+        finish_time=utc_now() - timedelta(seconds=1),
+        paid_cost={},
+    )
+    db_session.add_all([wonder, queue])
+    db_session.commit()
+
+    finished = building.process_building_queues(db_session)
+    assert len(finished) == 1
+
+    db_session.refresh(city.world)
+    assert city.world.lifecycle_status == "closed"
+    assert city.world.is_active is False
+    assert city.world.ended_at is not None
+    assert city.world.winner_id == user.id

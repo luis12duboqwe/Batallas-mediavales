@@ -6,7 +6,7 @@ from ..database import get_db
 from ..routers.auth import get_current_user
 from ..services import adventure as adventure_service
 from ..services import hero as hero_service
-from .world_access import require_world_access
+from .world_access import require_open_world_access, require_world_access
 
 router = APIRouter(
     prefix="/adventure",
@@ -35,6 +35,7 @@ def start_adventure(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
     try:
         hero = hero_service.get_hero(db, current_user.id, world_id)
@@ -49,6 +50,7 @@ def claim_adventure(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
     try:
         hero = hero_service.get_hero(db, current_user.id, world_id)

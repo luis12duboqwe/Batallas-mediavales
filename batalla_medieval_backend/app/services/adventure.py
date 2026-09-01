@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..utils import utc_now
-from . import balance, hero as hero_service, hero_rules, production
+from . import balance, hero as hero_service, hero_rules, production, world_lifecycle
 
 # Compatibility alias for older imports/tests. Canonical numbers live in hero_rules.
 DIFFICULTY_CONFIG = hero_rules.ADVENTURE_CONFIG
@@ -76,7 +76,12 @@ def get_adventures(db: Session, hero_id: int) -> list[models.Adventure]:
 
 
 def start_adventure(db: Session, adventure_id: int, hero: models.Hero) -> models.Adventure:
-    """Start one adventure under a hero/adventure lock and persist its seed."""
+    """Start one adventure under a world-first hero/adventure lock order."""
+
+    # Lifecycle lock must be acquired before domain rows. A pause transition
+    # locks the world first and then clock rows, so this shared order prevents
+    # both late mutations after pause and lock-order deadlocks.
+    world_lifecycle.require_world_open(db, hero.world_id, lock=True)
 
     locked_hero = (
         db.query(models.Hero)
@@ -187,6 +192,8 @@ def _item_loot(db: Session, hero: models.Hero, seeded: random.Random) -> dict[st
 
 def claim_adventure(db: Session, adventure_id: int, hero: models.Hero) -> dict[str, Any]:
     """Resolve and pay an adventure once; committed retries replay stored result."""
+
+    world_lifecycle.require_world_open(db, hero.world_id, lock=True)
 
     locked_hero = (
         db.query(models.Hero)
