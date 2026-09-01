@@ -328,9 +328,13 @@ def process_building_queues(db: Session) -> List[dict]:
                 .with_for_update()
                 .one_or_none()
             )
-            if world and world.is_active:
+            if world and world_lifecycle.status_of(world) == "open":
                 world.is_active = False
-                world.ended_at = now
+                world.lifecycle_status = "closed"
+                world.lifecycle_changed_at = now
+                world.pause_started_at = None
+                if world.ended_at is None:
+                    world.ended_at = now
                 world.winner_id = city.owner_id
                 world_won = True
 
