@@ -4,7 +4,7 @@
 
 Cerrado funcionalmente. Rama: `feature/BM-0072-world-lifecycle`.
 
-Evidencia previa al cierre documental: Validation #657 completamente verde sobre `41e7fd66d9c5f3fc387db9f83a6809db46b5a6a7`. El HEAD documental final debe volver a pasar CI completo antes de fusionar.  
+Evidencia funcional vigente tras review: Validation #666 completamente verde sobre `630e0fa2c690d72e686e4049f97a25bda79f4240`. El HEAD documental final debe volver a pasar CI completo antes de fusionar.
 Base: `main` en `422125bde8b7e62d115ea17d8c142f150acba11d`.
 
 ## Objetivo
