@@ -251,3 +251,25 @@ def test_due_workers_do_not_resolve_while_world_is_paused(db_session, user, city
     db_session.refresh(queue_row)
     assert movement_row.status == "ongoing"
     assert queue_row.id is not None
+
+
+def test_single_historical_city_read_has_no_quest_side_effect(
+    db_session, user, city, monkeypatch
+):
+    from app.routers import city as city_router
+
+    city.world.lifecycle_status = "archived"
+    city.world.is_active = False
+    db_session.commit()
+
+    def unexpected_event(*args, **kwargs):
+        raise AssertionError("historical city read attempted to write quest progress")
+
+    monkeypatch.setattr(city_router.quest_service, "handle_event", unexpected_event)
+    result = city_router.get_city(
+        city.id,
+        city.world_id,
+        db_session,
+        user,
+    )
+    assert result.id == city.id
