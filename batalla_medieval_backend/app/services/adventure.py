@@ -76,7 +76,12 @@ def get_adventures(db: Session, hero_id: int) -> list[models.Adventure]:
 
 
 def start_adventure(db: Session, adventure_id: int, hero: models.Hero) -> models.Adventure:
-    """Start one adventure under a hero/adventure lock and persist its seed."""
+    """Start one adventure under a world-first hero/adventure lock order."""
+
+    # Lifecycle lock must be acquired before domain rows. A pause transition
+    # locks the world first and then clock rows, so this shared order prevents
+    # both late mutations after pause and lock-order deadlocks.
+    world_lifecycle.require_world_open(db, hero.world_id, lock=True)
 
     locked_hero = (
         db.query(models.Hero)
@@ -117,7 +122,6 @@ def start_adventure(db: Session, adventure_id: int, hero: models.Hero) -> models
         db.rollback()
         raise ValueError("Hero already has an active adventure")
 
-    world_lifecycle.require_world_open(db, locked_hero.world_id)
     started_at = utc_now()
     adv.started_at = started_at
     adv.status = "active"
@@ -189,6 +193,8 @@ def _item_loot(db: Session, hero: models.Hero, seeded: random.Random) -> dict[st
 def claim_adventure(db: Session, adventure_id: int, hero: models.Hero) -> dict[str, Any]:
     """Resolve and pay an adventure once; committed retries replay stored result."""
 
+    world_lifecycle.require_world_open(db, hero.world_id, lock=True)
+
     locked_hero = (
         db.query(models.Hero)
         .filter(models.Hero.id == hero.id, models.Hero.world_id == hero.world_id)
@@ -208,7 +214,6 @@ def claim_adventure(db: Session, adventure_id: int, hero: models.Hero) -> dict[s
         raise ValueError("Adventure not found")
     if adv.result is not None and adv.status in {"completed", "failed"}:
         return deepcopy(adv.result)
-    world_lifecycle.require_world_open(db, locked_hero.world_id)
     if adv.status != "active":
         db.rollback()
         raise ValueError("Adventure not active")
