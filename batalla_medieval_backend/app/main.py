@@ -37,6 +37,7 @@ from .routers import (
     forum,
     adventure,
     tutorial,
+    support,
 )
 
 settings = get_settings()
@@ -90,6 +91,7 @@ app.include_router(public_api.router, prefix="/public-api", tags=["Public API"])
 # /queue/queue/* and breaks the frontend contract.
 app.include_router(queue.router)
 app.include_router(world.router)
+app.include_router(support.router)
 
 # G1 administration/moderation surface. Both routers own their prefixes and
 # enforce administrator authorization internally.

@@ -19,6 +19,7 @@ class User(Base):
     last_active_at: Mapped[datetime] = mapped_column(default=get_utc_now)
     protection_ends_at: Mapped[Optional[datetime]]
     is_admin: Mapped[bool] = mapped_column(default=False)
+    admin_role: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     rubies_balance: Mapped[int] = mapped_column(default=0)
     is_frozen: Mapped[bool] = mapped_column(default=False)
     email_notifications: Mapped[bool] = mapped_column(default=False)

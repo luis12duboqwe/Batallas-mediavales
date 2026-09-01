@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -17,9 +17,14 @@ class ChatMessage(Base):
     channel = Column(String, nullable=False)
     receiver_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     content = Column(Text, nullable=False)
+    is_hidden = Column(Boolean, default=False, nullable=False)
+    moderation_reason = Column(Text, nullable=True)
+    moderated_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    moderated_at = Column(DateTime, nullable=True)
     timestamp = Column(DateTime, default=get_utc_now)
 
     user = relationship("User", foreign_keys=[user_id])
     receiver = relationship("User", foreign_keys=[receiver_id])
+    moderated_by = relationship("User", foreign_keys=[moderated_by_id])
     world = relationship("World")
     alliance = relationship("Alliance")

@@ -8,8 +8,32 @@ from .. import models, schemas
 from . import balance, production, ranking
 
 
-def log_action(db: Session, user_id: int, action: str, details: Dict) -> models.Log:
-    log_entry = models.Log(user_id=user_id, action=action, details=json.dumps(details))
+def log_action(
+    db: Session,
+    user_id: int,
+    action: str,
+    details: Dict,
+    *,
+    target_type: str | None = None,
+    target_id: int | None = None,
+    reason: str | None = None,
+    before_state: Dict | None = None,
+    after_state: Dict | None = None,
+    reversible: bool = False,
+    support_case_id: int | None = None,
+) -> models.Log:
+    log_entry = models.Log(
+        user_id=user_id,
+        action=action,
+        details=json.dumps(details, sort_keys=True),
+        target_type=target_type,
+        target_id=target_id,
+        reason=reason,
+        before_state=json.dumps(before_state, sort_keys=True) if before_state is not None else None,
+        after_state=json.dumps(after_state, sort_keys=True) if after_state is not None else None,
+        reversible=bool(reversible),
+        support_case_id=support_case_id,
+    )
     db.add(log_entry)
     return log_entry
 
