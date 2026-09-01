@@ -21,7 +21,7 @@ ALLOWED_TRANSITIONS = {
 }
 
 
-def require_world_open(db: Session, world_id: int, *, lock: bool = False) -> models.World:
+def require_world_open(db: Session, world_id: int, *, lock: bool = True) -> models.World:
     query = db.query(models.World).filter(
         models.World.id == world_id,
         models.World.lifecycle_status == "open",
@@ -35,7 +35,7 @@ def require_world_open(db: Session, world_id: int, *, lock: bool = False) -> mod
     return world
 
 
-def require_world_open_http(db: Session, world_id: int, *, lock: bool = False) -> models.World:
+def require_world_open_http(db: Session, world_id: int, *, lock: bool = True) -> models.World:
     try:
         return require_world_open(db, world_id, lock=lock)
     except ValueError as exc:
@@ -168,9 +168,11 @@ def transition_world(
         if target_status == "paused":
             # Establish a hard pause barrier. If a worker already owns one of
             # these rows, this transition waits for it to finish before the
-            # paused state can commit. If the transition wins first, later
-            # workers see a non-open world and skip the rows.
+            # paused state can commit. Record the effective pause timestamp
+            # only after the barrier has been acquired so pre-commit wait time
+            # is never counted as paused gameplay time.
             _lock_world_clock_rows(db, world)
+            now = utc_now()
             world.pause_started_at = now
         elif target_status == "open":
             pause_started_at = _aware(world.pause_started_at)
