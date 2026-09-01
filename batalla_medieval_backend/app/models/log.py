@@ -25,4 +25,5 @@ class Log(Base):
     support_case_id = Column(Integer, ForeignKey("support_cases.id"), nullable=True, index=True)
     timestamp = Column(DateTime, default=get_utc_now)
 
-    user = relationship("User", back_populates="logs")
+    user = relationship("User", back_populates="logs", foreign_keys=[user_id])
+    reversed_by = relationship("User", foreign_keys=[reversed_by_id])
