@@ -41,7 +41,7 @@ def require_open_world_access(
 
     membership = require_world_access(world_id, db, current_user)
     try:
-        world_lifecycle.require_world_open(db, world_id)
+        world_lifecycle.require_world_open(db, world_id, lock=True)
     except ValueError as exc:
         raise error_response(
             409,
