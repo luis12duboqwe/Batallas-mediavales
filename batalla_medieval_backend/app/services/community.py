@@ -248,7 +248,7 @@ def list_alliance_chat_messages(
     *,
     limit: int = 100,
 ) -> list[models.ChatMessage]:
-    """Read the canonical alliance chat only for a current member."""
+    """Read visible canonical alliance chat only for a current member."""
 
     membership = _current_membership(db, alliance_id, viewer.id)
     alliance = membership.alliance
@@ -259,6 +259,7 @@ def list_alliance_chat_messages(
             models.ChatMessage.world_id == alliance.world_id,
             models.ChatMessage.alliance_id == alliance.id,
             models.ChatMessage.channel == "alliance",
+            models.ChatMessage.is_hidden.is_(False),
         )
         .order_by(models.ChatMessage.timestamp.desc())
         .limit(safe_limit)
