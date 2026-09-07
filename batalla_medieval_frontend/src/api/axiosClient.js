@@ -207,14 +207,8 @@ export const api = {
   // Themes
   getThemes: () => axiosClient.get('/theme/'),
 
-  // Admin
-  adminUpdateResources: (cityId, resources) => axiosClient.patch(`/admin/city/${cityId}/resources`, resources),
-  adminSetBuildingLevel: (cityId, buildingType, level) => axiosClient.patch(`/admin/city/${cityId}/building/${buildingType}`, { new_level: level }),
-  adminSetTroops: (cityId, troops) => axiosClient.patch(`/admin/city/${cityId}/troops`, { troops }),
-  adminCreateCity: (data) => axiosClient.post('/admin/city/create', data),
-  adminTeleportCity: (cityId, x, y) => axiosClient.patch(`/admin/city/${cityId}/coordinates`, { x, y }),
-  adminDeleteUser: (userId) => axiosClient.delete(`/admin/user/${userId}`),
-  adminDeleteCity: (cityId) => axiosClient.delete(`/admin/city/${cityId}`),
+  // Sensitive BM-0073 admin operations intentionally have no generic helpers:
+  // callers must construct explicit reasoned payloads at the administrative surface.
 
   // Troops
   getAvailableUnits: (cityId, worldId) =>
