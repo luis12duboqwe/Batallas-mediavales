@@ -54,6 +54,7 @@ def flag_violation(
                 models.AntiCheatFlag.user_id == user_id,
                 models.AntiCheatFlag.type_of_violation == violation_type,
                 models.AntiCheatFlag.severity == severity,
+                models.AntiCheatFlag.details == details,
                 models.AntiCheatFlag.resolved_status == "pending",
                 models.AntiCheatFlag.timestamp >= cutoff,
             )

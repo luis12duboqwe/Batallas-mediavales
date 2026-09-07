@@ -70,6 +70,40 @@ def test_multiaccount_signal_never_sanctions_automatically(db_session):
     assert flag.resolved_status == "pending"
 
 
+def test_distinct_evidence_is_not_collapsed_by_deduplication(db_session):
+    player = _user(db_session, "bm74_distinct_evidence")
+    first = anticheat.flag_violation(
+        db_session,
+        player,
+        "fake_attack",
+        "critical",
+        "Impossible timing toward city 10",
+    )
+    second = anticheat.flag_violation(
+        db_session,
+        player,
+        "fake_attack",
+        "critical",
+        "Impossible timing toward city 11",
+    )
+    duplicate = anticheat.flag_violation(
+        db_session,
+        player,
+        "fake_attack",
+        "critical",
+        "Impossible timing toward city 11",
+    )
+
+    assert first.id != second.id
+    assert duplicate.id == second.id
+    assert (
+        db_session.query(models.AntiCheatFlag)
+        .filter_by(user_id=player.id, type_of_violation="fake_attack")
+        .count()
+        == 2
+    )
+
+
 def test_review_state_is_server_owned_and_reasoned(client, db_session):
     admin = _user(db_session, "bm74_review_admin", admin=True)
     player = _user(db_session, "bm74_review_player")
@@ -101,7 +135,7 @@ def test_review_state_is_server_owned_and_reasoned(client, db_session):
     assert body["resolution_reason"] == "Evidence does not support a violation"
 
 
-def test_flag_queue_supports_operational_filters(client, db_session):
+def test_flag_queue_supports_operational_filters_and_pagination(client, db_session):
     admin = _user(db_session, "bm74_filter_admin", admin=True)
     one = _user(db_session, "bm74_filter_one")
     two = _user(db_session, "bm74_filter_two")
@@ -111,8 +145,29 @@ def test_flag_queue_supports_operational_filters(client, db_session):
     filtered = client.get(
         "/anticheat/flags",
         headers=_headers(admin),
-        params={"user_id": one.id, "severity": "critical", "resolved_status": "pending", "limit": 10},
+        params={
+            "user_id": one.id,
+            "severity": "critical",
+            "resolved_status": "pending",
+            "limit": 10,
+        },
     )
     assert filtered.status_code == 200, filtered.text
     assert len(filtered.json()) == 1
     assert filtered.json()[0]["user_id"] == one.id
+
+    first_page = client.get(
+        "/anticheat/flags",
+        headers=_headers(admin),
+        params={"skip": 0, "limit": 1},
+    )
+    second_page = client.get(
+        "/anticheat/flags",
+        headers=_headers(admin),
+        params={"skip": 1, "limit": 1},
+    )
+    assert first_page.status_code == 200, first_page.text
+    assert second_page.status_code == 200, second_page.text
+    assert len(first_page.json()) == 1
+    assert len(second_page.json()) == 1
+    assert first_page.json()[0]["id"] != second_page.json()[0]["id"]

@@ -17,6 +17,7 @@ def list_flags(
     severity: str | None = None,
     resolved_status: str | None = None,
     violation_type: str | None = None,
+    skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(
@@ -32,7 +33,15 @@ def list_flags(
         query = query.filter(models.AntiCheatFlag.resolved_status == resolved_status)
     if violation_type is not None:
         query = query.filter(models.AntiCheatFlag.type_of_violation == violation_type)
-    return query.order_by(models.AntiCheatFlag.timestamp.desc(), models.AntiCheatFlag.id.desc()).limit(limit).all()
+    return (
+        query.order_by(
+            models.AntiCheatFlag.timestamp.desc(),
+            models.AntiCheatFlag.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.patch("/resolve/{flag_id}", response_model=anticheat_schema.AntiCheatFlagRead)
