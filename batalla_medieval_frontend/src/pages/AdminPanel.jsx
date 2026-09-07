@@ -1,302 +1,362 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api/axiosClient';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import axiosClient, { api } from '../api/axiosClient';
+
+const errorDetail = (error) => error?.response?.data?.detail || error?.message || 'Error desconocido';
 
 const AdminPanel = () => {
-  const [targetCityId, setTargetCityId] = useState('');
   const [message, setMessage] = useState('');
   const [worlds, setWorlds] = useState([]);
   const [selectedWorldId, setSelectedWorldId] = useState('');
   const [lifecycleReason, setLifecycleReason] = useState('');
-  
-  // Resources
-  const [res, setRes] = useState({ wood: 1000, stone: 1000, iron: 1000, gold: 1000 });
-  
-  // Building
-  const [buildType, setBuildType] = useState('town_hall');
-  const [buildLevel, setBuildLevel] = useState(10);
-  
-  // Troops
-  const [troopType, setTroopType] = useState('basic_infantry');
-  const [troopAmount, setTroopAmount] = useState(100);
+  const [reason, setReason] = useState('');
+  const [supportCaseId, setSupportCaseId] = useState('');
+  const [logs, setLogs] = useState([]);
+  const [supportCases, setSupportCases] = useState([]);
 
-  // Teleport
+  const [targetCityId, setTargetCityId] = useState('');
+  const [resources, setResources] = useState({ wood: 1000, stone: 1000, iron: 1000, gold: 1000 });
+  const [buildingType, setBuildingType] = useState('town_hall');
+  const [buildingLevel, setBuildingLevel] = useState(1);
+  const [troopType, setTroopType] = useState('basic_infantry');
+  const [troopAmount, setTroopAmount] = useState(0);
   const [coords, setCoords] = useState({ x: 0, y: 0 });
 
-  // Create City
-  const [newCity, setNewCity] = useState({ owner_id: '', world_id: '', name: 'New City', x: 0, y: 0 });
+  const [targetUserId, setTargetUserId] = useState('');
+  const [adminRole, setAdminRole] = useState('support');
+  const [moderationKind, setModerationKind] = useState('chat');
+  const [moderationTargetId, setModerationTargetId] = useState('');
 
-  // Delete User
-  const [deleteUserId, setDeleteUserId] = useState('');
-
-  const log = (msg) => setMessage(prev => prev + '\n' + msg);
-
-  const loadWorlds = async () => {
-      try {
-          const response = await api.adminGetWorlds();
-          setWorlds(response.data || []);
-          if (!selectedWorldId && response.data?.length) {
-              setSelectedWorldId(String(response.data[0].id));
-          }
-      } catch (e) {
-          log('Error al cargar mundos: ' + (e.response?.data?.detail || e.message));
-      }
-  };
-
-  useEffect(() => {
-      loadWorlds();
+  const log = useCallback((text) => {
+    setMessage((previous) => `${previous}${previous ? '\n' : ''}${text}`);
   }, []);
 
-  const selectedLifecycleWorld = worlds.find(world => String(world.id) === String(selectedWorldId));
+  const commonPayload = useCallback(() => ({
+    reason: reason.trim(),
+    ...(supportCaseId ? { support_case_id: Number(supportCaseId) } : {}),
+  }), [reason, supportCaseId]);
 
-  const transitionWorld = async (targetStatus) => {
-      if (!selectedLifecycleWorld) return log('Selecciona un mundo');
-      if (!lifecycleReason.trim()) return log('El motivo de transición es obligatorio');
-      try {
-          const response = await api.transitionWorldLifecycle(
-              selectedLifecycleWorld.id,
-              selectedLifecycleWorld.lifecycle_status,
-              targetStatus,
-              lifecycleReason.trim(),
-          );
-          log(`Mundo ${selectedLifecycleWorld.id}: ${selectedLifecycleWorld.lifecycle_status} → ${response.data.lifecycle_status}`);
-          setLifecycleReason('');
-          await loadWorlds();
-      } catch (e) {
-          log('Error lifecycle: ' + (e.response?.data?.detail || e.message));
-          await loadWorlds();
-      }
+  const requireReason = () => {
+    if (reason.trim()) return true;
+    log('El motivo administrativo es obligatorio.');
+    return false;
   };
+
+  const loadWorlds = useCallback(async () => {
+    try {
+      const response = await api.adminGetWorlds();
+      const rows = response.data || [];
+      setWorlds(rows);
+      setSelectedWorldId((current) => current || (rows[0] ? String(rows[0].id) : ''));
+    } catch (error) {
+      log(`Mundos: ${errorDetail(error)}`);
+    }
+  }, [log]);
+
+  const loadOperationalData = useCallback(async () => {
+    const [logResult, caseResult] = await Promise.allSettled([
+      axiosClient.get('/admin/logs', { params: { limit: 50 } }),
+      axiosClient.get('/support/admin/cases', { params: { limit: 50 } }),
+    ]);
+    if (logResult.status === 'fulfilled') setLogs(logResult.value.data || []);
+    if (caseResult.status === 'fulfilled') setSupportCases(caseResult.value.data || []);
+  }, []);
+
+  useEffect(() => {
+    loadWorlds();
+    loadOperationalData();
+  }, [loadWorlds, loadOperationalData]);
+
+  const selectedLifecycleWorld = useMemo(
+    () => worlds.find((world) => String(world.id) === String(selectedWorldId)),
+    [worlds, selectedWorldId],
+  );
 
   const allowedLifecycleTargets = {
-      draft: ['open'],
-      open: ['paused', 'closed'],
-      paused: ['open', 'closed'],
-      closed: ['archived'],
-      archived: [],
+    draft: ['open'],
+    open: ['paused', 'closed'],
+    paused: ['open', 'closed'],
+    closed: ['archived'],
+    archived: [],
   };
 
-  const updateResources = async () => {
-      if (!targetCityId) return log('City ID required');
-      try {
-          await api.adminUpdateResources(targetCityId, res);
-          log(`Resources updated for city ${targetCityId}`);
-      } catch (e) { log('Error: ' + (e.response?.data?.detail || e.message)); }
+  const transitionWorld = async (targetStatus) => {
+    if (!selectedLifecycleWorld) return log('Selecciona un mundo.');
+    if (!lifecycleReason.trim()) return log('El motivo de transición es obligatorio.');
+    try {
+      const response = await api.transitionWorldLifecycle(
+        selectedLifecycleWorld.id,
+        selectedLifecycleWorld.lifecycle_status,
+        targetStatus,
+        lifecycleReason.trim(),
+      );
+      log(`Mundo ${selectedLifecycleWorld.id}: ${selectedLifecycleWorld.lifecycle_status} → ${response.data.lifecycle_status}`);
+      setLifecycleReason('');
+      await Promise.all([loadWorlds(), loadOperationalData()]);
+    } catch (error) {
+      log(`Lifecycle: ${errorDetail(error)}`);
+      await loadWorlds();
+    }
   };
 
-  const setBuildingLevel = async () => {
-      if (!targetCityId) return log('City ID required');
-      try {
-          await api.adminSetBuildingLevel(targetCityId, buildType, buildLevel);
-          log(`Building ${buildType} set to ${buildLevel} for city ${targetCityId}`);
-      } catch (e) { log('Error: ' + (e.response?.data?.detail || e.message)); }
+  const runAdminAction = async (label, action) => {
+    if (!requireReason()) return;
+    try {
+      await action();
+      log(`${label}: operación registrada y auditada.`);
+      await loadOperationalData();
+    } catch (error) {
+      log(`${label}: ${errorDetail(error)}`);
+    }
   };
 
-  const setTroops = async () => {
-      if (!targetCityId) return log('City ID required');
-      try {
-          await api.adminSetTroops(targetCityId, { [troopType]: troopAmount });
-          log(`Troops ${troopType} set to ${troopAmount} for city ${targetCityId}`);
-      } catch (e) { log('Error: ' + (e.response?.data?.detail || e.message)); }
+  const updateResources = () => {
+    if (!targetCityId) return log('ID de ciudad obligatorio.');
+    return runAdminAction('Recursos', () => axiosClient.patch(
+      `/admin/city/${targetCityId}/resources`,
+      { ...resources, ...commonPayload() },
+    ));
   };
 
-  const teleportCity = async () => {
-      if (!targetCityId) return log('City ID required');
-      try {
-          await api.adminTeleportCity(targetCityId, coords.x, coords.y);
-          log(`City ${targetCityId} teleported to (${coords.x}, ${coords.y})`);
-      } catch (e) { log('Error: ' + (e.response?.data?.detail || e.message)); }
+  const setBuildingLevel = () => {
+    if (!targetCityId) return log('ID de ciudad obligatorio.');
+    return runAdminAction('Edificio', () => axiosClient.patch(
+      `/admin/city/${targetCityId}/building/${buildingType}`,
+      { new_level: Number(buildingLevel), ...commonPayload() },
+    ));
   };
 
-  const createCity = async () => {
-      if (!newCity.owner_id) return log('Owner ID required');
-      if (!newCity.world_id) return log('World ID required');
-      try {
-          const payload = {
-              ...newCity,
-              owner_id: Number(newCity.owner_id),
-              world_id: Number(newCity.world_id),
-          };
-          const response = await api.adminCreateCity(payload);
-          log(`City created! ID: ${response.data.id}`);
-      } catch (e) { log('Error: ' + (e.response?.data?.detail || e.message)); }
+  const setTroops = () => {
+    if (!targetCityId) return log('ID de ciudad obligatorio.');
+    return runAdminAction('Tropas', () => axiosClient.patch(
+      `/admin/city/${targetCityId}/troops`,
+      { troops: { [troopType]: Number(troopAmount) }, ...commonPayload() },
+    ));
   };
 
-  const deleteCity = async () => {
-      if (!targetCityId) return log('City ID required');
-      if (!confirm(`¿Eliminar ciudad ${targetCityId}?`)) return;
-      try {
-          await api.adminDeleteCity(targetCityId);
-          log(`City ${targetCityId} deleted`);
-      } catch (e) { log('Error: ' + (e.response?.data?.detail || e.message)); }
+  const teleportCity = () => {
+    if (!targetCityId) return log('ID de ciudad obligatorio.');
+    return runAdminAction('Coordenadas', () => axiosClient.patch(
+      `/admin/city/${targetCityId}/coordinates`,
+      { x: Number(coords.x), y: Number(coords.y), ...commonPayload() },
+    ));
   };
 
-  const deleteUser = async () => {
-      if (!deleteUserId) return log('User ID required');
-      if (!confirm(`¿Eliminar usuario ${deleteUserId}?`)) return;
-      try {
-          await api.adminDeleteUser(deleteUserId);
-          log(`User ${deleteUserId} deleted`);
-      } catch (e) { log('Error: ' + (e.response?.data?.detail || e.message)); }
+  const setFreeze = (isFrozen) => {
+    if (!targetUserId) return log('ID de usuario obligatorio.');
+    return runAdminAction(isFrozen ? 'Congelar cuenta' : 'Descongelar cuenta', () => axiosClient.patch(
+      `/admin/user/${targetUserId}/freeze`,
+      { is_frozen: isFrozen, ...commonPayload() },
+    ));
+  };
+
+  const setRole = (enabled) => {
+    if (!targetUserId) return log('ID de usuario obligatorio.');
+    return runAdminAction(enabled ? 'Asignar rol' : 'Revocar rol', () => axiosClient.patch(
+      `/admin/user/${targetUserId}/role`,
+      { enabled, role: enabled ? adminRole : null, ...commonPayload() },
+    ));
+  };
+
+  const moderateContent = (hidden) => {
+    if (!moderationTargetId) return log('ID del contenido obligatorio.');
+    return runAdminAction(hidden ? 'Ocultar contenido' : 'Restaurar contenido', () => axiosClient.patch(
+      `/admin/moderation/${moderationKind}/${moderationTargetId}`,
+      { hidden, ...commonPayload() },
+    ));
+  };
+
+  const revertLog = async (entry) => {
+    if (!requireReason()) return;
+    try {
+      await axiosClient.post(`/admin/logs/${entry.id}/revert`, { reason: reason.trim() });
+      log(`Auditoría #${entry.id}: reversión aplicada.`);
+      await loadOperationalData();
+    } catch (error) {
+      log(`Reversión #${entry.id}: ${errorDetail(error)}`);
+    }
+  };
+
+  const updateCase = async (supportCase, status) => {
+    if (!requireReason()) return;
+    try {
+      await axiosClient.patch(`/support/admin/cases/${supportCase.id}`, {
+        status,
+        reason: reason.trim(),
+        ...(status === 'resolved' ? { resolution: `Resuelto desde administración: ${reason.trim()}` } : {}),
+      });
+      log(`Caso #${supportCase.id}: ${status}.`);
+      await loadOperationalData();
+    } catch (error) {
+      log(`Caso #${supportCase.id}: ${errorDetail(error)}`);
+    }
   };
 
   return (
-      <div className="p-6 space-y-8 max-w-6xl mx-auto pb-20">
-          <h1 className="text-3xl font-bold text-red-500">Panel de Administración</h1>
-          
-          <section className="card bg-gray-900 p-5 border border-amber-700/50" data-testid="world-lifecycle-admin">
-              <div className="flex flex-col md:flex-row md:items-end gap-4">
-                  <div className="flex-1">
-                      <h2 className="text-xl font-bold text-amber-400 mb-3">Ciclo de vida de mundos</h2>
-                      <label className="block text-gray-400 mb-1 text-sm">Mundo</label>
-                      <select
-                          value={selectedWorldId}
-                          onChange={e => setSelectedWorldId(e.target.value)}
-                          className="select w-full bg-black/50 border-gray-600"
-                          data-testid="world-lifecycle-select"
-                      >
-                          {worlds.map(world => (
-                              <option key={world.id} value={world.id}>
-                                  {world.name} — {world.lifecycle_status}
-                              </option>
-                          ))}
-                      </select>
-                  </div>
-                  <div className="flex-1">
-                      <label className="block text-gray-400 mb-1 text-sm">Motivo obligatorio</label>
-                      <input
-                          value={lifecycleReason}
-                          onChange={e => setLifecycleReason(e.target.value)}
-                          className="input w-full bg-black/50 border-gray-600"
-                          placeholder="Motivo de la transición"
-                          data-testid="world-lifecycle-reason"
-                      />
-                  </div>
-              </div>
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <span className="badge badge-outline" data-testid="world-lifecycle-current">
-                      Estado: {selectedLifecycleWorld?.lifecycle_status || '—'}
-                  </span>
-                  {(allowedLifecycleTargets[selectedLifecycleWorld?.lifecycle_status] || []).map(target => (
-                      <button
-                          key={target}
-                          onClick={() => transitionWorld(target)}
-                          className="btn btn-sm bg-amber-700 hover:bg-amber-600 text-white border-none"
-                          data-testid={`world-lifecycle-to-${target}`}
-                      >
-                          Cambiar a {target}
-                      </button>
-                  ))}
-              </div>
-          </section>
-
-          {/* Target City Selector */}
-          <div className="bg-gray-900 p-4 rounded border border-red-900 flex items-center gap-4">
-              <div className="flex-1">
-                <label className="block text-gray-400 mb-1 text-sm">ID Ciudad Objetivo (Operaciones)</label>
-                <input 
-                    type="number" 
-                    value={targetCityId} 
-                    onChange={e => setTargetCityId(e.target.value)}
-                    className="input input-bordered bg-black/50 w-full border-gray-600"
-                    placeholder="ID de Ciudad"
-                />
-              </div>
-              <button onClick={deleteCity} className="btn bg-red-900/50 hover:bg-red-900 text-red-200 border-red-800 mt-6">
-                  🗑️ Eliminar Ciudad
-              </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {/* Resources */}
-              <div className="card bg-gray-800 p-4 border border-gray-700">
-                  <h3 className="font-bold mb-4 text-amber-500">1. Recursos</h3>
-                  <div className="space-y-2">
-                      <input type="number" value={res.wood} onChange={e => setRes({...res, wood: +e.target.value})} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Madera" />
-                      <input type="number" value={res.stone} onChange={e => setRes({...res, stone: +e.target.value})} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Piedra" />
-                      <input type="number" value={res.iron} onChange={e => setRes({...res, iron: +e.target.value})} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Hierro" />
-                      <input type="number" value={res.gold} onChange={e => setRes({...res, gold: +e.target.value})} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Oro" />
-                      <button onClick={updateResources} className="btn btn-sm bg-red-700 hover:bg-red-600 text-white w-full border-none">Actualizar</button>
-                  </div>
-              </div>
-
-              {/* Buildings */}
-              <div className="card bg-gray-800 p-4 border border-gray-700">
-                  <h3 className="font-bold mb-4 text-amber-500">2. Edificios</h3>
-                  <div className="space-y-2">
-                      <select value={buildType} onChange={e => setBuildType(e.target.value)} className="select select-sm w-full bg-black/50 border-gray-600">
-                          <option value="town_hall">Ayuntamiento</option>
-                          <option value="warehouse">Almacén</option>
-                          <option value="barracks">Cuartel</option>
-                          <option value="farm">Granja</option>
-                          <option value="mine">Mina</option>
-                          <option value="wall">Muralla</option>
-                          <option value="stable">Establo</option>
-                      </select>
-                      <input type="number" value={buildLevel} onChange={e => setBuildLevel(+e.target.value)} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Nivel" />
-                      <button onClick={setBuildingLevel} className="btn btn-sm bg-red-700 hover:bg-red-600 text-white w-full border-none">Fijar Nivel</button>
-                  </div>
-              </div>
-
-              {/* Troops */}
-              <div className="card bg-gray-800 p-4 border border-gray-700">
-                  <h3 className="font-bold mb-4 text-amber-500">3. Tropas</h3>
-                  <div className="space-y-2">
-                      <select value={troopType} onChange={e => setTroopType(e.target.value)} className="select select-sm w-full bg-black/50 border-gray-600">
-                          <option value="basic_infantry">Infantería Básica</option>
-                          <option value="heavy_infantry">Infantería Pesada</option>
-                          <option value="archer">Arquero</option>
-                          <option value="fast_cavalry">Caballería Ligera</option>
-                          <option value="heavy_cavalry">Caballería Pesada</option>
-                          <option value="spy">Espía</option>
-                          <option value="ram">Ariete</option>
-                          <option value="catapult">Catapulta</option>
-                      </select>
-                      <input type="number" value={troopAmount} onChange={e => setTroopAmount(+e.target.value)} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Cantidad" />
-                      <button onClick={setTroops} className="btn btn-sm bg-red-700 hover:bg-red-600 text-white w-full border-none">Fijar Tropas</button>
-                  </div>
-              </div>
-
-              {/* Teleport */}
-              <div className="card bg-gray-800 p-4 border border-gray-700">
-                  <h3 className="font-bold mb-4 text-amber-500">4. Teletransporte</h3>
-                  <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <input type="number" value={coords.x} onChange={e => setCoords({...coords, x: +e.target.value})} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="X" />
-                        <input type="number" value={coords.y} onChange={e => setCoords({...coords, y: +e.target.value})} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Y" />
-                      </div>
-                      <button onClick={teleportCity} className="btn btn-sm bg-purple-700 hover:bg-purple-600 text-white w-full border-none">Teletransportar</button>
-                  </div>
-              </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Create City */}
-              <div className="card bg-gray-800 p-4 border border-gray-700">
-                  <h3 className="font-bold mb-4 text-green-500">Crear Nueva Ciudad</h3>
-                  <div className="grid grid-cols-2 gap-2">
-                      <input type="number" value={newCity.owner_id} onChange={e => setNewCity({...newCity, owner_id: e.target.value})} className="input input-sm bg-black/50 border-gray-600" placeholder="ID Dueño" />
-                      <input type="number" value={newCity.world_id} onChange={e => setNewCity({...newCity, world_id: e.target.value})} className="input input-sm bg-black/50 border-gray-600" placeholder="ID Mundo" />
-                      <input type="text" value={newCity.name} onChange={e => setNewCity({...newCity, name: e.target.value})} className="input input-sm bg-black/50 border-gray-600" placeholder="Nombre Ciudad" />
-                      <input type="number" value={newCity.x} onChange={e => setNewCity({...newCity, x: +e.target.value})} className="input input-sm bg-black/50 border-gray-600" placeholder="X" />
-                      <input type="number" value={newCity.y} onChange={e => setNewCity({...newCity, y: +e.target.value})} className="input input-sm bg-black/50 border-gray-600" placeholder="Y" />
-                  </div>
-                  <button onClick={createCity} className="btn btn-sm bg-green-700 hover:bg-green-600 text-white w-full border-none mt-4">Crear Ciudad</button>
-              </div>
-
-              {/* User Management */}
-              <div className="card bg-gray-800 p-4 border border-gray-700">
-                  <h3 className="font-bold mb-4 text-red-500">Gestión de Usuarios</h3>
-                  <div className="flex gap-2">
-                      <input type="number" value={deleteUserId} onChange={e => setDeleteUserId(e.target.value)} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="ID Usuario" />
-                      <button onClick={deleteUser} className="btn btn-sm bg-red-900 hover:bg-red-800 text-white border-none">Eliminar Usuario</button>
-                  </div>
-              </div>
-          </div>
-
-          <div className="bg-black p-4 rounded font-mono text-xs text-green-500 whitespace-pre-wrap h-40 overflow-y-auto border border-gray-700 shadow-inner">
-              {message || '> Sistema listo...'}
-          </div>
+    <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto pb-20" data-testid="bm0073-admin-panel">
+      <div>
+        <h1 className="text-3xl font-bold text-red-500">Administración y soporte</h1>
+        <p className="text-sm text-gray-400 mt-1">Sin borrado duro: toda intervención sensible exige motivo y queda auditada.</p>
       </div>
+
+      <section className="card bg-gray-900 p-5 border border-red-900/60" data-testid="admin-operation-context">
+        <h2 className="text-lg font-bold text-red-300 mb-3">Contexto obligatorio</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <input
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            className="input w-full bg-black/50 border-gray-600"
+            placeholder="Motivo administrativo obligatorio"
+            data-testid="admin-reason"
+          />
+          <input
+            type="number"
+            min="1"
+            value={supportCaseId}
+            onChange={(event) => setSupportCaseId(event.target.value)}
+            className="input w-full bg-black/50 border-gray-600"
+            placeholder="Caso de soporte (opcional)"
+            data-testid="admin-support-case-id"
+          />
+        </div>
+      </section>
+
+      <section className="card bg-gray-900 p-5 border border-amber-700/50" data-testid="world-lifecycle-admin">
+        <h2 className="text-xl font-bold text-amber-400 mb-3">Ciclo de vida de mundos</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <select
+            value={selectedWorldId}
+            onChange={(event) => setSelectedWorldId(event.target.value)}
+            className="select w-full bg-black/50 border-gray-600"
+            data-testid="world-lifecycle-select"
+          >
+            {worlds.map((world) => <option key={world.id} value={world.id}>{world.name} — {world.lifecycle_status}</option>)}
+          </select>
+          <input
+            value={lifecycleReason}
+            onChange={(event) => setLifecycleReason(event.target.value)}
+            className="input w-full bg-black/50 border-gray-600"
+            placeholder="Motivo de transición"
+            data-testid="world-lifecycle-reason"
+          />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="badge badge-outline" data-testid="world-lifecycle-current">Estado: {selectedLifecycleWorld?.lifecycle_status || '—'}</span>
+          {(allowedLifecycleTargets[selectedLifecycleWorld?.lifecycle_status] || []).map((target) => (
+            <button
+              key={target}
+              onClick={() => transitionWorld(target)}
+              className="btn btn-sm bg-amber-700 hover:bg-amber-600 text-white border-none"
+              data-testid={`world-lifecycle-to-${target}`}
+            >Cambiar a {target}</button>
+          ))}
+        </div>
+      </section>
+
+      <section className="card bg-gray-900 p-5 border border-gray-700" data-testid="admin-game-corrections">
+        <h2 className="text-xl font-bold text-amber-400 mb-3">Correcciones del juego</h2>
+        <input type="number" value={targetCityId} onChange={(event) => setTargetCityId(event.target.value)} className="input w-full bg-black/50 border-gray-600 mb-4" placeholder="ID de ciudad" />
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+          <div className="space-y-2">
+            <h3 className="font-semibold">Recursos</h3>
+            {Object.keys(resources).map((key) => (
+              <input key={key} type="number" value={resources[key]} onChange={(event) => setResources({ ...resources, [key]: Number(event.target.value) })} className="input input-sm w-full bg-black/50 border-gray-600" placeholder={key} />
+            ))}
+            <button className="btn btn-sm w-full" onClick={updateResources}>Aplicar recursos</button>
+          </div>
+          <div className="space-y-2">
+            <h3 className="font-semibold">Edificio</h3>
+            <input value={buildingType} onChange={(event) => setBuildingType(event.target.value)} className="input input-sm w-full bg-black/50 border-gray-600" />
+            <input type="number" min="0" value={buildingLevel} onChange={(event) => setBuildingLevel(event.target.value)} className="input input-sm w-full bg-black/50 border-gray-600" />
+            <button className="btn btn-sm w-full" onClick={setBuildingLevel}>Fijar nivel</button>
+          </div>
+          <div className="space-y-2">
+            <h3 className="font-semibold">Tropas</h3>
+            <input value={troopType} onChange={(event) => setTroopType(event.target.value)} className="input input-sm w-full bg-black/50 border-gray-600" />
+            <input type="number" min="0" value={troopAmount} onChange={(event) => setTroopAmount(event.target.value)} className="input input-sm w-full bg-black/50 border-gray-600" />
+            <button className="btn btn-sm w-full" onClick={setTroops}>Fijar cantidad</button>
+          </div>
+          <div className="space-y-2">
+            <h3 className="font-semibold">Coordenadas</h3>
+            <div className="flex gap-2">
+              <input type="number" value={coords.x} onChange={(event) => setCoords({ ...coords, x: event.target.value })} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="X" />
+              <input type="number" value={coords.y} onChange={(event) => setCoords({ ...coords, y: event.target.value })} className="input input-sm w-full bg-black/50 border-gray-600" placeholder="Y" />
+            </div>
+            <button className="btn btn-sm w-full" onClick={teleportCity}>Mover ciudad</button>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section className="card bg-gray-900 p-5 border border-gray-700" data-testid="admin-account-controls">
+          <h2 className="text-xl font-bold text-amber-400 mb-3">Cuenta y roles</h2>
+          <input type="number" value={targetUserId} onChange={(event) => setTargetUserId(event.target.value)} className="input w-full bg-black/50 border-gray-600 mb-3" placeholder="ID de usuario" />
+          <div className="flex flex-wrap gap-2 mb-4">
+            <button className="btn btn-sm" onClick={() => setFreeze(true)}>Congelar</button>
+            <button className="btn btn-sm" onClick={() => setFreeze(false)}>Descongelar</button>
+          </div>
+          <div className="flex gap-2">
+            <select value={adminRole} onChange={(event) => setAdminRole(event.target.value)} className="select select-sm bg-black/50 border-gray-600 flex-1">
+              <option value="support">support</option>
+              <option value="moderator">moderator</option>
+              <option value="operator">operator</option>
+              <option value="admin">admin</option>
+            </select>
+            <button className="btn btn-sm" onClick={() => setRole(true)}>Asignar</button>
+            <button className="btn btn-sm" onClick={() => setRole(false)}>Revocar</button>
+          </div>
+        </section>
+
+        <section className="card bg-gray-900 p-5 border border-gray-700" data-testid="admin-global-moderation">
+          <h2 className="text-xl font-bold text-amber-400 mb-3">Moderación reversible</h2>
+          <div className="flex gap-2 mb-3">
+            <select value={moderationKind} onChange={(event) => setModerationKind(event.target.value)} className="select select-sm bg-black/50 border-gray-600">
+              <option value="chat">Chat</option>
+              <option value="forum">Foro</option>
+            </select>
+            <input type="number" min="1" value={moderationTargetId} onChange={(event) => setModerationTargetId(event.target.value)} className="input input-sm flex-1 bg-black/50 border-gray-600" placeholder="ID del contenido" />
+          </div>
+          <div className="flex gap-2">
+            <button className="btn btn-sm" onClick={() => moderateContent(true)}>Ocultar</button>
+            <button className="btn btn-sm" onClick={() => moderateContent(false)}>Restaurar</button>
+          </div>
+        </section>
+      </div>
+
+      <section className="card bg-gray-900 p-5 border border-gray-700" data-testid="admin-support-cases">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xl font-bold text-amber-400">Casos de soporte</h2>
+          <button className="btn btn-xs" onClick={loadOperationalData}>Actualizar</button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="table table-sm">
+            <thead><tr><th>ID</th><th>Asunto</th><th>Estado</th><th>Prioridad</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {supportCases.map((supportCase) => (
+                <tr key={supportCase.id}>
+                  <td>#{supportCase.id}</td><td>{supportCase.subject}</td><td>{supportCase.status}</td><td>{supportCase.priority}</td>
+                  <td className="flex gap-1"><button className="btn btn-xs" onClick={() => updateCase(supportCase, 'in_progress')}>Tomar</button><button className="btn btn-xs" onClick={() => updateCase(supportCase, 'resolved')}>Resolver</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card bg-gray-900 p-5 border border-gray-700" data-testid="admin-audit-log">
+        <h2 className="text-xl font-bold text-amber-400 mb-3">Auditoría reciente</h2>
+        <div className="space-y-2 max-h-96 overflow-auto">
+          {logs.map((entry) => (
+            <div key={entry.id} className="border border-gray-700 rounded p-3 flex flex-col md:flex-row md:items-center gap-2">
+              <div className="flex-1 text-sm"><strong>#{entry.id} {entry.action}</strong><div className="text-gray-400">{entry.reason || 'Sin motivo legacy'}</div></div>
+              {entry.reversible && !entry.reversed_at && <button className="btn btn-xs" onClick={() => revertLog(entry)}>Revertir</button>}
+              {entry.reversed_at && <span className="badge badge-outline">Revertido</span>}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <pre className="bg-black/60 border border-gray-700 rounded p-4 whitespace-pre-wrap text-sm min-h-16" data-testid="admin-operation-log">{message || 'Sin operaciones en esta sesión.'}</pre>
+    </div>
   );
 };
 
