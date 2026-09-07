@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
-from ..routers.admin import require_admin
 from ..routers.auth import get_current_user
+from ..services import admin_permissions
 from ..services import theme as theme_service
 
 router = APIRouter(prefix="/theme", tags=["themes"])
@@ -21,7 +21,9 @@ def list_all_themes(db: Session = Depends(get_db)):
 def create_new_theme(
     payload: schemas.ThemeCreate,
     db: Session = Depends(get_db),
-    current_admin: models.User = Depends(require_admin),
+    current_admin: models.User = Depends(
+        admin_permissions.require_capability("admin.manage")
+    ),
 ):
     return theme_service.create_theme(db, payload)
 
@@ -39,7 +41,9 @@ def update_theme(
     theme_id: int,
     payload: schemas.ThemeUpdate,
     db: Session = Depends(get_db),
-    current_admin: models.User = Depends(require_admin),
+    current_admin: models.User = Depends(
+        admin_permissions.require_capability("admin.manage")
+    ),
 ):
     try:
         return theme_service.update_theme(db, theme_id, payload)
@@ -51,7 +55,9 @@ def update_theme(
 def delete_theme(
     theme_id: int,
     db: Session = Depends(get_db),
-    current_admin: models.User = Depends(require_admin),
+    current_admin: models.User = Depends(
+        admin_permissions.require_capability("admin.manage")
+    ),
 ):
     try:
         theme_service.delete_theme(db, theme_id)
@@ -64,7 +70,9 @@ def delete_theme(
 def grant_theme(
     payload: schemas.ThemeOwnershipCreate,
     db: Session = Depends(get_db),
-    current_admin: models.User = Depends(require_admin),
+    current_admin: models.User = Depends(
+        admin_permissions.require_capability("admin.manage")
+    ),
 ):
     try:
         return theme_service.grant_theme_to_user(db, payload)
