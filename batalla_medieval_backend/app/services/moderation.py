@@ -13,12 +13,24 @@ from ..utils import utc_now
 from . import admin as admin_service
 
 
+def _serialize_time(value: datetime | None) -> str | None:
+    """Persist a dialect-stable moderation timestamp in audit snapshots.
+
+    The moderation columns are timezone-naive SQL ``DateTime`` values. SQLite
+    drops tzinfo on round-trip while the in-memory value produced by utc_now()
+    can still carry it. Normalizing to naive ISO form makes compare-and-set
+    snapshots stable without weakening the timestamp check.
+    """
+
+    return value.replace(tzinfo=None).isoformat() if value else None
+
+
 def _snapshot(target) -> dict:
     return {
         "is_hidden": bool(target.is_hidden),
         "moderation_reason": target.moderation_reason,
         "moderated_by_id": target.moderated_by_id,
-        "moderated_at": target.moderated_at.isoformat() if target.moderated_at else None,
+        "moderated_at": _serialize_time(target.moderated_at),
     }
 
 
