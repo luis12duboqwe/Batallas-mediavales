@@ -1,0 +1,53 @@
+name: BM-0073 wire validation
+
+on:
+  push:
+    branches:
+      - feature/BM-0073-admin-support-moderation
+    paths:
+      - .github/workflows/bm0073-wire-validation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/BM-0073-admin-support-moderation
+      - name: Patch validation workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/validation.yml')
+          text = path.read_text()
+          replacements = [
+              (
+                  '          tests/test_world_lifecycle_concurrency.py\n',
+                  '          tests/test_world_lifecycle_concurrency.py\n          tests/test_bm0073_admin_concurrency.py\n',
+              ),
+              (
+                  '          python scripts/prepare_g16_world_lifecycle_e2e.py\n',
+                  '          python scripts/prepare_g16_world_lifecycle_e2e.py\n          python scripts/prepare_g17_admin_support_e2e.py\n',
+              ),
+              (
+                  '          node e2e/g16-world-lifecycle.mjs\n',
+                  '          node e2e/g16-world-lifecycle.mjs\n          node e2e/g17-admin-support.mjs\n',
+              ),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one validation anchor, got {text.count(old)}: {old!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          git diff --check
+      - name: Commit validation wiring
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/validation.yml
+          git commit -m "ci(BM-0073): validate admin concurrency and G17 browser journey"
+          git push origin HEAD:feature/BM-0073-admin-support-moderation
