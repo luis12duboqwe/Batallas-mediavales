@@ -8,12 +8,7 @@ from ..utils import utc_now
 
 
 def _as_utc(value: datetime) -> datetime:
-    """Normalize SQLAlchemy datetimes before comparing them to aware UTC now.
-
-    SQLite commonly round-trips ``DateTime`` values without ``tzinfo`` even
-    when the application originally persisted an aware UTC value. Treat those
-    database-naive timestamps as UTC; preserve/convert aware values to UTC.
-    """
+    """Normalize SQLAlchemy datetimes before comparing them to aware UTC now."""
 
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -35,20 +30,24 @@ def flag_violation(
     details: str,
     reviewer_id: int | None = None,
 ) -> models.AntiCheatFlag:
+    """Persist evidence only; heuristics never sanction a player directly.
+
+    A critical severity raises review priority but must not freeze the account,
+    revoke sessions or mutate authorization state. BM-0074 deliberately keeps
+    sanctions behind the reasoned BM-0073 administrative surface.
+    """
+
     flag = models.AntiCheatFlag(
         user_id=user.id,
         type_of_violation=violation_type,
         severity=severity,
         details=details,
         reviewer_id=reviewer_id,
+        reviewed_by_admin=False,
+        resolved_status="pending",
     )
-
-    if severity.lower() == "critical":
-        user.is_frozen = True
-        user.freeze_reason = details
-        log_action(db, user, "account_freeze", f"Frozen due to {violation_type}: {details}")
-
-    _persist(db, flag, user)
+    db.add(flag)
+    db.commit()
     db.refresh(flag)
     return flag
 
@@ -62,6 +61,11 @@ def log_action(db: Session, user: models.User, action: str, details: str) -> mod
 
 
 def check_action_speed(db: Session, user: models.User, action_name: str):
+    """Legacy speed signal retained until the persistent BM-0074 limiter lands.
+
+    It may create a flag, but never sanctions the account.
+    """
+
     now = utc_now()
     if user.last_action_at:
         delta = (now - _as_utc(user.last_action_at)).total_seconds()
@@ -124,8 +128,6 @@ def check_multiaccount_ip(db: Session, user: models.User, client_ip: str | None)
 def check_repeated_account_interactions(
     db: Session, origin_city: models.City, target_city: models.City, movement_type: str
 ):
-    # Multi-account heuristics only make sense between two player-owned cities.
-    # Barbarian villages deliberately have owner_id=None.
     if origin_city.owner is None or target_city.owner is None:
         return
 

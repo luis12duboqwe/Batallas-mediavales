@@ -19,6 +19,8 @@ class AntiCheatFlag(Base):
     reviewed_by_admin = Column(Boolean, default=False, nullable=False)
     resolved_status = Column(String, default="pending", nullable=False)
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    resolution_reason = Column(Text, nullable=True)
 
     user = relationship("User", foreign_keys=[user_id])
     reviewer = relationship("User", foreign_keys=[reviewer_id])
