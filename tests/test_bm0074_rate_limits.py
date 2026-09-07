@@ -2,7 +2,15 @@ import pytest
 from fastapi import HTTPException
 
 from app import models
+from app.routers.auth import create_access_token
 from app.services import anticheat
+
+
+def _headers(user: models.User) -> dict[str, str]:
+    token = create_access_token(
+        {"sub": user.username, "type": "access", "ver": user.auth_version}
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 def test_rate_limit_blocks_without_freezing_account(db_session, user):
@@ -105,3 +113,27 @@ def test_rate_limit_repeated_denials_dedupe_flags(db_session, user):
         .count()
         == 1
     )
+
+
+def test_movement_endpoint_applies_authoritative_rate_limit(
+    client,
+    user,
+    monkeypatch,
+):
+    monkeypatch.setitem(anticheat.RATE_LIMIT_RULES, "movement.create", (1, 60))
+    payload = {
+        "origin_city_id": 999999,
+        "target_city_id": 999998,
+        "movement_type": "attack",
+        "troops": {"basic_infantry": 1},
+        "resources": {},
+        "world_id": 1,
+    }
+
+    first = client.post("/movement/", json=payload, headers=_headers(user))
+    assert first.status_code == 404
+
+    blocked = client.post("/movement/", json=payload, headers=_headers(user))
+    assert blocked.status_code == 429
+    assert blocked.json()["detail"] == "Rate limit exceeded"
+    assert int(blocked.headers["Retry-After"]) >= 1
