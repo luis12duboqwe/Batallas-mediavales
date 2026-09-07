@@ -20,7 +20,6 @@ class ForumThread(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=get_utc_now, onupdate=get_utc_now)
 
     author = relationship("User", foreign_keys=[author_id])
-    moderated_by = relationship("User", foreign_keys=[moderated_by_id])
     posts = relationship("ForumPost", back_populates="thread", cascade="all, delete-orphan")
 
 class ForumPost(Base):
@@ -40,4 +39,5 @@ class ForumPost(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=get_utc_now, onupdate=get_utc_now)
 
     thread = relationship("ForumThread", back_populates="posts")
-    author = relationship("User")
+    author = relationship("User", foreign_keys=[author_id])
+    moderated_by = relationship("User", foreign_keys=[moderated_by_id])
