@@ -6,7 +6,9 @@ from app import models
 from app.routers import event as event_router
 from app.routers import premium as premium_router
 from app.routers import season as season_router
+from app.routers import world as world_router
 from app.routers.auth import create_access_token
+from app.services import admin as admin_service
 from app.services import admin_permissions
 from app.services import premium as premium_service
 from app.utils import utc_now
@@ -121,6 +123,120 @@ def test_support_reopen_clears_resolution_timestamp_and_explicit_null_unassigns(
     assert reopened.json()["status"] == "in_progress"
     assert reopened.json()["resolved_at"] is None
     assert reopened.json()["assigned_to_id"] is None
+
+
+def test_support_rejects_blank_case_text_and_preserves_resolved_resolution(
+    client, db_session
+):
+    requester = _user(db_session, "bm73_support_validation_requester")
+    support = _user(db_session, "bm73_support_validation_admin", role="support")
+
+    blank = client.post(
+        "/support/cases",
+        headers=_headers(requester),
+        json={"subject": "   ", "description": "     "},
+    )
+    assert blank.status_code == 422, blank.text
+
+    created = client.post(
+        "/support/cases",
+        headers=_headers(requester),
+        json={"subject": "Valid subject", "description": "Valid support description"},
+    )
+    assert created.status_code == 200, created.text
+    case_id = created.json()["id"]
+
+    resolved = client.patch(
+        f"/support/admin/cases/{case_id}",
+        headers=_headers(support),
+        json={
+            "status": "resolved",
+            "resolution": "Verified resolution",
+            "reason": "Resolve valid support case",
+        },
+    )
+    assert resolved.status_code == 200, resolved.text
+
+    invalid_clear = client.patch(
+        f"/support/admin/cases/{case_id}",
+        headers=_headers(support),
+        json={"resolution": "   ", "reason": "Must preserve resolution invariant"},
+    )
+    assert invalid_clear.status_code == 400, invalid_clear.text
+    db_session.expire_all()
+    persisted = db_session.query(models.SupportCase).filter_by(id=case_id).one()
+    assert persisted.status == "resolved"
+    assert persisted.resolution == "Verified resolution"
+
+
+def test_admin_city_creation_rolls_back_when_audit_write_fails(
+    client, db_session, monkeypatch
+):
+    admin = _user(db_session, "bm73_city_atomic_admin", role="admin")
+    owner = _user(db_session, "bm73_city_atomic_owner")
+    world = db_session.query(models.World).first()
+    world.lifecycle_status = "open"
+    world.is_active = True
+    db_session.add(models.PlayerWorld(user_id=owner.id, world_id=world.id))
+    db_session.commit()
+    before = db_session.query(models.City).count()
+
+    def fail_audit(*args, **kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(admin_service, "log_action", fail_audit)
+    with pytest.raises(RuntimeError, match="audit unavailable"):
+        client.post(
+            "/admin/city/create",
+            headers=_headers(admin),
+            json={
+                "name": "Atomic Admin City",
+                "owner_id": owner.id,
+                "world_id": world.id,
+                "x": 91,
+                "y": 92,
+                "reason": "Atomic city creation regression",
+            },
+        )
+
+    db_session.rollback()
+    assert db_session.query(models.City).count() == before
+
+
+def test_world_creation_requires_reason_and_rolls_back_with_audit(
+    client, db_session, monkeypatch
+):
+    admin = _user(db_session, "bm73_world_atomic", role="admin")
+    payload = {
+        "name": "Atomic World",
+        "speed_modifier": 1.0,
+        "resource_modifier": 1.0,
+        "map_size": 25,
+        "special_rules": "",
+    }
+
+    missing_reason = client.post(
+        "/worlds/create",
+        headers=_headers(admin),
+        json=payload,
+    )
+    assert missing_reason.status_code == 422, missing_reason.text
+
+    before = db_session.query(models.World).count()
+
+    def fail_audit(*args, **kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(world_router.admin_service, "log_action", fail_audit)
+    with pytest.raises(RuntimeError, match="audit unavailable"):
+        client.post(
+            "/worlds/create",
+            headers=_headers(admin, reason="Atomic world creation regression"),
+            json=payload,
+        )
+
+    db_session.rollback()
+    assert db_session.query(models.World).count() == before
 
 
 def test_event_creation_rolls_back_when_audit_write_fails(

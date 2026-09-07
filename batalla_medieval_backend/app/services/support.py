@@ -110,6 +110,7 @@ def update_case(
     assigned_to_id: int | None = None,
     assigned_to_provided: bool = False,
     resolution: str | None = None,
+    resolution_provided: bool = False,
 ) -> models.SupportCase:
     case = (
         db.query(models.SupportCase)
@@ -125,6 +126,30 @@ def update_case(
     if not normalized_reason:
         raise HTTPException(status_code=400, detail="Administrative reason is required")
 
+    if status is not None and status != case.status:
+        if status not in ALLOWED_TRANSITIONS.get(case.status, set()):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Invalid support transition: {case.status} -> {status}",
+            )
+
+    if priority is not None and priority not in VALID_PRIORITIES:
+        raise HTTPException(status_code=400, detail="Invalid support priority")
+
+    assignee = None
+    if assigned_to_provided and assigned_to_id is not None:
+        assignee = db.query(models.User).filter(models.User.id == assigned_to_id).one_or_none()
+        if assignee is None or not admin_permissions.effective_admin_role(assignee):
+            raise HTTPException(status_code=400, detail="Assignee must be an administrator")
+
+    normalized_resolution = None
+    if resolution_provided and resolution is not None:
+        normalized_resolution = resolution.strip() or None
+    resulting_status = status if status is not None else case.status
+    resulting_resolution = normalized_resolution if resolution_provided else case.resolution
+    if resulting_status in {"resolved", "closed"} and not (resulting_resolution or "").strip():
+        raise HTTPException(status_code=400, detail="Resolution is required")
+
     before = {
         "status": case.status,
         "priority": case.priority,
@@ -133,40 +158,25 @@ def update_case(
     }
 
     if status is not None and status != case.status:
-        if status not in ALLOWED_TRANSITIONS.get(case.status, set()):
-            raise HTTPException(
-                status_code=409,
-                detail=f"Invalid support transition: {case.status} -> {status}",
-            )
         case.status = status
         now = utc_now()
         if status == "resolved":
-            if not (resolution or case.resolution or "").strip():
-                raise HTTPException(status_code=400, detail="Resolution is required")
             case.resolved_at = now
             case.closed_at = None
         elif status == "closed":
             case.closed_at = now
-        elif status == "in_progress":
+        elif status in {"open", "in_progress"}:
             case.closed_at = None
             case.resolved_at = None
 
     if priority is not None:
-        if priority not in VALID_PRIORITIES:
-            raise HTTPException(status_code=400, detail="Invalid support priority")
         case.priority = priority
 
     if assigned_to_provided:
-        if assigned_to_id is None:
-            case.assigned_to_id = None
-        else:
-            assignee = db.query(models.User).filter(models.User.id == assigned_to_id).one_or_none()
-            if assignee is None or not admin_permissions.effective_admin_role(assignee):
-                raise HTTPException(status_code=400, detail="Assignee must be an administrator")
-            case.assigned_to_id = assigned_to_id
+        case.assigned_to_id = assignee.id if assignee is not None else None
 
-    if resolution is not None:
-        case.resolution = resolution.strip() or None
+    if resolution_provided:
+        case.resolution = normalized_resolution
 
     after = {
         "status": case.status,

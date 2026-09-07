@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 SupportStatus = Literal["open", "in_progress", "resolved", "closed"]
@@ -12,6 +12,11 @@ class SupportCaseCreate(BaseModel):
     subject: str = Field(min_length=3, max_length=255)
     description: str = Field(min_length=5, max_length=5000)
     world_id: Optional[int] = None
+
+    @field_validator("subject", "description", mode="before")
+    @classmethod
+    def strip_required_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class SupportCaseAdminUpdate(BaseModel):

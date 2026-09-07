@@ -74,5 +74,6 @@ def update_support_case(
         case_id,
         admin_user=current_admin,
         assigned_to_provided="assigned_to_id" in payload.model_fields_set,
+        resolution_provided="resolution" in payload.model_fields_set,
         **values,
     )
