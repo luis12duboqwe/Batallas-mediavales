@@ -69,8 +69,6 @@ MVP_HTTP_CONTRACT = {
     ("PATCH", "/admin/city/{city_id}/troops"),
     ("POST", "/admin/city/create"),
     ("PATCH", "/admin/city/{city_id}/coordinates"),
-    ("DELETE", "/admin/user/{user_id}"),
-    ("DELETE", "/admin/city/{city_id}"),
     ("GET", "/anticheat/flags"),
     ("PATCH", "/anticheat/resolve/{flag_id}"),
 }

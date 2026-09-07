@@ -117,7 +117,7 @@ const AdminPanel = () => {
     ));
   };
 
-  const setBuildingLevel = () => {
+  const applyBuildingLevel = () => {
     if (!targetCityId) return log('ID de ciudad obligatorio.');
     return runAdminAction('Edificio', () => axiosClient.patch(
       `/admin/city/${targetCityId}/building/${buildingType}`,
@@ -267,7 +267,7 @@ const AdminPanel = () => {
             <h3 className="font-semibold">Edificio</h3>
             <input value={buildingType} onChange={(event) => setBuildingType(event.target.value)} className="input input-sm w-full bg-black/50 border-gray-600" />
             <input type="number" min="0" value={buildingLevel} onChange={(event) => setBuildingLevel(event.target.value)} className="input input-sm w-full bg-black/50 border-gray-600" />
-            <button className="btn btn-sm w-full" onClick={setBuildingLevel}>Fijar nivel</button>
+            <button className="btn btn-sm w-full" onClick={applyBuildingLevel}>Fijar nivel</button>
           </div>
           <div className="space-y-2">
             <h3 className="font-semibold">Tropas</h3>

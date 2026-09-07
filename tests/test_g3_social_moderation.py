@@ -104,7 +104,7 @@ def test_admin_can_freeze_unfreeze_and_read_audit_log(client, db_session):
     unfrozen = client.patch(
         f"/admin/user/{target.id}/freeze",
         headers=_headers(admin),
-        json={"is_frozen": False},
+        json={"is_frozen": False, "reason": "manual moderation test complete"},
     )
     assert unfrozen.status_code == 200, unfrozen.text
     assert unfrozen.json()["is_frozen"] is False

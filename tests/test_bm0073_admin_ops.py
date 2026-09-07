@@ -118,5 +118,5 @@ def test_hard_delete_endpoints_are_not_operational_surface(client, db_session, c
     admin = _admin(db_session, "bm73_admin_delete", "admin")
     delete_user = client.delete(f"/admin/user/{user.id}", headers=_headers(admin))
     delete_city = client.delete(f"/admin/city/{city.id}", headers=_headers(admin))
-    assert delete_user.status_code == 405, delete_user.text
-    assert delete_city.status_code == 405, delete_city.text
+    assert delete_user.status_code == 404, delete_user.text
+    assert delete_city.status_code == 404, delete_city.text
