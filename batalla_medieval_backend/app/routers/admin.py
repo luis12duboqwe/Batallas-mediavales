@@ -260,7 +260,7 @@ def revert_admin_action(
     payload: RevertRequest,
     db: Session = Depends(get_db),
     current_admin: models.User = Depends(
-        admin_permissions.require_capability("admin.revert")
+        admin_permissions.require_capability("audit.read")
     ),
 ):
     return admin_service.revert_action(

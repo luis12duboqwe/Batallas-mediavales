@@ -443,6 +443,23 @@ def revert_action(
     if original.reversed_at is not None:
         raise HTTPException(status_code=409, detail="Audit action already reverted")
 
+    required_capability = {
+        "update_city_resources": "game.correct",
+        "teleport_city": "game.correct",
+        "set_building_level": "game.correct",
+        "set_troop_amounts": "game.correct",
+        "set_user_freeze": "account.freeze",
+        "moderate_chat_message": "content.moderate",
+        "moderate_forum_post": "content.moderate",
+    }.get(original.action)
+    if required_capability is None:
+        raise HTTPException(status_code=409, detail="Reversal handler is not available for this action")
+    if not admin_permissions.has_capability(admin_user, required_capability):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Administrative capability required: {required_capability}",
+        )
+
     before = _load_state(original.before_state)
     after = _load_state(original.after_state)
 
