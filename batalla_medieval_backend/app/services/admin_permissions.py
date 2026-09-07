@@ -35,6 +35,7 @@ ROLE_CAPABILITIES = {
         "content.moderate",
         "game.correct",
         "world.manage",
+        "admin.manage",
         "admin.roles",
         "admin.revert",
     },
