@@ -1,13 +1,17 @@
 """Prepare deterministic BM-0073 Browser G17 fixtures from G16 users."""
 
+from pathlib import Path
+
 from app import models
 from app.database import SessionLocal
+from app.routers.auth import create_access_token
 from app.utils import utc_now
 
 ADMIN_USERNAME = "g16_admin"
 PLAYER_USERNAME = "g16_player"
 CASE_SUBJECT = "G17 correction request"
 CHAT_CONTENT = "G17 moderation target"
+TOKEN_PATH = Path("/tmp/g17-admin-token")
 
 
 def main() -> None:
@@ -80,8 +84,12 @@ def main() -> None:
             models.Log.reason.like("G17%"),
         ).delete(synchronize_session=False)
         db.commit()
+        db.refresh(admin)
         db.refresh(case)
         db.refresh(message)
+
+        token = create_access_token({"sub": admin.username, "ver": admin.auth_version})
+        TOKEN_PATH.write_text(token)
         print(
             f"prepared-g17:world={world.id}:admin={admin.id}:player={player.id}:"
             f"case={case.id}:chat={message.id}"
