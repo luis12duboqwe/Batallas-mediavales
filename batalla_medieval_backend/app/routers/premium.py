@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
+from ..services import admin as admin_service
 from ..services import admin_permissions
 from ..services import premium as premium_service
 
@@ -64,12 +65,31 @@ def grant_rubies(
     current_admin: models.User = Depends(
         admin_permissions.require_capability("admin.manage")
     ),
+    reason: str = Depends(admin_permissions.require_reason),
 ):
     user = db.query(models.User).filter(models.User.id == payload.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     try:
-        return premium_service.grant_rubies(db, user, payload.amount)
+        status = premium_service.get_or_create_status(db, user)
+        before = {"rubies_balance": status.rubies_balance}
+        status = premium_service.grant_rubies(db, user, payload.amount)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    after = {"rubies_balance": status.rubies_balance}
+    admin_service.log_action(
+        db,
+        current_admin.id,
+        "grant_premium_rubies",
+        {"target_user_id": user.id, "amount": payload.amount},
+        target_type="premium_status",
+        target_id=status.id,
+        reason=reason,
+        before_state=before,
+        after_state=after,
+        reversible=False,
+    )
+    db.commit()
+    return status
