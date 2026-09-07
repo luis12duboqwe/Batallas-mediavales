@@ -97,6 +97,7 @@ jobs:
           tests/test_community_concurrency.py
           tests/test_honor_medal_concurrency.py
           tests/test_world_lifecycle_concurrency.py
+          tests/test_bm0073_admin_concurrency.py
 
   frontend:
     name: Frontend
@@ -174,6 +175,7 @@ jobs:
           python scripts/prepare_g14_community_e2e.py
           python scripts/prepare_g15_ranking_medals_e2e.py
           python scripts/prepare_g16_world_lifecycle_e2e.py
+          python scripts/prepare_g17_admin_support_e2e.py
       - name: Start backend and frontend
         run: |
           python -m uvicorn app.main:socket_app --app-dir batalla_medieval_backend --host 127.0.0.1 --port 8000 >/tmp/bm-backend.log 2>&1 &
@@ -198,6 +200,7 @@ jobs:
           node e2e/g14-community.mjs
           node e2e/g15-ranking-medals.mjs
           node e2e/g16-world-lifecycle.mjs
+          node e2e/g17-admin-support.mjs
       - name: Show service logs
         if: always()
         run: |

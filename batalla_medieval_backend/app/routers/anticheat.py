@@ -3,17 +3,20 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..database import get_db
-from ..routers.auth import get_current_user
 from ..schemas import anticheat as anticheat_schema
 from ..services import admin as admin_service
+from ..services import admin_permissions
 
 router = APIRouter(prefix="/anticheat", tags=["anticheat"])
 
 
 @router.get("/flags", response_model=list[anticheat_schema.AntiCheatFlagRead])
-def list_flags(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin privileges required")
+def list_flags(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(
+        admin_permissions.require_capability("audit.read")
+    ),
+):
     return (
         db.query(models.AntiCheatFlag)
         .order_by(models.AntiCheatFlag.timestamp.desc())
@@ -26,27 +29,44 @@ def resolve_flag(
     flag_id: int,
     payload: anticheat_schema.AntiCheatResolveRequest,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(
+        admin_permissions.require_capability("admin.manage")
+    ),
+    reason: str = Depends(admin_permissions.require_reason),
 ):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin privileges required")
-    flag = db.query(models.AntiCheatFlag).filter(models.AntiCheatFlag.id == flag_id).first()
+    flag = (
+        db.query(models.AntiCheatFlag)
+        .filter(models.AntiCheatFlag.id == flag_id)
+        .with_for_update()
+        .one_or_none()
+    )
     if not flag:
         raise HTTPException(status_code=404, detail="Flag not found")
 
+    before = {
+        "resolved_status": flag.resolved_status,
+        "reviewed_by_admin": bool(flag.reviewed_by_admin),
+        "reviewer_id": flag.reviewer_id,
+    }
     flag.resolved_status = payload.resolved_status
     flag.reviewed_by_admin = payload.reviewed_by_admin
     flag.reviewer_id = current_user.id
+    after = {
+        "resolved_status": flag.resolved_status,
+        "reviewed_by_admin": bool(flag.reviewed_by_admin),
+        "reviewer_id": flag.reviewer_id,
+    }
     admin_service.log_action(
         db,
         current_user.id,
         "resolve_anticheat_flag",
-        {
-            "flag_id": flag.id,
-            "target_user_id": flag.user_id,
-            "resolved_status": payload.resolved_status,
-            "reviewed_by_admin": payload.reviewed_by_admin,
-        },
+        {"target_user_id": flag.user_id},
+        target_type="anticheat_flag",
+        target_id=flag.id,
+        reason=reason,
+        before_state=before,
+        after_state=after,
+        reversible=False,
     )
     db.add(flag)
     db.commit()

@@ -4,15 +4,11 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
+from ..services import admin as admin_service
+from ..services import admin_permissions
 from ..services import premium as premium_service
 
 router = APIRouter(tags=["premium"])
-
-
-def require_admin(current_user: models.User = Depends(get_current_user)) -> models.User:
-    if not getattr(current_user, "is_admin", False):
-        raise HTTPException(status_code=403, detail="Admin privileges required")
-    return current_user
 
 
 @router.get("/status", response_model=schemas.PremiumStatusRead)
@@ -66,13 +62,42 @@ def use_feature(
 def grant_rubies(
     payload: schemas.GrantRubies,
     db: Session = Depends(get_db),
-    current_admin: models.User = Depends(require_admin),
+    current_admin: models.User = Depends(
+        admin_permissions.require_capability("admin.manage")
+    ),
+    reason: str = Depends(admin_permissions.require_reason),
 ):
     user = db.query(models.User).filter(models.User.id == payload.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
 
-    try:
-        return premium_service.grant_rubies(db, user, payload.amount)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # Ensure the unique status row exists, then lock and mutate it without an
+    # intermediate commit. The ruby change and its audit row commit together.
+    premium_service.get_or_create_status(db, user)
+    status = (
+        db.query(models.PremiumStatus)
+        .filter(models.PremiumStatus.user_id == user.id)
+        .with_for_update()
+        .populate_existing()
+        .one()
+    )
+    before = {"rubies_balance": status.rubies_balance}
+    status.rubies_balance += payload.amount
+    after = {"rubies_balance": status.rubies_balance}
+    admin_service.log_action(
+        db,
+        current_admin.id,
+        "grant_premium_rubies",
+        {"target_user_id": user.id, "amount": payload.amount},
+        target_type="premium_status",
+        target_id=status.id,
+        reason=reason,
+        before_state=before,
+        after_state=after,
+        reversible=False,
+    )
+    db.commit()
+    db.refresh(status)
+    return status

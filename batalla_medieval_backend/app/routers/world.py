@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
-from ..services import world_gen, world_lifecycle, world_membership
+from ..services import admin as admin_service
+from ..services import admin_permissions, world_gen, world_lifecycle, world_membership
 
 router = APIRouter(prefix="/worlds", tags=["worlds"])
 
@@ -23,10 +24,10 @@ def list_worlds(db: Session = Depends(get_db)):
 @router.get("/admin/catalogue", response_model=list[schemas.WorldRead])
 def list_admin_worlds(
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(
+        admin_permissions.require_capability("world.manage")
+    ),
 ):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Only administrators can list draft worlds")
     return db.query(models.World).order_by(models.World.created_at.desc()).all()
 
 
@@ -34,10 +35,11 @@ def list_admin_worlds(
 def create_world(
     payload: schemas.WorldCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(
+        admin_permissions.require_capability("world.manage")
+    ),
+    reason: str = Depends(admin_permissions.require_reason),
 ):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Only administrators can create worlds")
     world = models.World(
         name=payload.name,
         speed_modifier=payload.speed_modifier,
@@ -48,6 +50,27 @@ def create_world(
         map_size=payload.map_size,
     )
     db.add(world)
+    db.flush()
+    admin_service.log_action(
+        db,
+        current_user.id,
+        "create_world",
+        {
+            "world_id": world.id,
+            "name": world.name,
+            "lifecycle_status": world.lifecycle_status,
+        },
+        target_type="world",
+        target_id=world.id,
+        reason=reason,
+        before_state=None,
+        after_state={
+            "exists": True,
+            "lifecycle_status": world.lifecycle_status,
+            "is_active": bool(world.is_active),
+        },
+        reversible=False,
+    )
     db.commit()
     db.refresh(world)
     return world
@@ -58,10 +81,10 @@ def transition_world_lifecycle(
     world_id: int,
     payload: schemas.WorldLifecycleTransition,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(
+        admin_permissions.require_capability("world.manage")
+    ),
 ):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Only administrators can transition worlds")
     return world_lifecycle.transition_world(
         db,
         world_id,

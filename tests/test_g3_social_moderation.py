@@ -104,7 +104,7 @@ def test_admin_can_freeze_unfreeze_and_read_audit_log(client, db_session):
     unfrozen = client.patch(
         f"/admin/user/{target.id}/freeze",
         headers=_headers(admin),
-        json={"is_frozen": False},
+        json={"is_frozen": False, "reason": "manual moderation test complete"},
     )
     assert unfrozen.status_code == 200, unfrozen.text
     assert unfrozen.json()["is_frozen"] is False
@@ -137,9 +137,18 @@ def test_anticheat_review_is_admin_only_and_audited(client, db_session):
     assert visible.status_code == 200, visible.text
     assert any(item["id"] == flag.id for item in visible.json())
 
-    resolved = client.patch(
+    missing_reason = client.patch(
         f"/anticheat/resolve/{flag.id}",
         headers=_headers(admin),
+        json={"resolved_status": "false_positive", "reviewed_by_admin": True},
+    )
+    assert missing_reason.status_code == 422, missing_reason.text
+
+    reasoned_headers = _headers(admin)
+    reasoned_headers["X-Admin-Reason"] = "manual anti-cheat review"
+    resolved = client.patch(
+        f"/anticheat/resolve/{flag.id}",
+        headers=reasoned_headers,
         json={"resolved_status": "false_positive", "reviewed_by_admin": True},
     )
     assert resolved.status_code == 200, resolved.text
@@ -153,3 +162,4 @@ def test_anticheat_review_is_admin_only_and_audited(client, db_session):
     ]
     assert moderation_entries
     assert moderation_entries[0]["user_id"] == admin.id
+    assert moderation_entries[0]["reason"] == "manual anti-cheat review"

@@ -19,6 +19,7 @@ class User(Base):
     last_active_at: Mapped[datetime] = mapped_column(default=get_utc_now)
     protection_ends_at: Mapped[Optional[datetime]]
     is_admin: Mapped[bool] = mapped_column(default=False)
+    admin_role: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     rubies_balance: Mapped[int] = mapped_column(default=0)
     is_frozen: Mapped[bool] = mapped_column(default=False)
     email_notifications: Mapped[bool] = mapped_column(default=False)
@@ -73,7 +74,12 @@ class User(Base):
     messages_received: Mapped[List["Message"]] = relationship(
         "Message", back_populates="receiver", foreign_keys="Message.receiver_id", cascade="all, delete-orphan"
     )
-    logs: Mapped[List["Log"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    logs: Mapped[List["Log"]] = relationship(
+        "Log",
+        back_populates="user",
+        foreign_keys="Log.user_id",
+        cascade="all, delete-orphan",
+    )
     achievement_progress: Mapped[List["AchievementProgress"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",

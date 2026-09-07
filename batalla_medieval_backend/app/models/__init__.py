@@ -36,6 +36,7 @@ from .research import Research
 from .forum import ForumThread, ForumPost
 from .adventure import Adventure
 from .user_block import UserBlock
+from .support_case import SupportCase
 
 __all__ = [
     "User",
@@ -86,4 +87,5 @@ __all__ = [
     "ForumPost",
     "Adventure",
     "UserBlock",
+    "SupportCase",
 ]

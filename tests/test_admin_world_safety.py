@@ -43,6 +43,7 @@ def test_admin_city_creation_requires_owner_world_membership_and_free_coordinate
         "name": "Admin City",
         "x": 33,
         "y": 34,
+        "reason": "Support-approved city recovery",
     }
 
     not_joined = client.post("/admin/city/create", headers=_headers(admin), json=payload)
@@ -59,9 +60,6 @@ def test_admin_city_creation_requires_owner_world_membership_and_free_coordinate
     assert body["x"] == 33
     assert body["y"] == 34
 
-    # owner_id is intentionally not part of the public CityRead contract.
-    # Verify the administrative invariant from persistence instead of widening
-    # the response schema and leaking extra ownership metadata unnecessarily.
     persisted = db_session.query(models.City).filter_by(id=body["id"]).one()
     assert persisted.owner_id == owner.id
     assert persisted.world_id == world.id
@@ -79,3 +77,5 @@ def test_admin_city_creation_requires_owner_world_membership_and_free_coordinate
     create_entries = [entry for entry in logs.json() if entry["action"] == "create_city"]
     assert create_entries
     assert create_entries[0]["user_id"] == admin.id
+    assert create_entries[0]["reason"] == payload["reason"]
+    assert create_entries[0]["reversible"] is False

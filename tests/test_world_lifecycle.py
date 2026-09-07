@@ -10,7 +10,10 @@ def _auth_headers(user: models.User) -> dict[str, str]:
     token = create_access_token(
         {"sub": user.username, "type": "access", "ver": user.auth_version}
     )
-    return {"Authorization": f"Bearer {token}"}
+    return {
+        "Authorization": f"Bearer {token}",
+        "X-Admin-Reason": "BM-0072 lifecycle test",
+    }
 
 
 def test_admin_created_world_defaults_to_draft_and_cannot_be_joined(

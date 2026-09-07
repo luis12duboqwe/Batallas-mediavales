@@ -225,6 +225,7 @@ def get_chat_history(
     query = db.query(models.ChatMessage).filter(
         models.ChatMessage.channel == channel,
         models.ChatMessage.world_id == world_id,
+        models.ChatMessage.is_hidden.is_(False),
     )
 
     if channel == "alliance":
@@ -267,6 +268,7 @@ def private_history(
     query = db.query(models.ChatMessage).filter(
         models.ChatMessage.channel == "private",
         models.ChatMessage.world_id == world_id,
+        models.ChatMessage.is_hidden.is_(False),
         (
             ((models.ChatMessage.user_id == current_user.id) & (models.ChatMessage.receiver_id == user_id))
             | ((models.ChatMessage.user_id == user_id) & (models.ChatMessage.receiver_id == current_user.id))

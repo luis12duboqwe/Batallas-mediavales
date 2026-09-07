@@ -55,6 +55,8 @@ def create_event(db: Session, payload: schemas.EventCreate) -> models.WorldEvent
         modifiers=_merge_modifiers(template_modifiers),
     )
     db.add(event)
-    db.commit()
+    # The caller owns the transaction so event creation and its administrative
+    # audit record are committed atomically.
+    db.flush()
     db.refresh(event)
     return event

@@ -18,6 +18,7 @@ import MessagesView from './pages/MessagesView';
 import RankingView from './pages/RankingView';
 import ProfileView from './pages/ProfileView';
 import AdminPanel from './pages/AdminPanel';
+import AdminCityCreateCard from './pages/AdminCityCreateCard';
 import MarketView from './pages/MarketView';
 import AcademyView from './pages/AcademyView';
 import ExpansionView from './pages/ExpansionView';
@@ -203,7 +204,10 @@ const App = () => {
         path="/admin"
         element={
           <AdminRoute>
-            <Layout><AdminPanel /></Layout>
+            <Layout>
+              <AdminPanel />
+              <AdminCityCreateCard />
+            </Layout>
           </AdminRoute>
         }
       />

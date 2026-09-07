@@ -7,20 +7,14 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
-from ..routers.auth import get_current_user
-from ..services import balance, espionage, event as event_service
+from ..services import admin as admin_service
+from ..services import admin_permissions, balance, espionage, event as event_service
 from ..utils import utc_now
 
 router = APIRouter(tags=["wiki"])
 
 _seed_lock = threading.Lock()
 _builtin_seeded = False
-
-
-def require_admin(current_user: models.User = Depends(get_current_user)):
-    if not getattr(current_user, "is_admin", False):
-        raise HTTPException(status_code=403, detail="Admin privileges required")
-    return current_user
 
 
 def _fmt_cost(cost: dict) -> str:
@@ -411,11 +405,32 @@ def search_articles(
 def create_article(
     payload: schemas.WikiArticleCreate,
     db: Session = Depends(get_db),
-    current_admin: models.User = Depends(require_admin),
+    current_admin: models.User = Depends(
+        admin_permissions.require_capability("admin.manage")
+    ),
+    reason: str = Depends(admin_permissions.require_reason),
 ):
     ensure_builtin_articles(db)
     article = models.WikiArticle(**payload.model_dump())
     db.add(article)
+    db.flush()
+    admin_service.log_action(
+        db,
+        current_admin.id,
+        "create_wiki_article",
+        {"title": article.title},
+        target_type="wiki_article",
+        target_id=article.id,
+        reason=reason,
+        before_state=None,
+        after_state={
+            "exists": True,
+            "title": article.title,
+            "category": article.category,
+            "content_markdown": article.content_markdown,
+        },
+        reversible=False,
+    )
     db.commit()
     db.refresh(article)
     return article
@@ -426,20 +441,46 @@ def edit_article(
     article_id: int,
     payload: schemas.WikiArticleUpdate,
     db: Session = Depends(get_db),
-    current_admin: models.User = Depends(require_admin),
+    current_admin: models.User = Depends(
+        admin_permissions.require_capability("admin.manage")
+    ),
+    reason: str = Depends(admin_permissions.require_reason),
 ):
     ensure_builtin_articles(db)
     article = (
         db.query(models.WikiArticle)
         .filter(models.WikiArticle.id == article_id)
-        .first()
+        .with_for_update()
+        .one_or_none()
     )
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
 
+    before = {
+        "title": article.title,
+        "category": article.category,
+        "content_markdown": article.content_markdown,
+    }
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(article, field, value)
     article.updated_at = utc_now()
+    after = {
+        "title": article.title,
+        "category": article.category,
+        "content_markdown": article.content_markdown,
+    }
+    admin_service.log_action(
+        db,
+        current_admin.id,
+        "edit_wiki_article",
+        {"fields": sorted(payload.model_dump(exclude_unset=True))},
+        target_type="wiki_article",
+        target_id=article.id,
+        reason=reason,
+        before_state=before,
+        after_state=after,
+        reversible=False,
+    )
     db.add(article)
     db.commit()
     db.refresh(article)
