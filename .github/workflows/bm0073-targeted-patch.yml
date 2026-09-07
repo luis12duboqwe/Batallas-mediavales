@@ -1,0 +1,68 @@
+name: BM-0073 targeted patch
+
+on:
+  push:
+    branches:
+      - feature/BM-0073-admin-support-moderation
+    paths:
+      - .github/workflows/bm0073-targeted-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v7
+        with:
+          ref: feature/BM-0073-admin-support-moderation
+      - name: Apply exact BM-0073 patches
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "batalla_medieval_backend/app/routers/chat.py",
+              '''    query = db.query(models.ChatMessage).filter(\n        models.ChatMessage.channel == channel,\n        models.ChatMessage.world_id == world_id,\n    )''',
+              '''    query = db.query(models.ChatMessage).filter(\n        models.ChatMessage.channel == channel,\n        models.ChatMessage.world_id == world_id,\n        models.ChatMessage.is_hidden.is_(False),\n    )''',
+          )
+          replace_once(
+              "batalla_medieval_backend/app/routers/chat.py",
+              '''    query = db.query(models.ChatMessage).filter(\n        models.ChatMessage.channel == "private",\n        models.ChatMessage.world_id == world_id,\n        (''',
+              '''    query = db.query(models.ChatMessage).filter(\n        models.ChatMessage.channel == "private",\n        models.ChatMessage.world_id == world_id,\n        models.ChatMessage.is_hidden.is_(False),\n        (''',
+          )
+          replace_once(
+              "batalla_medieval_backend/app/services/forum.py",
+              '''            .filter(models.ForumPost.thread_id == thread.id)\n            .count()''',
+              '''            .filter(\n                models.ForumPost.thread_id == thread.id,\n                models.ForumPost.is_hidden.is_(False),\n            )\n            .count()''',
+          )
+          replace_once(
+              "batalla_medieval_backend/app/services/forum.py",
+              '''        .filter(models.ForumPost.thread_id == thread_id)\n        .order_by''',
+              '''        .filter(\n            models.ForumPost.thread_id == thread_id,\n            models.ForumPost.is_hidden.is_(False),\n        )\n        .order_by''',
+          )
+          replace_once(
+              "batalla_medieval_backend/app/services/admin.py",
+              '''        user.freeze_reason = before.get("freeze_reason")\n        user.auth_version += 1\n    else:\n        raise HTTPException(status_code=409, detail="Reversal handler is not available for this action")''',
+              '''        user.freeze_reason = before.get("freeze_reason")\n        user.auth_version += 1\n    elif original.action in {"moderate_chat_message", "moderate_forum_post"}:\n        from . import moderation\n\n        moderation.revert_from_audit(db, original, before, after)\n    else:\n        raise HTTPException(status_code=409, detail="Reversal handler is not available for this action")''',
+          )
+          PY
+          python -m compileall -q batalla_medieval_backend/app
+      - name: Commit targeted changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add batalla_medieval_backend/app/routers/chat.py batalla_medieval_backend/app/services/forum.py batalla_medieval_backend/app/services/admin.py
+          git diff --cached --check
+          git commit -m "feat(BM-0073): enforce hidden-content reads and moderation undo"
+          git push origin HEAD:feature/BM-0073-admin-support-moderation
