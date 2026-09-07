@@ -3,17 +3,20 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..database import get_db
-from ..routers.auth import get_current_user
 from ..schemas import anticheat as anticheat_schema
 from ..services import admin as admin_service
+from ..services import admin_permissions
 
 router = APIRouter(prefix="/anticheat", tags=["anticheat"])
 
 
 @router.get("/flags", response_model=list[anticheat_schema.AntiCheatFlagRead])
-def list_flags(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin privileges required")
+def list_flags(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(
+        admin_permissions.require_capability("audit.read")
+    ),
+):
     return (
         db.query(models.AntiCheatFlag)
         .order_by(models.AntiCheatFlag.timestamp.desc())
@@ -26,10 +29,10 @@ def resolve_flag(
     flag_id: int,
     payload: anticheat_schema.AntiCheatResolveRequest,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(
+        admin_permissions.require_capability("admin.manage")
+    ),
 ):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin privileges required")
     flag = db.query(models.AntiCheatFlag).filter(models.AntiCheatFlag.id == flag_id).first()
     if not flag:
         raise HTTPException(status_code=404, detail="Flag not found")
