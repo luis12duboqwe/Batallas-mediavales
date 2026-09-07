@@ -1,0 +1,43 @@
+name: BM-0073 lock refresh
+
+on:
+  push:
+    branches:
+      - feature/BM-0073-admin-support-moderation
+    paths:
+      - .github/workflows/bm0073-lock-refresh.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lock:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v7
+        with:
+          ref: feature/BM-0073-admin-support-moderation
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: batalla_medieval_frontend/package-lock.json
+      - name: Regenerate and verify lockfile
+        working-directory: batalla_medieval_frontend
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm audit --audit-level=high
+      - name: Commit refreshed lockfile
+        run: |
+          if git diff --quiet -- batalla_medieval_frontend/package-lock.json; then
+            echo "Lockfile already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add batalla_medieval_frontend/package-lock.json
+          git commit -m "chore(security): refresh frontend lockfile"
+          git push origin HEAD:feature/BM-0073-admin-support-moderation
