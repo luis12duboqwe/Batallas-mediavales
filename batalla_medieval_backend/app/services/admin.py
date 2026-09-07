@@ -504,6 +504,10 @@ def revert_action(
         user.is_frozen = bool(before["is_frozen"])
         user.freeze_reason = before.get("freeze_reason")
         user.auth_version += 1
+    elif original.action in {"moderate_chat_message", "moderate_forum_post"}:
+        from . import moderation
+
+        moderation.revert_from_audit(db, original, before, after)
     else:
         raise HTTPException(status_code=409, detail="Reversal handler is not available for this action")
 

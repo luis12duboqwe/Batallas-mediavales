@@ -44,7 +44,10 @@ def list_threads(
     for thread in threads:
         total_posts = (
             db.query(models.ForumPost)
-            .filter(models.ForumPost.thread_id == thread.id)
+            .filter(
+                models.ForumPost.thread_id == thread.id,
+                models.ForumPost.is_hidden.is_(False),
+            )
             .count()
         )
         result.append(
@@ -71,7 +74,10 @@ def get_thread(db: Session, thread_id: int):
 
     posts = (
         db.query(models.ForumPost)
-        .filter(models.ForumPost.thread_id == thread_id)
+        .filter(
+            models.ForumPost.thread_id == thread_id,
+            models.ForumPost.is_hidden.is_(False),
+        )
         .order_by(models.ForumPost.created_at.asc(), models.ForumPost.id.asc())
         .all()
     )
