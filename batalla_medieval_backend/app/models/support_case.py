@@ -11,7 +11,7 @@ from ..utils import get_utc_now
 class SupportCase(Base):
     __tablename__ = "support_cases"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     requester_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     world_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("worlds.id"), nullable=True, index=True)
     assigned_to_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
