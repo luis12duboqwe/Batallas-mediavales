@@ -1,0 +1,41 @@
+name: BM-0073 client cleanup
+
+on:
+  push:
+    branches:
+      - feature/BM-0073-admin-support-moderation
+    paths:
+      - .github/workflows/bm0073-client-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/BM-0073-admin-support-moderation
+      - name: Remove stale unsafe admin helpers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('batalla_medieval_frontend/src/api/axiosClient.js')
+          text = path.read_text()
+          old = '''  // Admin\n  adminUpdateResources: (cityId, resources) => axiosClient.patch(`/admin/city/${cityId}/resources`, resources),\n  adminSetBuildingLevel: (cityId, buildingType, level) => axiosClient.patch(`/admin/city/${cityId}/building/${buildingType}`, { new_level: level }),\n  adminSetTroops: (cityId, troops) => axiosClient.patch(`/admin/city/${cityId}/troops`, { troops }),\n  adminCreateCity: (data) => axiosClient.post('/admin/city/create', data),\n  adminTeleportCity: (cityId, x, y) => axiosClient.patch(`/admin/city/${cityId}/coordinates`, { x, y }),\n  adminDeleteUser: (userId) => axiosClient.delete(`/admin/user/${userId}`),\n  adminDeleteCity: (cityId) => axiosClient.delete(`/admin/city/${cityId}`),\n'''
+          new = '''  // Admin lifecycle. Sensitive BM-0073 operations use explicit payloads\n  // from AdminPanel so a mandatory reason can never be silently omitted.\n  adminGetWorlds: undefined,\n'''
+          # adminGetWorlds already exists earlier; only remove the legacy unsafe block.
+          new = '''  // Sensitive BM-0073 admin operations intentionally have no generic helpers:\n  // callers must construct explicit reasoned payloads at the administrative surface.\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one stale admin helper block, got {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git diff --check
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add batalla_medieval_frontend/src/api/axiosClient.js
+          git commit -m "chore(BM-0073): remove stale destructive admin client helpers"
+          git push origin HEAD:feature/BM-0073-admin-support-moderation
