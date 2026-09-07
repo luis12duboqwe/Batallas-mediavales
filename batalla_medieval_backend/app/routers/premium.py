@@ -4,15 +4,10 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
+from ..services import admin_permissions
 from ..services import premium as premium_service
 
 router = APIRouter(tags=["premium"])
-
-
-def require_admin(current_user: models.User = Depends(get_current_user)) -> models.User:
-    if not getattr(current_user, "is_admin", False):
-        raise HTTPException(status_code=403, detail="Admin privileges required")
-    return current_user
 
 
 @router.get("/status", response_model=schemas.PremiumStatusRead)
@@ -66,7 +61,9 @@ def use_feature(
 def grant_rubies(
     payload: schemas.GrantRubies,
     db: Session = Depends(get_db),
-    current_admin: models.User = Depends(require_admin),
+    current_admin: models.User = Depends(
+        admin_permissions.require_capability("admin.manage")
+    ),
 ):
     user = db.query(models.User).filter(models.User.id == payload.user_id).first()
     if not user:
