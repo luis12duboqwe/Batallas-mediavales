@@ -7,7 +7,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
 from ..routers.responses import error_response
-from ..services import market
+from ..services import anticheat, market
 from .world_access import require_open_world_access, require_world_access
 
 router = APIRouter(dependencies=[Depends(require_world_access)])
@@ -29,6 +29,10 @@ def get_city_or_404(db: Session, city_id: int, user: models.User, world_id: int)
     return city
 
 
+def _rate_limit(db: Session, user: models.User, action_key: str) -> None:
+    anticheat.enforce_action_rate_limit(db, user, action_key)
+
+
 @router.post("/offers", response_model=schemas.MarketOfferResponse)
 def create_offer(
     payload: schemas.MarketOfferCreate,
@@ -38,6 +42,7 @@ def create_offer(
     current_user: models.User = Depends(get_current_user),
     _: models.PlayerWorld = Depends(require_open_world_access),
 ):
+    _rate_limit(db, current_user, "market.offer.create")
     city = get_city_or_404(db, city_id, current_user, world_id)
     return market.create_offer(db, city, payload)
 
@@ -66,6 +71,7 @@ def npc_trade(
     current_user: models.User = Depends(get_current_user),
     _: models.PlayerWorld = Depends(require_open_world_access),
 ):
+    _rate_limit(db, current_user, "market.npc_trade")
     city = get_city_or_404(db, city_id, current_user, world_id)
     return market.npc_trade(db, city, offer_type, request_type, amount)
 
@@ -79,6 +85,7 @@ def accept_offer(
     current_user: models.User = Depends(get_current_user),
     _: models.PlayerWorld = Depends(require_open_world_access),
 ):
+    _rate_limit(db, current_user, "market.offer.accept")
     city = get_city_or_404(db, city_id, current_user, world_id)
     market.accept_offer(db, city, offer_id)
     return {"status": "accepted"}
@@ -93,6 +100,7 @@ def cancel_offer(
     current_user: models.User = Depends(get_current_user),
     _: models.PlayerWorld = Depends(require_open_world_access),
 ):
+    _rate_limit(db, current_user, "market.offer.cancel")
     city = get_city_or_404(db, city_id, current_user, world_id)
     market.cancel_offer(db, city, offer_id)
     return {"status": "cancelled"}
@@ -107,6 +115,7 @@ def send_resources(
     current_user: models.User = Depends(get_current_user),
     _: models.PlayerWorld = Depends(require_open_world_access),
 ):
+    _rate_limit(db, current_user, "market.transport")
     city = get_city_or_404(db, city_id, current_user, world_id)
     market.send_resources(db, city, payload)
     return {"status": "sent"}

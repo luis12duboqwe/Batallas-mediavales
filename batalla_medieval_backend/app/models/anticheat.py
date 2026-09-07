@@ -1,6 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -24,3 +33,24 @@ class AntiCheatFlag(Base):
 
     user = relationship("User", foreign_keys=[user_id])
     reviewer = relationship("User", foreign_keys=[reviewer_id])
+
+
+class AntiCheatRateBucket(Base):
+    __tablename__ = "anti_cheat_rate_buckets"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "action_key",
+            name="uq_anticheat_rate_bucket_user_action",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    action_key = Column(String(96), nullable=False)
+    window_started_at = Column(DateTime, default=get_utc_now, nullable=False)
+    request_count = Column(Integer, default=0, nullable=False)
+    blocked_until = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=get_utc_now, nullable=False)
+
+    user = relationship("User", foreign_keys=[user_id])

@@ -7,7 +7,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
 from ..routers.responses import error_response
-from ..services import movement, protection
+from ..services import anticheat, movement, protection
 
 router = APIRouter(tags=["movements"])
 
@@ -21,6 +21,8 @@ def create_movement(
     current_user: models.User = Depends(get_current_user),
 ):
     """Create a movement; world simulation remains worker-only."""
+
+    anticheat.enforce_action_rate_limit(db, current_user, "movement.create")
 
     origin_city = (
         db.query(models.City)
