@@ -120,8 +120,11 @@ def set_admin_role(
     user = db.query(models.User).filter(models.User.id == user_id).with_for_update().one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    if user.id == admin_user.id and not enabled:
-        raise HTTPException(status_code=400, detail="Administrators cannot revoke their own access")
+    if user.id == admin_user.id and (not enabled or role != "admin"):
+        raise HTTPException(
+            status_code=400,
+            detail="Administrators cannot demote or revoke their own access",
+        )
     if enabled and role not in admin_permissions.ADMIN_ROLES:
         raise HTTPException(status_code=400, detail="Invalid administrative role")
 
