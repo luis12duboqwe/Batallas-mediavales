@@ -7,6 +7,7 @@ from .middleware.language import LanguageMiddleware
 from .services import socket_manager
 from .routers import (
     admin,
+    admin_moderation,
     achievement,
     alliance,
     anticheat,
@@ -93,9 +94,10 @@ app.include_router(queue.router)
 app.include_router(world.router)
 app.include_router(support.router)
 
-# G1 administration/moderation surface. Both routers own their prefixes and
-# enforce administrator authorization internally.
+# G1 administration/moderation surface. Routers own their prefixes and enforce
+# capability authorization internally.
 app.include_router(admin.router)
+app.include_router(admin_moderation.router)
 app.include_router(anticheat.router)
 
 # Socket.IO is mounted around the HTTP application. The real-time transport
