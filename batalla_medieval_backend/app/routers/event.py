@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from .. import schemas
+from .. import models, schemas
 from ..database import get_db
-from ..routers.admin import require_admin
+from ..services import admin_permissions
 from ..services import event as event_service
 
 router = APIRouter(tags=["events"])
@@ -20,7 +20,9 @@ def get_active_event(db: Session = Depends(get_db)):
 def create_event(
     payload: schemas.EventCreate,
     db: Session = Depends(get_db),
-    current_admin=Depends(require_admin),
+    current_admin: models.User = Depends(
+        admin_permissions.require_capability("admin.manage")
+    ),
 ):
     try:
         event = event_service.create_event(db, payload)
