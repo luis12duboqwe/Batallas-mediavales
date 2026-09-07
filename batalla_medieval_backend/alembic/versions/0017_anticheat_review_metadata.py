@@ -34,7 +34,7 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "ix_anticheat_rate_buckets_user_id",
+        "ix_anti_cheat_rate_buckets_user_id",
         "anti_cheat_rate_buckets",
         ["user_id"],
     )
@@ -42,7 +42,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index(
-        "ix_anticheat_rate_buckets_user_id",
+        "ix_anti_cheat_rate_buckets_user_id",
         table_name="anti_cheat_rate_buckets",
     )
     op.drop_table("anti_cheat_rate_buckets")
