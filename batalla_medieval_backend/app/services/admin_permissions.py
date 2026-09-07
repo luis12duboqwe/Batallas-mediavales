@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, Header, HTTPException
 
 from .. import models
 from ..routers.auth import get_current_user
@@ -66,3 +66,20 @@ def require_capability(capability: str):
         return current_user
 
     return dependency
+
+
+def require_reason(
+    x_admin_reason: str = Header(..., alias="X-Admin-Reason", min_length=1, max_length=1000),
+) -> str:
+    """Require a non-blank reason for legacy admin endpoints without body room.
+
+    New BM-0073 endpoints carry ``reason`` in their typed request body. Older
+    administrative routes keep their existing body contracts and use this
+    header so the security invariant is enforced without overloading unrelated
+    domain schemas.
+    """
+
+    normalized = x_admin_reason.strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Administrative reason is required")
+    return normalized
