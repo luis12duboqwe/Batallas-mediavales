@@ -27,7 +27,6 @@ ROLE_CAPABILITIES = {
         "account.freeze",
         "content.moderate",
         "game.correct",
-        "world.manage",
     },
     "admin": {
         "audit.read",
