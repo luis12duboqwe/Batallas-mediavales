@@ -68,9 +68,11 @@ def update_support_case(
         admin_permissions.require_capability("support.manage")
     ),
 ):
+    values = payload.model_dump()
     return support_service.update_case(
         db,
         case_id,
         admin_user=current_admin,
-        **payload.model_dump(),
+        assigned_to_provided="assigned_to_id" in payload.model_fields_set,
+        **values,
     )

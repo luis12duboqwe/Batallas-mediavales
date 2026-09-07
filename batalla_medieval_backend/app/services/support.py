@@ -108,6 +108,7 @@ def update_case(
     status: str | None = None,
     priority: str | None = None,
     assigned_to_id: int | None = None,
+    assigned_to_provided: bool = False,
     resolution: str | None = None,
 ) -> models.SupportCase:
     case = (
@@ -148,17 +149,21 @@ def update_case(
             case.closed_at = now
         elif status == "in_progress":
             case.closed_at = None
+            case.resolved_at = None
 
     if priority is not None:
         if priority not in VALID_PRIORITIES:
             raise HTTPException(status_code=400, detail="Invalid support priority")
         case.priority = priority
 
-    if assigned_to_id is not None:
-        assignee = db.query(models.User).filter(models.User.id == assigned_to_id).one_or_none()
-        if assignee is None or not admin_permissions.effective_admin_role(assignee):
-            raise HTTPException(status_code=400, detail="Assignee must be an administrator")
-        case.assigned_to_id = assigned_to_id
+    if assigned_to_provided:
+        if assigned_to_id is None:
+            case.assigned_to_id = None
+        else:
+            assignee = db.query(models.User).filter(models.User.id == assigned_to_id).one_or_none()
+            if assignee is None or not admin_permissions.effective_admin_role(assignee):
+                raise HTTPException(status_code=400, detail="Assignee must be an administrator")
+            case.assigned_to_id = assigned_to_id
 
     if resolution is not None:
         case.resolution = resolution.strip() or None

@@ -33,7 +33,9 @@ def start_new_season(db: Session, world_id: str, name: str) -> models.Season:
         is_active=True,
     )
     db.add(new_season)
-    db.commit()
+    # The router owns the commit so the season mutation and administrative
+    # audit record are atomic.
+    db.flush()
     db.refresh(new_season)
     return new_season
 
@@ -110,9 +112,8 @@ def end_current_season(db: Session, world_id: str) -> List[models.SeasonResult]:
     season.end_date = utc_now()
     season.is_active = False
     results = _snapshot_rankings(db, season)
-    db.commit()
-    for result in results:
-        db.refresh(result)
+    # The router commits only after writing the matching audit record.
+    db.flush()
     return results
 
 

@@ -46,7 +46,11 @@ def effective_admin_role(user: models.User) -> str | None:
     if not bool(getattr(user, "is_admin", False)):
         return None
     role = getattr(user, "admin_role", None)
-    return role if role in ADMIN_ROLES else "admin"
+    if role is None:
+        # Compatibility for pre-BM-0073 administrators that have not yet been
+        # assigned an explicit role. Unknown non-null values must fail closed.
+        return "admin"
+    return role if role in ADMIN_ROLES else None
 
 
 def has_capability(user: models.User, capability: str) -> bool:

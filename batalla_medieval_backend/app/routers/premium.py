@@ -70,14 +70,21 @@ def grant_rubies(
     user = db.query(models.User).filter(models.User.id == payload.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
 
-    try:
-        status = premium_service.get_or_create_status(db, user)
-        before = {"rubies_balance": status.rubies_balance}
-        status = premium_service.grant_rubies(db, user, payload.amount)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
+    # Ensure the unique status row exists, then lock and mutate it without an
+    # intermediate commit. The ruby change and its audit row commit together.
+    premium_service.get_or_create_status(db, user)
+    status = (
+        db.query(models.PremiumStatus)
+        .filter(models.PremiumStatus.user_id == user.id)
+        .with_for_update()
+        .populate_existing()
+        .one()
+    )
+    before = {"rubies_balance": status.rubies_balance}
+    status.rubies_balance += payload.amount
     after = {"rubies_balance": status.rubies_balance}
     admin_service.log_action(
         db,
@@ -92,4 +99,5 @@ def grant_rubies(
         reversible=False,
     )
     db.commit()
+    db.refresh(status)
     return status

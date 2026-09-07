@@ -1,6 +1,6 @@
 from typing import Dict, List
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
@@ -144,6 +144,13 @@ def set_admin_role(
         admin_permissions.require_capability("admin.roles")
     ),
 ):
+    if user_id == current_admin.id and (
+        not payload.enabled or payload.role != "admin"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Administrators cannot demote or revoke their own access",
+        )
     return admin_service.set_admin_role(
         db,
         user_id,
