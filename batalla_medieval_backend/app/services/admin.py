@@ -358,7 +358,7 @@ def create_city(
     )
     db.add(city)
     db.flush()
-    production.recalculate_resources(db, city)
+    production.recalculate_resources(db, city, commit=False)
     log_action(
         db,
         admin_user.id,
