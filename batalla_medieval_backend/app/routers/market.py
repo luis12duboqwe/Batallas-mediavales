@@ -29,8 +29,21 @@ def get_city_or_404(db: Session, city_id: int, user: models.User, world_id: int)
     return city
 
 
-def _rate_limit(db: Session, user: models.User, action_key: str) -> None:
+def _rate_limit_open_world(
+    db: Session,
+    user: models.User,
+    world_id: int,
+    action_key: str,
+) -> models.PlayerWorld:
+    """Persist the abuse bucket before acquiring the gameplay lifecycle lock.
+
+    The limiter intentionally commits its durable bucket/evidence. Acquiring the
+    world lock only after that commit ensures the lock remains held until the
+    market service commits the actual gameplay mutation.
+    """
+
     anticheat.enforce_action_rate_limit(db, user, action_key)
+    return require_open_world_access(world_id, db, user)
 
 
 @router.post("/offers", response_model=schemas.MarketOfferResponse)
@@ -40,9 +53,8 @@ def create_offer(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
-    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
-    _rate_limit(db, current_user, "market.offer.create")
+    _rate_limit_open_world(db, current_user, world_id, "market.offer.create")
     city = get_city_or_404(db, city_id, current_user, world_id)
     return market.create_offer(db, city, payload)
 
@@ -69,9 +81,8 @@ def npc_trade(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
-    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
-    _rate_limit(db, current_user, "market.npc_trade")
+    _rate_limit_open_world(db, current_user, world_id, "market.npc_trade")
     city = get_city_or_404(db, city_id, current_user, world_id)
     return market.npc_trade(db, city, offer_type, request_type, amount)
 
@@ -83,9 +94,8 @@ def accept_offer(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
-    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
-    _rate_limit(db, current_user, "market.offer.accept")
+    _rate_limit_open_world(db, current_user, world_id, "market.offer.accept")
     city = get_city_or_404(db, city_id, current_user, world_id)
     market.accept_offer(db, city, offer_id)
     return {"status": "accepted"}
@@ -98,9 +108,8 @@ def cancel_offer(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
-    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
-    _rate_limit(db, current_user, "market.offer.cancel")
+    _rate_limit_open_world(db, current_user, world_id, "market.offer.cancel")
     city = get_city_or_404(db, city_id, current_user, world_id)
     market.cancel_offer(db, city, offer_id)
     return {"status": "cancelled"}
@@ -113,9 +122,8 @@ def send_resources(
     world_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
-    _: models.PlayerWorld = Depends(require_open_world_access),
 ):
-    _rate_limit(db, current_user, "market.transport")
+    _rate_limit_open_world(db, current_user, world_id, "market.transport")
     city = get_city_or_404(db, city_id, current_user, world_id)
     market.send_resources(db, city, payload)
     return {"status": "sent"}

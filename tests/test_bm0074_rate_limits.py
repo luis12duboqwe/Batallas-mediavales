@@ -2,6 +2,8 @@ import pytest
 from fastapi import HTTPException
 
 from app import models
+from app.routers import market as market_router
+from app.routers import movement as movement_router
 from app.routers.auth import create_access_token
 from app.services import anticheat
 
@@ -113,6 +115,65 @@ def test_rate_limit_repeated_denials_dedupe_flags(db_session, user):
         .count()
         == 1
     )
+
+
+def test_market_rate_limit_happens_before_world_lock(db_session, user, monkeypatch):
+    calls: list[tuple] = []
+
+    def fake_limit(db, actor, action_key):
+        assert db is db_session
+        assert actor.id == user.id
+        calls.append(("limit", action_key))
+
+    def fake_open(world_id, db, actor):
+        assert db is db_session
+        assert actor.id == user.id
+        calls.append(("lock", world_id))
+        return object()
+
+    monkeypatch.setattr(anticheat, "enforce_action_rate_limit", fake_limit)
+    monkeypatch.setattr(market_router, "require_open_world_access", fake_open)
+
+    market_router._rate_limit_open_world(
+        db_session,
+        user,
+        1,
+        "market.npc_trade",
+    )
+
+    assert calls == [("limit", "market.npc_trade"), ("lock", 1)]
+
+
+def test_movement_locks_world_after_rate_limit(client, user, monkeypatch):
+    calls: list[tuple] = []
+
+    def fake_limit(db, actor, action_key):
+        assert actor.id == user.id
+        calls.append(("limit", action_key))
+
+    def fake_require_world_open(db, world_id, lock=False):
+        calls.append(("lock", world_id, lock))
+        return db.query(models.World).filter(models.World.id == world_id).one()
+
+    monkeypatch.setattr(anticheat, "enforce_action_rate_limit", fake_limit)
+    monkeypatch.setattr(
+        movement_router.world_lifecycle,
+        "require_world_open",
+        fake_require_world_open,
+    )
+
+    payload = {
+        "origin_city_id": 999999,
+        "target_city_id": 999998,
+        "movement_type": "attack",
+        "troops": {"basic_infantry": 1},
+        "resources": {},
+        "world_id": 1,
+    }
+    response = client.post("/movement/", json=payload, headers=_headers(user))
+
+    assert response.status_code == 404
+    assert calls[:2] == [("limit", "movement.create"), ("lock", 1, True)]
 
 
 def test_movement_endpoint_applies_authoritative_rate_limit(

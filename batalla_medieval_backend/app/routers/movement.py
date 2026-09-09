@@ -7,7 +7,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
 from ..routers.responses import error_response
-from ..services import anticheat, movement, protection
+from ..services import anticheat, movement, protection, world_lifecycle
 
 router = APIRouter(tags=["movements"])
 
@@ -23,6 +23,15 @@ def create_movement(
     """Create a movement; world simulation remains worker-only."""
 
     anticheat.enforce_action_rate_limit(db, current_user, "movement.create")
+    try:
+        world_lifecycle.require_world_open(db, payload.world_id, lock=True)
+    except ValueError as exc:
+        raise error_response(
+            409,
+            "world_not_open",
+            "This world is not open for gameplay mutations",
+            {"world_id": payload.world_id},
+        ) from exc
 
     origin_city = (
         db.query(models.City)
