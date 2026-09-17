@@ -222,7 +222,9 @@ def enforce_action_rate_limit(
     db.commit()
 
 
-def check_action_speed(db: Session, user: models.User, action_name: str):
+def check_action_speed(
+    db: Session, user: models.User, action_name: str, *, commit: bool = True
+):
     """Legacy heuristic signal; authoritative blocking uses rate buckets."""
 
     now = utc_now()
@@ -235,10 +237,12 @@ def check_action_speed(db: Session, user: models.User, action_name: str):
                 "bot_detection",
                 "critical",
                 f"Actions executed too quickly ({delta * 1000:.1f}ms) during {action_name}",
+                commit=commit,
             )
     user.last_action_at = now
     db.add(user)
-    db.commit()
+    if commit:
+        db.commit()
 
 
 def check_repeated_actions(db: Session, user: models.User, signature: str):
