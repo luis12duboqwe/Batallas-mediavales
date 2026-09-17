@@ -204,6 +204,7 @@ jobs:
           node e2e/g16-world-lifecycle.mjs
           node e2e/g17-admin-support.mjs
           node e2e/g18-anticheat.mjs
+          node e2e/g19-tutorial-help.mjs
       - name: Show service logs
         if: always()
         run: |
