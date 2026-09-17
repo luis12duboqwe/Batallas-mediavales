@@ -25,6 +25,7 @@ import ExpansionView from './pages/ExpansionView';
 import SendMovementView from './pages/SendMovementView';
 import HeroView from './pages/HeroView';
 import AdventuresView from './pages/AdventuresView';
+import WikiView from './pages/WikiView';
 import TutorialOverlay from './components/TutorialOverlay';
 import { useUserStore } from './store/userStore';
 import { useCityStore } from './store/cityStore';
@@ -46,6 +47,7 @@ const sidebarLinks = [
   { to: '/ranking', key: 'nav.ranking', icon: '🏆' },
   { to: '/alliance', key: 'nav.alliance', icon: '🤝' },
   { to: '/messages', key: 'nav.messages', icon: '✉️' },
+  { to: '/wiki', key: 'nav.wiki', icon: '📚' },
 ];
 
 const NavLink = ({ link, active, mobile = false, t }) => (
@@ -198,6 +200,7 @@ const App = () => {
       <Route path="/ranking" element={<GameRoute><RankingView /></GameRoute>} />
       <Route path="/alliance" element={<GameRoute><AllianceView /></GameRoute>} />
       <Route path="/messages" element={<GameRoute><MessagesView /></GameRoute>} />
+      <Route path="/wiki" element={<GameRoute><WikiView /></GameRoute>} />
       <Route path="/send-movement/:targetCityId" element={<GameRoute><SendMovementView /></GameRoute>} />
 
       <Route
