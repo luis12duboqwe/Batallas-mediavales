@@ -288,7 +288,7 @@ def send_movement(
     distance = math.hypot(origin_city.x - target_x, origin_city.y - target_y)
 
     if origin_city.owner:
-        anticheat.check_action_speed(db, origin_city.owner, "movement")
+        anticheat.check_action_speed(db, origin_city.owner, "movement", commit=False)
 
     movement_obj = _reserve_payload_and_create(
         db,
