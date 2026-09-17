@@ -1,7 +1,16 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
+
+
+AntiCheatResolutionStatus = Literal[
+    "resolved",
+    "confirmed",
+    "false_positive",
+    "monitoring",
+    "dismissed",
+]
 
 
 class AntiCheatFlagBase(BaseModel):
@@ -12,6 +21,8 @@ class AntiCheatFlagBase(BaseModel):
     reviewed_by_admin: bool = False
     resolved_status: str
     reviewer_id: Optional[int] = None
+    reviewed_at: Optional[datetime] = None
+    resolution_reason: Optional[str] = None
 
 
 class AntiCheatFlagRead(AntiCheatFlagBase):
@@ -22,5 +33,7 @@ class AntiCheatFlagRead(AntiCheatFlagBase):
 
 
 class AntiCheatResolveRequest(BaseModel):
-    resolved_status: str = "resolved"
-    reviewed_by_admin: bool = True
+    resolved_status: AntiCheatResolutionStatus = "resolved"
+    # Compatibility-only input. The server is authoritative and always records
+    # a successful review as reviewed regardless of this client value.
+    reviewed_by_admin: Optional[bool] = None

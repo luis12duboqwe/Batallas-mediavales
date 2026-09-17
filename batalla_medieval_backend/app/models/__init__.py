@@ -23,7 +23,7 @@ from .market_offer import MarketOffer
 from .hero import Hero
 from .admin_bot_log import AdminBotLog
 from .notification import Notification
-from .anticheat import AntiCheatFlag
+from .anticheat import AntiCheatFlag, AntiCheatRateBucket
 from .event import WorldEvent
 from .quest import Quest
 from .quest_progress import QuestProgress
@@ -71,6 +71,7 @@ __all__ = [
     "AdminBotLog",
     "Notification",
     "AntiCheatFlag",
+    "AntiCheatRateBucket",
     "WorldEvent",
     "Quest",
     "QuestProgress",
