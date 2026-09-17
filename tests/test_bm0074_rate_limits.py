@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 from fastapi import HTTPException
 
@@ -6,6 +8,7 @@ from app.routers import market as market_router
 from app.routers import movement as movement_router
 from app.routers.auth import create_access_token
 from app.services import anticheat
+from app.utils import utc_now
 
 
 def _headers(user: models.User) -> dict[str, str]:
@@ -198,3 +201,28 @@ def test_movement_endpoint_applies_authoritative_rate_limit(
     assert blocked.status_code == 429
     assert blocked.json()["detail"] == "Rate limit exceeded"
     assert int(blocked.headers["Retry-After"]) >= 1
+
+
+def test_action_speed_telemetry_keeps_caller_transaction_open(db_session, user, monkeypatch):
+    user.last_action_at = utc_now() - timedelta(milliseconds=5)
+    db_session.add(user)
+    db_session.commit()
+
+    commits = []
+    real_commit = db_session.commit
+
+    def record_commit():
+        commits.append(True)
+        real_commit()
+
+    monkeypatch.setattr(db_session, "commit", record_commit)
+    anticheat.check_action_speed(db_session, user, "movement", commit=False)
+
+    assert commits == []
+    assert db_session.query(models.AntiCheatFlag).filter_by(
+        user_id=user.id, type_of_violation="bot_detection"
+    ).count() == 1
+    db_session.rollback()
+    assert db_session.query(models.AntiCheatFlag).filter_by(
+        user_id=user.id, type_of_violation="bot_detection"
+    ).count() == 0
