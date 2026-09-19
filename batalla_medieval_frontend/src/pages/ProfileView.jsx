@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useUserStore } from '../store/userStore';
 import { api } from '../api/axiosClient';
+import GameIcon from '../components/GameIcon';
 
 const ProfileView = () => {
   const { t, i18n } = useTranslation();
@@ -87,7 +88,9 @@ const ProfileView = () => {
             </div>
             <div>
               <div className="text-gray-500 text-sm">{t('profile.rubies')}</div>
-              <div className="text-xl text-red-400">💎 {user.rubies_balance}</div>
+              <div className="text-xl text-red-400 inline-flex items-center gap-2">
+                <GameIcon name="gem" size={20} /> {user.rubies_balance}
+              </div>
             </div>
           </div>
         </div>
