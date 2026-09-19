@@ -5,13 +5,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sourceRoot = join(root, 'src');
 const checkedExtensions = new Set(['.js', '.jsx', '.css', '.html']);
-
-const provisionalEmoji = [
-  '🏰', '🛠️', '⛺', '🎓', '⚔️', '🦸', '🧭', '🗺️', '🥾', '📜', '⚖️', '🏆', '🤝', '✉️', '📚',
-  '🪵', '🪨', '⛓️', '🪙', '👥', '🛡️', '⚠️', '🏛️', '🐎', '🧱', '🌾', '📦', '⚒️', '⚙️', '⛪', '🕍',
-  '🌟', '🔒', '👁️', '📥', '↩️', '🌲', '🏞️', '🌴', '🏠', '⬆️', '⬇️', '⬅️', '➡️', '✦', '⏱️',
-  '🎒', '💨', '🏗️', '🕵️', '📌', '💎',
-];
+const pictographicEmoji = /\p{Extended_Pictographic}/gu;
 
 const remoteMediaPatterns = [
   /@import\s+url\(\s*['"]?https?:\/\//i,
@@ -35,8 +29,9 @@ const failures = [];
 for (const path of files) {
   const text = await readFile(path, 'utf8');
   const display = relative(root, path);
-  for (const emoji of provisionalEmoji) {
-    if (text.includes(emoji)) failures.push(`${display}: provisional UI symbol ${emoji}`);
+  const emojiMatches = [...new Set(text.match(pictographicEmoji) || [])];
+  for (const emoji of emojiMatches) {
+    failures.push(`${display}: pictographic emoji is not approved production iconography (${emoji})`);
   }
   for (const pattern of remoteMediaPatterns) {
     if (pattern.test(text)) failures.push(`${display}: remote runtime visual/media dependency (${pattern})`);
