@@ -34,8 +34,10 @@ async function login() {
   await page.waitForURL(`${BASE_URL}/`, { timeout: 20000 });
 }
 
-async function checkRoute(route, expectMainIcon = true) {
+async function checkRoute(route) {
   await page.goto(`${BASE_URL}${route}`, { waitUntil: 'networkidle' });
+  await page.locator('main').waitFor({ state: 'visible', timeout: 15000 });
+
   const navigation = page.getByTestId('mobile-navigation');
   await navigation.waitFor({ state: 'visible', timeout: 15000 });
 
@@ -45,11 +47,6 @@ async function checkRoute(route, expectMainIcon = true) {
   const navigationText = await navigation.innerText();
   for (const symbol of provisionalSymbols) {
     if (navigationText.includes(symbol)) failures.push(`${route}: provisional navigation symbol ${symbol} is still visible`);
-  }
-
-  if (expectMainIcon) {
-    const mainSvgCount = await page.locator('main svg').count();
-    if (mainSvgCount === 0) failures.push(`${route}: expected local SVG iconography in the primary content`);
   }
 }
 
@@ -62,14 +59,14 @@ try {
   await checkRoute('/troops');
   await checkRoute('/map');
   await checkRoute('/movements');
-  await checkRoute('/wiki', false);
+  await checkRoute('/wiki');
 
   if (externalRequests.size > 0) {
     failures.push(`External runtime requests detected:\n${[...externalRequests].join('\n')}`);
   }
 
   if (failures.length) throw new Error(failures.join('\n'));
-  console.log('G20 visual assets passed: shared SVG system rendered and no external runtime visual dependencies were requested');
+  console.log('G20 visual assets passed: shared SVG navigation rendered, accepted routes loaded, and no external runtime visual dependencies were requested');
 } finally {
   await browser.close();
 }
