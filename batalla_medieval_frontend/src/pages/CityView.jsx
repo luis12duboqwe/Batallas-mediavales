@@ -2,28 +2,29 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useCityStore } from '../store/cityStore';
 import { buildingList } from '../utils/gameMath';
+import GameIcon from '../components/GameIcon';
 
 const oasisResourceMeta = {
-  wood: { icon: '🌲', label: 'Madera' },
-  stone: { icon: '🪨', label: 'Piedra' },
-  iron: { icon: '⛓️', label: 'Hierro' },
-  gold: { icon: '🪙', label: 'Oro' },
+  wood: { icon: 'wood', label: 'Madera' },
+  stone: { icon: 'stone', label: 'Piedra' },
+  iron: { icon: 'iron', label: 'Hierro' },
+  gold: { icon: 'gold', label: 'Oro' },
 };
 
 const buildingIcons = {
-  town_hall: '🏛️',
-  barracks: '🛡️',
-  stable: '🐎',
-  academy: '📚',
-  wall: '🧱',
-  market: '⚖️',
-  farm: '🌾',
-  warehouse: '📦',
-  smithy: '⚒️',
-  workshop: '⚙️',
-  church: '⛪',
-  cathedral: '🕍',
-  world_wonder: '🌟',
+  town_hall: 'townHall',
+  barracks: 'barracks',
+  stable: 'stable',
+  academy: 'academy',
+  wall: 'wall',
+  market: 'scales',
+  farm: 'farm',
+  warehouse: 'warehouse',
+  smithy: 'smithy',
+  workshop: 'workshop',
+  church: 'church',
+  cathedral: 'cathedral',
+  world_wonder: 'star',
 };
 
 const CityView = () => {
@@ -54,7 +55,10 @@ const CityView = () => {
               : 'Malla detallada de tus estructuras.'}
           </p>
         </div>
-        <span className="badge">{isCamp ? '⛺ Campamento' : '🏰 Ciudad'} · Estado en tiempo real</span>
+        <span className="badge">
+          <GameIcon name={isCamp ? 'camp' : 'castle'} size={15} />
+          {isCamp ? 'Campamento' : 'Ciudad'} · Estado en tiempo real
+        </span>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
         {buildingMap.map((building) => (
@@ -63,8 +67,8 @@ const CityView = () => {
             className="card relative p-4 text-center overflow-hidden group transition hover:-translate-y-1 hover:shadow-[0_16px_40px_rgba(0,0,0,0.45)]"
           >
             <div className="absolute inset-0 bg-gradient-to-br from-yellow-400/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition" />
-            <div className="h-16 w-16 rounded-full bg-gray-800/80 mx-auto mb-3 border border-yellow-800/50 flex items-center justify-center text-2xl shadow-inner">
-              {buildingIcons[building.name] || '🏰'}
+            <div className="h-16 w-16 rounded-full bg-gray-800/80 mx-auto mb-3 border border-yellow-800/50 flex items-center justify-center text-yellow-200 shadow-inner">
+              <GameIcon name={buildingIcons[building.name] || 'castle'} size={31} />
             </div>
             <h3 className="text-lg">{building.display_name || t(building.name)}</h3>
             <p className="text-sm text-gray-400">Nivel {building.level}</p>
@@ -82,16 +86,16 @@ const CityView = () => {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {currentCity.oases.map((oasis) => {
               const resourceMeta = oasisResourceMeta[oasis.resource_type] || {
-                icon: '🏞️',
+                icon: 'oasis',
                 label: oasis.resource_type,
               };
               return (
                 <div key={oasis.id} className="bg-gray-800 p-4 rounded border border-green-700/50 shadow-lg relative overflow-hidden">
-                  <div className="absolute top-0 right-0 p-1 bg-green-900/50 rounded-bl text-xs text-green-200">
-                    Activo
-                  </div>
+                  <div className="absolute top-0 right-0 p-1 bg-green-900/50 rounded-bl text-xs text-green-200">Activo</div>
                   <div className="flex items-center gap-3 mb-2">
-                    <div className="text-3xl filter drop-shadow-lg">{resourceMeta.icon}</div>
+                    <div className="h-11 w-11 rounded-full border border-green-700/50 bg-green-950/40 text-green-200 flex items-center justify-center drop-shadow-lg">
+                      <GameIcon name={resourceMeta.icon} size={24} />
+                    </div>
                     <div>
                       <div className="font-bold text-white text-lg">{resourceMeta.label}</div>
                       <div className="text-green-400 font-bold text-sm">+{oasis.bonus_percent}% Producción</div>
