@@ -117,6 +117,8 @@ jobs:
           cache-dependency-path: batalla_medieval_frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Validate visual asset policy
+        run: npm run lint:visual-assets
       - name: Lint frontend
         run: npm run lint
       - name: Build frontend
