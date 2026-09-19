@@ -10,7 +10,7 @@ const provisionalEmoji = [
   '🏰', '🛠️', '⛺', '🎓', '⚔️', '🦸', '🧭', '🗺️', '🥾', '📜', '⚖️', '🏆', '🤝', '✉️', '📚',
   '🪵', '🪨', '⛓️', '🪙', '👥', '🛡️', '⚠️', '🏛️', '🐎', '🧱', '🌾', '📦', '⚒️', '⚙️', '⛪', '🕍',
   '🌟', '🔒', '👁️', '📥', '↩️', '🌲', '🏞️', '🌴', '🏠', '⬆️', '⬇️', '⬅️', '➡️', '✦', '⏱️',
-  '🎒', '💨', '🏗️', '🕵️',
+  '🎒', '💨', '🏗️', '🕵️', '📌', '💎',
 ];
 
 const remoteMediaPatterns = [
@@ -32,7 +32,6 @@ async function walk(directory) {
 
 const files = [...await walk(sourceRoot), join(root, 'index.html')];
 const failures = [];
-
 for (const path of files) {
   const text = await readFile(path, 'utf8');
   const display = relative(root, path);
@@ -49,5 +48,4 @@ if (failures.length) {
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exit(1);
 }
-
 console.log(`BM-0080 visual asset policy passed (${files.length} frontend source files checked)`);

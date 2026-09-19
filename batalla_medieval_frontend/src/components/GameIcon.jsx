@@ -18,6 +18,9 @@ const iconShapes = {
   stone: <><path d="m5 7 5-4 7 2 3 6-3 8-9 2-5-6 2-8Z"/><path d="m10 3 2 5 8 3M3 15l7-2 7 6M10 13l2-5"/></>,
   iron: <><path d="M5 5h14l-2 5H7L5 5ZM7 10h10l2 9H5l2-9Z"/><path d="M9 14h6"/></>,
   gold: <><circle cx="12" cy="12" r="8"/><path d="M9 9h4a2 2 0 0 1 0 4H9m3-6v10M9 13h5a2 2 0 0 1 0 4H9"/></>,
+  gem: <><path d="M6 4h12l4 6-10 11L2 10l4-6Z"/><path d="m2 10 5-1 5 12 5-12 5 1M6 4l1 5h10l1-5"/></>,
+  bag: <><path d="M6 9h12l2 11H4L6 9Z"/><path d="M9 9V7a3 3 0 0 1 6 0v2M8 13h8"/></>,
+  pin: <><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"/><path d="M12 14v7"/></>,
   population: <><circle cx="8" cy="8" r="3"/><circle cx="16" cy="9" r="2.5"/><path d="M2 21v-2c0-4 2-6 6-6s6 2 6 6v2M13 15c1-1 2-2 4-2 3 0 5 2 5 5v3"/></>,
   shield: <><path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></>,
   warning: <><path d="M12 3 2 21h20L12 3Z"/><path d="M12 9v5M12 18h.01"/></>,
@@ -52,19 +55,7 @@ const iconShapes = {
 };
 
 const GameIcon = ({ name, size = 20, className = '' }) => (
-  <svg
-    viewBox="0 0 24 24"
-    width={size}
-    height={size}
-    className={className}
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-    focusable="false"
-  >
+  <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
     {iconShapes[name] || iconShapes.shield}
   </svg>
 );
