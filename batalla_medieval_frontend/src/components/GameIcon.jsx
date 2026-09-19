@@ -47,6 +47,8 @@ const iconShapes = {
   return: <><path d="M9 7 4 12l5 5"/><path d="M5 12h9a6 6 0 0 1 6 6v2"/></>,
   house: <><path d="m3 11 9-7 9 7"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
   oasis: <><path d="M12 21V9M12 9c-2-3-5-4-8-3 1 3 4 5 8 3ZM12 9c2-3 5-4 8-3-1 3-4 5-8 3Z"/><path d="M3 21h18M6 17c2-2 4-2 6 0 2-2 4-2 6 0"/></>,
+  music: <><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/><path d="M9 9l10-2"/></>,
+  bell: <><path d="M6 17h12l-2-3V9a4 4 0 0 0-8 0v5l-2 3Z"/><path d="M10 20h4"/></>,
   arrowUp: <><path d="m6 14 6-6 6 6M12 8v11"/></>,
   arrowDown: <><path d="m6 10 6 6 6-6M12 5v11"/></>,
   arrowLeft: <><path d="m14 6-6 6 6 6M8 12h11"/></>,
