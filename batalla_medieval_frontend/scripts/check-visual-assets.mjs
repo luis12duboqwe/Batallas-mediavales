@@ -4,13 +4,14 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sourceRoot = join(root, 'src');
-const checkedExtensions = new Set(['.js', '.jsx', '.css', '.html']);
+const checkedExtensions = new Set(['.js', '.jsx', '.css', '.html', '.json', '.svg']);
 const pictographicEmoji = /\p{Extended_Pictographic}/gu;
 
 const remoteMediaPatterns = [
-  /@import\s+url\(\s*['"]?https?:\/\//i,
-  /url\(\s*['"]?https?:\/\//i,
-  /<(?:img|audio|video|source)\b[^>]*\bsrc\s*=\s*['"]https?:\/\//i,
+  /@import\s+url\(\s*['"]?(?:https?:)?\/\//i,
+  /url\(\s*['"]?(?:https?:)?\/\//i,
+  /<(?:img|audio|video|source)\b[^>]*\bsrc\s*=\s*['"](?:https?:)?\/\//i,
+  /<(?:image|use)\b[^>]*\b(?:href|xlink:href)\s*=\s*['"](?:https?:)?\/\//i,
 ];
 
 async function walk(directory) {
