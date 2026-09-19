@@ -1,15 +1,23 @@
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --bm-gold: #d4af37;
+  --bm-gold-soft: #e8cf79;
+  --bm-ink: #0b0f19;
+  --bm-iron: #1f2937;
+  --bm-parchment: #f4e5c2;
+}
+
 body {
   @apply bg-midnight text-gray-100 font-body;
-  background-image: radial-gradient(circle at 20% 20%, rgba(212, 175, 55, 0.06), transparent 35%),
+  background-color: var(--bm-ink);
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(212, 175, 55, 0.07), transparent 34%),
     radial-gradient(circle at 80% 0%, rgba(148, 97, 17, 0.12), transparent 30%),
-    linear-gradient(135deg, rgba(17, 24, 39, 0.9), rgba(3, 7, 18, 0.98)),
-    url('https://www.transparenttextures.com/patterns/dark-denim-3.png');
+    repeating-linear-gradient(135deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 6px),
+    linear-gradient(135deg, rgba(17, 24, 39, 0.94), rgba(3, 7, 18, 0.99));
   background-attachment: fixed;
 }
 
@@ -106,24 +114,12 @@ a {
 }
 
 @keyframes metallic-shine {
-  0% {
-    background-position: -120% 0;
-  }
-  50% {
-    background-position: 40% 0;
-  }
-  100% {
-    background-position: 120% 0;
-  }
+  0% { background-position: -120% 0; }
+  50% { background-position: 40% 0; }
+  100% { background-position: 120% 0; }
 }
 
 @keyframes fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }

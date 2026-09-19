@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import ResourceBar from './components/ResourceBar';
+import GameIcon from './components/GameIcon';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
@@ -33,21 +34,21 @@ import soundManager from './services/sound';
 import { useTranslation } from 'react-i18next';
 
 const sidebarLinks = [
-  { to: '/', key: 'nav.city', icon: '🏰' },
-  { to: '/buildings', key: 'nav.buildings', icon: '🛠️' },
-  { to: '/expansion', key: 'nav.expansion', icon: '⛺' },
-  { to: '/academy', key: 'nav.academy', icon: '🎓' },
-  { to: '/troops', key: 'nav.troops', icon: '⚔️' },
-  { to: '/hero', key: 'nav.hero', icon: '🦸' },
-  { to: '/adventures', key: 'nav.adventures', icon: '🧭' },
-  { to: '/map', key: 'nav.map', icon: '🗺️' },
-  { to: '/movements', key: 'nav.movements', icon: '🥾' },
-  { to: '/reports', key: 'nav.reports', icon: '📜' },
-  { to: '/market', key: 'nav.market', icon: '⚖️' },
-  { to: '/ranking', key: 'nav.ranking', icon: '🏆' },
-  { to: '/alliance', key: 'nav.alliance', icon: '🤝' },
-  { to: '/messages', key: 'nav.messages', icon: '✉️' },
-  { to: '/wiki', key: 'nav.wiki', icon: '📚' },
+  { to: '/', key: 'nav.city', icon: 'castle' },
+  { to: '/buildings', key: 'nav.buildings', icon: 'buildings' },
+  { to: '/expansion', key: 'nav.expansion', icon: 'camp' },
+  { to: '/academy', key: 'nav.academy', icon: 'academy' },
+  { to: '/troops', key: 'nav.troops', icon: 'sword' },
+  { to: '/hero', key: 'nav.hero', icon: 'hero' },
+  { to: '/adventures', key: 'nav.adventures', icon: 'compass' },
+  { to: '/map', key: 'nav.map', icon: 'map' },
+  { to: '/movements', key: 'nav.movements', icon: 'boot' },
+  { to: '/reports', key: 'nav.reports', icon: 'scroll' },
+  { to: '/market', key: 'nav.market', icon: 'scales' },
+  { to: '/ranking', key: 'nav.ranking', icon: 'trophy' },
+  { to: '/alliance', key: 'nav.alliance', icon: 'alliance' },
+  { to: '/messages', key: 'nav.messages', icon: 'mail' },
+  { to: '/wiki', key: 'nav.wiki', icon: 'book' },
 ];
 
 const NavLink = ({ link, active, mobile = false, t }) => (
@@ -68,7 +69,7 @@ const NavLink = ({ link, active, mobile = false, t }) => (
           }`
     }
   >
-    <span className={mobile ? 'text-base' : 'text-lg'} aria-hidden>{link.icon}</span>
+    <GameIcon name={link.icon} size={mobile ? 18 : 20} className="shrink-0" />
     <span className="font-medium whitespace-nowrap">{t(link.key)}</span>
   </Link>
 );

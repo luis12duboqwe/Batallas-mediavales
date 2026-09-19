@@ -3,28 +3,22 @@ import { api } from '../api/axiosClient';
 import { useUserStore } from '../store/userStore';
 import { useCityStore } from '../store/cityStore';
 import { useNavigate } from 'react-router-dom';
+import GameIcon from '../components/GameIcon';
 
-const RADIUS = 7; // 15x15 grid
+const RADIUS = 7;
 const OASIS_RESOURCE_META = {
-  wood: { icon: '🌲', label: 'Madera' },
-  stone: { icon: '🪨', label: 'Piedra' },
-  iron: { icon: '⛓️', label: 'Hierro' },
-  gold: { icon: '🪙', label: 'Oro' },
+  wood: { icon: 'wood', label: 'Madera' },
+  stone: { icon: 'stone', label: 'Piedra' },
+  iron: { icon: 'iron', label: 'Hierro' },
+  gold: { icon: 'gold', label: 'Oro' },
 };
 
 const PveDifficulty = ({ tile }) => {
   if (!tile?.pve_tier) return null;
   return (
-    <div
-      className="rounded border border-amber-700/40 bg-amber-950/30 p-2 text-xs text-amber-100"
-      data-testid="pve-difficulty"
-      data-pve-tier={tile.pve_tier}
-      data-pve-rules-version={tile.pve_rules_version || ''}
-    >
+    <div className="rounded border border-amber-700/40 bg-amber-950/30 p-2 text-xs text-amber-100" data-testid="pve-difficulty" data-pve-tier={tile.pve_tier} data-pve-rules-version={tile.pve_rules_version || ''}>
       <div className="font-semibold">Dificultad PvE T{tile.pve_tier}</div>
-      {tile.pve_rules_version && (
-        <div className="mt-1 break-all text-[10px] text-gray-400">Reglas {tile.pve_rules_version}</div>
-      )}
+      {tile.pve_rules_version && <div className="mt-1 break-all text-[10px] text-gray-400">Reglas {tile.pve_rules_version}</div>}
     </div>
   );
 };
@@ -86,30 +80,23 @@ const MapView = () => {
     let content = null;
 
     if (tile.city_id) {
-      const settlementIcon = tile.settlement_type === 'camp'
-        ? '⛺'
-        : tile.points > 1000 ? '🏰' : '🏠';
+      const settlementIcon = tile.settlement_type === 'camp' ? 'camp' : tile.points > 1000 ? 'castle' : 'house';
       content = (
-        <div className={`w-8 h-8 mx-auto mt-2 rounded-full shadow-lg flex items-center justify-center text-xs font-bold ${isMine ? 'bg-blue-600 text-white' : tile.owner_id ? 'bg-red-600 text-white' : 'bg-gray-400 text-black'}`}>
-          {settlementIcon}
+        <div className={`w-8 h-8 mx-auto mt-2 rounded-full shadow-lg flex items-center justify-center ${isMine ? 'bg-blue-600 text-white' : tile.owner_id ? 'bg-red-600 text-white' : 'bg-gray-300 text-gray-950'}`}>
+          <GameIcon name={settlementIcon} size={18} />
         </div>
       );
     } else if (isOasis) {
       const resourceMeta = OASIS_RESOURCE_META[tile.resource_type];
       content = (
-        <div className={`w-8 h-8 mx-auto mt-2 rounded-full shadow-lg flex items-center justify-center text-xs font-bold ${tile.is_conquered ? (tile.owner_id === user?.id ? 'bg-blue-500 ring-2 ring-blue-300' : 'bg-red-500 ring-2 ring-red-300') : 'bg-green-600 ring-2 ring-green-300'}`}>
-          {resourceMeta?.icon || '🌴'}
+        <div className={`w-8 h-8 mx-auto mt-2 rounded-full shadow-lg flex items-center justify-center ${tile.is_conquered ? (tile.owner_id === user?.id ? 'bg-blue-500 ring-2 ring-blue-300' : 'bg-red-500 ring-2 ring-red-300') : 'bg-green-600 ring-2 ring-green-300'}`}>
+          <GameIcon name={resourceMeta?.icon || 'oasis'} size={18} />
         </div>
       );
     }
 
     return (
-      <div
-        key={`${tile.x},${tile.y}`}
-        className={`w-12 h-12 border border-black/20 relative cursor-pointer hover:brightness-110 transition ${getTileColor(tile.type)} ${isSelected ? 'ring-2 ring-yellow-400 z-10' : ''}`}
-        onClick={() => setSelectedTile(tile)}
-        title={`(${tile.x}, ${tile.y}) ${tile.type}`}
-      >
+      <div key={`${tile.x},${tile.y}`} className={`w-12 h-12 border border-black/20 relative cursor-pointer hover:brightness-110 transition ${getTileColor(tile.type)} ${isSelected ? 'ring-2 ring-yellow-400 z-10' : ''}`} onClick={() => setSelectedTile(tile)} title={`(${tile.x}, ${tile.y}) ${tile.type}`}>
         {content}
         {isCenter && <div className="absolute inset-0 border-2 border-white/50 pointer-events-none" />}
       </div>
@@ -123,9 +110,7 @@ const MapView = () => {
     rows[tile.y].push(tile);
   });
   const sortedY = Object.keys(rows).sort((a, b) => b - a);
-  const selectedOasisResource = selectedTile?.oasis_id
-    ? OASIS_RESOURCE_META[selectedTile.resource_type]
-    : null;
+  const selectedOasisResource = selectedTile?.oasis_id ? OASIS_RESOURCE_META[selectedTile.resource_type] : null;
   const selectedSettlementLabel = selectedTile?.settlement_type === 'camp' ? 'Campamento' : 'Ciudad';
   const selectedSettlementIsMine = Boolean(user?.id && selectedTile?.owner_id === user.id);
 
@@ -144,10 +129,10 @@ const MapView = () => {
         <div className="flex-1 relative bg-gray-900 rounded overflow-auto flex items-center justify-center p-4">
           {loading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20">Cargando...</div>}
           <div className="relative">
-            <button onClick={() => handleMove(0, 5)} className="absolute top-0 left-1/2 -translate-x-1/2 -mt-8 btn btn-xs btn-circle">⬆️</button>
-            <button onClick={() => handleMove(0, -5)} className="absolute bottom-0 left-1/2 -translate-x-1/2 -mb-8 btn btn-xs btn-circle">⬇️</button>
-            <button onClick={() => handleMove(-5, 0)} className="absolute left-0 top-1/2 -translate-y-1/2 -ml-8 btn btn-xs btn-circle">⬅️</button>
-            <button onClick={() => handleMove(5, 0)} className="absolute right-0 top-1/2 -translate-y-1/2 -mr-8 btn btn-xs btn-circle">➡️</button>
+            <button type="button" aria-label="Mover mapa hacia arriba" onClick={() => handleMove(0, 5)} className="absolute top-0 left-1/2 -translate-x-1/2 -mt-8 btn btn-xs btn-circle"><GameIcon name="arrowUp" size={18} /></button>
+            <button type="button" aria-label="Mover mapa hacia abajo" onClick={() => handleMove(0, -5)} className="absolute bottom-0 left-1/2 -translate-x-1/2 -mb-8 btn btn-xs btn-circle"><GameIcon name="arrowDown" size={18} /></button>
+            <button type="button" aria-label="Mover mapa hacia la izquierda" onClick={() => handleMove(-5, 0)} className="absolute left-0 top-1/2 -translate-y-1/2 -ml-8 btn btn-xs btn-circle"><GameIcon name="arrowLeft" size={18} /></button>
+            <button type="button" aria-label="Mover mapa hacia la derecha" onClick={() => handleMove(5, 0)} className="absolute right-0 top-1/2 -translate-y-1/2 -mr-8 btn btn-xs btn-circle"><GameIcon name="arrowRight" size={18} /></button>
             <div className="grid gap-0.5 bg-black/50 p-1">
               {sortedY.map((y) => (
                 <div key={y} className="flex gap-0.5">
@@ -172,8 +157,9 @@ const MapView = () => {
                 <div className="space-y-3">
                   <div>
                     <div className="text-sm text-gray-400">{selectedSettlementLabel}</div>
-                    <div className="font-bold text-lg text-white">
-                      {selectedTile.settlement_type === 'camp' ? '⛺ ' : '🏰 '}{selectedTile.city_name}
+                    <div className="font-bold text-lg text-white flex items-center gap-2">
+                      <GameIcon name={selectedTile.settlement_type === 'camp' ? 'camp' : 'castle'} size={20} />
+                      {selectedTile.city_name}
                     </div>
                     <div className="text-xs text-yellow-500">{selectedTile.points} puntos</div>
                   </div>
@@ -182,17 +168,8 @@ const MapView = () => {
                     <div className="font-bold text-white">{selectedTile.owner_name || 'Bárbaros'}</div>
                   </div>
                   {!selectedTile.owner_id && <PveDifficulty tile={selectedTile} />}
-                  {selectedTile.alliance_name && (
-                    <div>
-                      <div className="text-sm text-gray-400">Alianza</div>
-                      <div className="font-bold text-blue-400">[{selectedTile.alliance_name}]</div>
-                    </div>
-                  )}
-                  {selectedSettlementIsMine && (
-                    <div className="rounded border border-blue-700/50 bg-blue-950/30 p-2 text-xs text-blue-200">
-                      Este asentamiento te pertenece.
-                    </div>
-                  )}
+                  {selectedTile.alliance_name && <div><div className="text-sm text-gray-400">Alianza</div><div className="font-bold text-blue-400">[{selectedTile.alliance_name}]</div></div>}
+                  {selectedSettlementIsMine && <div className="rounded border border-blue-700/50 bg-blue-950/30 p-2 text-xs text-blue-200">Este asentamiento te pertenece.</div>}
                   <div className="divider" />
                   {currentCity && !selectedSettlementIsMine && (
                     <div className="grid grid-cols-2 gap-2">
@@ -207,19 +184,14 @@ const MapView = () => {
                 <div className="space-y-3">
                   <div>
                     <div className="text-sm text-gray-400">Oasis</div>
-                    <div className="font-bold text-lg text-white">{selectedOasisResource?.icon || '🏞️'} {selectedOasisResource?.label || selectedTile.resource_type} (+{selectedTile.bonus_percent}%)</div>
+                    <div className="font-bold text-lg text-white flex items-center gap-2">
+                      <GameIcon name={selectedOasisResource?.icon || 'oasis'} size={20} />
+                      {selectedOasisResource?.label || selectedTile.resource_type} (+{selectedTile.bonus_percent}%)
+                    </div>
                   </div>
                   <PveDifficulty tile={selectedTile} />
-                  <div>
-                    <div className="text-sm text-gray-400">Estado</div>
-                    <div className="font-bold text-white">{selectedTile.is_conquered ? (selectedTile.owner_id ? 'Conquistado' : 'Ocupado') : 'Salvaje'}</div>
-                  </div>
-                  {currentCity && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <button className="btn btn-sm btn-error w-full" onClick={() => navigate(`/send-movement/${selectedTile.oasis_id}?type=oasis`)}>Atacar</button>
-                      <button className="btn btn-sm btn-info w-full">Espiar</button>
-                    </div>
-                  )}
+                  <div><div className="text-sm text-gray-400">Estado</div><div className="font-bold text-white">{selectedTile.is_conquered ? (selectedTile.owner_id ? 'Conquistado' : 'Ocupado') : 'Salvaje'}</div></div>
+                  {currentCity && <div className="grid grid-cols-2 gap-2"><button className="btn btn-sm btn-error w-full" onClick={() => navigate(`/send-movement/${selectedTile.oasis_id}?type=oasis`)}>Atacar</button><button className="btn btn-sm btn-info w-full">Espiar</button></div>}
                 </div>
               ) : (
                 <div className="text-gray-500 italic mt-4">Terreno salvaje. No hay asentamientos aquí.</div>

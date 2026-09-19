@@ -2,13 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import axiosClient from '../api/axiosClient';
 import { useCityStore } from '../store/cityStore';
 import { troopList, TROOP_TYPES } from '../utils/gameMath';
-
-const relationText = {
-  own: 'Tus dominios',
-  alliance: 'Alianza',
-  enemy: 'Enemigo',
-  neutral: 'Neutral',
-};
+import GameIcon from './GameIcon';
 
 const CityPopup = ({ cityId, coordinate, onClose }) => {
   const [loading, setLoading] = useState(true);
@@ -21,9 +15,7 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (popupRef.current && !popupRef.current.contains(event.target)) {
-        onClose?.();
-      }
+      if (popupRef.current && !popupRef.current.contains(event.target)) onClose?.();
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -34,27 +26,15 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
     setLoading(true);
     setSelectedTroops({});
     setShowTroopSelector(false);
-    axiosClient
-      .get(`/city/${cityId}`)
-      .then((response) => {
-        setCity(response.data);
-      })
-      .catch(() => {
-        setCity(null);
-      })
-      .finally(() => setLoading(false));
+    axiosClient.get(`/city/${cityId}`).then((response) => setCity(response.data)).catch(() => setCity(null)).finally(() => setLoading(false));
   }, [cityId]);
 
   const handleTroopChange = (unit, value) => {
-    setSelectedTroops(prev => ({
-      ...prev,
-      [unit]: parseInt(value) || 0
-    }));
+    setSelectedTroops((previous) => ({ ...previous, [unit]: parseInt(value) || 0 }));
   };
 
   const sendAction = async (type) => {
     if (!cityId || !currentCity) return;
-    
     if (type === 'attack' && !showTroopSelector) {
       setShowTroopSelector(true);
       return;
@@ -68,9 +48,8 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
         movement_type: type,
         world_id: currentCity.world_id,
         troops: type === 'attack' ? selectedTroops : {},
-        spy_count: type === 'spy' ? 1 : 0 // Default spy count for now
+        spy_count: type === 'spy' ? 1 : 0,
       };
-      
       await axiosClient.post('/movements/', payload);
       setActionState({ status: 'success', message: `Orden enviada: ${type}` });
       setShowTroopSelector(false);
@@ -86,83 +65,45 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div ref={popupRef} className="w-full max-w-md rounded-xl border border-amber-700/50 bg-gray-900 p-6 shadow-2xl">
         {loading ? (
-          <div className="flex justify-center py-8">
-            <span className="loading loading-spinner text-amber-500"></span>
-          </div>
+          <div className="flex justify-center py-8"><span className="loading loading-spinner text-amber-500"></span></div>
         ) : city ? (
           <div className="space-y-4">
             <div className="flex items-start justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-amber-100">{city.name}</h2>
-                <p className="text-amber-200/60">
-                  Jugador: <span className="text-amber-100">{city.owner?.username || 'Bárbaro'}</span>
-                </p>
-                <p className="text-sm text-gray-400">Coordenadas: ({city.x}, {city.y})</p>
+                <p className="text-amber-200/60">Jugador: <span className="text-amber-100">{city.owner?.username || 'Bárbaro'}</span></p>
+                <p className="text-sm text-gray-400">Coordenadas: ({city.x ?? coordinate?.x}, {city.y ?? coordinate?.y})</p>
               </div>
-              <button onClick={onClose} className="btn btn-ghost btn-sm text-gray-400 hover:text-white">✕</button>
+              <button type="button" aria-label="Cerrar detalles de ciudad" onClick={onClose} className="btn btn-ghost btn-sm text-gray-400 hover:text-white"><GameIcon name="close" size={18} /></button>
             </div>
 
             {showTroopSelector ? (
               <div className="space-y-3 bg-gray-800/50 p-3 rounded">
                 <h3 className="text-sm font-bold text-amber-200">Seleccionar Tropas</h3>
                 <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-                  {troopList.map(unit => (
+                  {troopList.map((unit) => (
                     <div key={unit} className="flex items-center gap-2">
-                      <label className="text-xs text-gray-300 w-20 truncate" title={TROOP_TYPES[unit]}>
-                        {TROOP_TYPES[unit]}
-                      </label>
-                      <input 
-                        type="number" 
-                        className="input input-xs w-16 bg-gray-900 border-gray-700"
-                        min="0"
-                        placeholder="0"
-                        onChange={(e) => handleTroopChange(unit, e.target.value)}
-                      />
+                      <label className="text-xs text-gray-300 w-20 truncate" title={TROOP_TYPES[unit]}>{TROOP_TYPES[unit]}</label>
+                      <input type="number" className="input input-xs w-16 bg-gray-900 border-gray-700" min="0" placeholder="0" onChange={(event) => handleTroopChange(unit, event.target.value)} />
                     </div>
                   ))}
                 </div>
                 <div className="flex gap-2 pt-2">
-                  <button 
-                    className="btn btn-sm btn-error flex-1"
-                    onClick={() => setShowTroopSelector(false)}
-                  >
-                    Cancelar
-                  </button>
-                  <button 
-                    className="btn btn-sm btn-primary flex-1"
-                    onClick={() => sendAction('attack')}
-                  >
-                    Confirmar Ataque
-                  </button>
+                  <button className="btn btn-sm btn-error flex-1" onClick={() => setShowTroopSelector(false)}>Cancelar</button>
+                  <button className="btn btn-sm btn-primary flex-1" onClick={() => sendAction('attack')}>Confirmar Ataque</button>
                 </div>
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3 pt-2">
-                <button 
-                  className="btn bg-red-900/40 hover:bg-red-800/60 text-red-100 border-red-800/50"
-                  onClick={() => sendAction('attack')}
-                >
-                  ⚔️ Atacar
-                </button>
-                <button 
-                  className="btn bg-blue-900/40 hover:bg-blue-800/60 text-blue-100 border-blue-800/50"
-                  onClick={() => sendAction('spy')}
-                >
-                  👁️ Espiar
-                </button>
+                <button className="btn bg-red-900/40 hover:bg-red-800/60 text-red-100 border-red-800/50 inline-flex items-center justify-center gap-2" onClick={() => sendAction('attack')}><GameIcon name="sword" size={18} /> Atacar</button>
+                <button className="btn bg-blue-900/40 hover:bg-blue-800/60 text-blue-100 border-blue-800/50 inline-flex items-center justify-center gap-2" onClick={() => sendAction('spy')}><GameIcon name="spy" size={18} /> Espiar</button>
               </div>
             )}
 
-            {actionState.message && (
-              <div className={`alert ${actionState.status === 'error' ? 'alert-error' : 'alert-success'} py-2 text-sm`}>
-                {actionState.message}
-              </div>
-            )}
+            {actionState.message && <div className={`alert ${actionState.status === 'error' ? 'alert-error' : 'alert-success'} py-2 text-sm`}>{actionState.message}</div>}
           </div>
         ) : (
-          <div className="text-center py-8 text-gray-400">
-            No se pudo cargar la información de la ciudad.
-          </div>
+          <div className="text-center py-8 text-gray-400">No se pudo cargar la información de la ciudad.</div>
         )}
       </div>
     </div>
@@ -170,4 +111,3 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
 };
 
 export default CityPopup;
-

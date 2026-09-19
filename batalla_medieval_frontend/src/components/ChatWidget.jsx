@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useUserStore } from '../store/userStore';
+import GameIcon from './GameIcon';
 
 const ChatWidget = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -13,13 +14,8 @@ const ChatWidget = () => {
     if (isOpen && !ws.current && token) {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/chat/global?token=${encodeURIComponent(token)}`;
-
       ws.current = new WebSocket(wsUrl);
-
-      ws.current.onopen = () => {
-        console.log('Connected to global chat');
-      };
-
+      ws.current.onopen = () => console.log('Connected to global chat');
       ws.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -28,17 +24,12 @@ const ChatWidget = () => {
           console.error('Error parsing chat message', error);
         }
       };
-
       ws.current.onclose = () => {
         console.log('Disconnected from global chat');
         ws.current = null;
       };
-
-      ws.current.onerror = (error) => {
-        console.error('WebSocket error', error);
-      };
+      ws.current.onerror = (error) => console.error('WebSocket error', error);
     }
-
     return () => {
       if (!isOpen && ws.current) {
         ws.current.close();
@@ -55,8 +46,6 @@ const ChatWidget = () => {
     event.preventDefault();
     const content = input.trim();
     if (!content || !ws.current || ws.current.readyState !== WebSocket.OPEN) return;
-
-    // The backend WebSocket contract accepts JSON with a ``content`` field.
     ws.current.send(JSON.stringify({ content }));
     setInput('');
   };
@@ -69,7 +58,7 @@ const ChatWidget = () => {
         <div className="bg-gray-900 border border-amber-700 rounded-lg w-80 h-96 flex flex-col shadow-xl mb-2">
           <div className="bg-gray-800 p-2 rounded-t-lg flex justify-between items-center border-b border-gray-700">
             <span className="font-bold text-amber-500">Chat Global</span>
-            <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-white">✕</button>
+            <button type="button" aria-label="Cerrar chat global" onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-white"><GameIcon name="close" size={18} /></button>
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
             {messages.map((msg, idx) => (
@@ -81,22 +70,11 @@ const ChatWidget = () => {
             <div ref={messagesEndRef} />
           </div>
           <form onSubmit={sendMessage} className="p-2 border-t border-gray-700 flex">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              className="flex-1 bg-black/50 border border-gray-600 rounded px-2 py-1 text-sm text-white"
-              placeholder="Mensaje..."
-            />
+            <input type="text" value={input} onChange={(e) => setInput(e.target.value)} className="flex-1 bg-black/50 border border-gray-600 rounded px-2 py-1 text-sm text-white" placeholder="Mensaje..." />
           </form>
         </div>
       )}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="bg-amber-700 hover:bg-amber-600 text-white rounded-full p-3 shadow-lg"
-      >
-        💬
-      </button>
+      <button type="button" aria-label={isOpen ? 'Ocultar chat global' : 'Abrir chat global'} onClick={() => setIsOpen(!isOpen)} className="bg-amber-700 hover:bg-amber-600 text-white rounded-full p-3 shadow-lg"><GameIcon name="mail" size={22} /></button>
     </div>
   );
 };
