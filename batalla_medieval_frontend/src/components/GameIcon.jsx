@@ -1,0 +1,72 @@
+const iconShapes = {
+  castle: <><path d="M4 20V9l4-3 4 3 4-3 4 3v11"/><path d="M7 20v-5h4v5M13 20v-4h4v4M4 10h16"/><path d="M6 6V3h3v4M15 7V3h3v3"/></>,
+  buildings: <><path d="M3 20h18M5 20V10h6v10M13 20V6h6v14"/><path d="M7 13h2M7 16h2M15 9h2M15 12h2M15 15h2"/></>,
+  camp: <><path d="M3 20 12 5l9 15H3Z"/><path d="m8 20 4-7 4 7M12 5v15"/></>,
+  academy: <><path d="m3 10 9-5 9 5-9 5-9-5Z"/><path d="M7 12v5c3 2 7 2 10 0v-5M21 10v6"/></>,
+  sword: <><path d="m14 4 6-1-1 6-8 8-4-4 7-9Z"/><path d="m5 12 7 7M4 20l4-4"/></>,
+  hero: <><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M6 10h12l-1 5H7l-1-5ZM9 15v5M15 15v5M9 18h6"/></>,
+  compass: <><circle cx="12" cy="12" r="9"/><path d="m15 9-2 4-4 2 2-4 4-2Z"/></>,
+  map: <><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z"/><path d="M9 3v15M15 6v15"/></>,
+  boot: <><path d="M8 3h6v8l4 3c2 1 3 3 2 5H7c-3 0-4-2-3-4l4-4V3Z"/><path d="M8 8h6"/></>,
+  scroll: <><path d="M6 4h12a2 2 0 0 1 0 4H8a2 2 0 0 0-2 2v8"/><path d="M6 18a2 2 0 0 0 2 2h10a2 2 0 0 0 0-4H9"/><path d="M9 11h7M9 14h5"/></>,
+  scales: <><path d="M12 3v18M7 6h10M4 8l-2 6h4L4 8ZM20 8l-2 6h4l-2-6Z"/><path d="M2 14a2 2 0 0 0 4 0M18 14a2 2 0 0 0 4 0M8 21h8"/></>,
+  trophy: <><path d="M8 4h8v5a4 4 0 0 1-8 0V4Z"/><path d="M8 6H4v2a4 4 0 0 0 4 4M16 6h4v2a4 4 0 0 1-4 4M12 13v4M9 21h6M10 17h4"/></>,
+  alliance: <><path d="M8 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM16 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M2 21v-2c0-3 2-5 6-5s6 2 6 5v2M12 17c1-2 2-3 4-3 4 0 6 2 6 5v2"/></>,
+  mail: <><path d="M3 5h18v14H3V5Z"/><path d="m3 7 9 7 9-7"/></>,
+  book: <><path d="M4 5c3-1 6 0 8 2v13c-2-2-5-3-8-2V5ZM20 5c-3-1-6 0-8 2v13c2-2 5-3 8-2V5Z"/></>,
+  wood: <><path d="M5 19c5-1 9-5 10-10 2 4 1 9-2 12"/><path d="M4 20c5-4 9-9 12-16M9 14l-3-2M12 10l-2-3M14 14l3-2"/></>,
+  stone: <><path d="m5 7 5-4 7 2 3 6-3 8-9 2-5-6 2-8Z"/><path d="m10 3 2 5 8 3M3 15l7-2 7 6M10 13l2-5"/></>,
+  iron: <><path d="M5 5h14l-2 5H7L5 5ZM7 10h10l2 9H5l2-9Z"/><path d="M9 14h6"/></>,
+  gold: <><circle cx="12" cy="12" r="8"/><path d="M9 9h4a2 2 0 0 1 0 4H9m3-6v10M9 13h5a2 2 0 0 1 0 4H9"/></>,
+  population: <><circle cx="8" cy="8" r="3"/><circle cx="16" cy="9" r="2.5"/><path d="M2 21v-2c0-4 2-6 6-6s6 2 6 6v2M13 15c1-1 2-2 4-2 3 0 5 2 5 5v3"/></>,
+  shield: <><path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></>,
+  warning: <><path d="M12 3 2 21h20L12 3Z"/><path d="M12 9v5M12 18h.01"/></>,
+  townHall: <><path d="M3 20h18M5 9h14M7 9v9M11 9v9M15 9v9M19 9v9M4 9l8-5 8 5"/></>,
+  barracks: <><path d="M4 20V9l8-5 8 5v11M8 20v-6h8v6"/><path d="m9 9 6 6M15 9l-6 6"/></>,
+  stable: <><path d="M4 20V8l8-4 8 4v12M8 20v-7h8v7"/><path d="M10 10c1-2 4-2 5 0-1 3-2 4-5 4"/></>,
+  wall: <><path d="M3 20V8h4V5h4v3h4V5h4v3h2v12H3Z"/><path d="M7 12h3v3H7M14 12h3v3h-3"/></>,
+  farm: <><path d="M4 20c0-7 3-12 8-16 5 4 8 9 8 16H4Z"/><path d="M12 5v15M8 10l4 3 4-3M8 15l4 3 4-3"/></>,
+  warehouse: <><path d="M3 10 12 4l9 6v10H3V10Z"/><path d="M8 20v-6h8v6M6 11h12"/></>,
+  smithy: <><path d="M4 15h9l2 3h5v3H7l-3-3v-3Z"/><path d="M14 4 8 10M11 3l4 4M6 12l3 3"/></>,
+  workshop: <><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></>,
+  church: <><path d="M6 21V10l6-4 6 4v11H6Z"/><path d="M12 2v5M9 4h6M10 21v-5h4v5"/></>,
+  cathedral: <><path d="M4 21V9l4-3 4 3 4-3 4 3v12H4Z"/><path d="M8 6V3M6 4h4M16 6V3M14 4h4M10 21v-6h4v6"/></>,
+  star: <><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></>,
+  horse: <><path d="M6 20v-7l4-3 1-5 5 2 2 5-3 3v5M6 15h9M8 20v-4M14 20v-4"/></>,
+  siege: <><path d="M4 17h16M7 17l2-8h6l2 8M9 9l3-5 3 5"/><circle cx="8" cy="20" r="1.5"/><circle cx="16" cy="20" r="1.5"/></>,
+  speed: <><path d="M3 12a9 9 0 1 0 3-6M3 4v6h6"/><path d="m12 12 5-3"/></>,
+  carry: <><path d="M5 8h14l-1 12H6L5 8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></>,
+  lock: <><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></>,
+  spy: <><path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></>,
+  handshake: <><path d="m3 12 4-4 4 3 2-2 4 4-6 6-8-7Z"/><path d="m13 9 2-2 6 5-4 4M7 8 5 6 1 10"/></>,
+  package: <><path d="m3 7 9-4 9 4-9 4-9-4Z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/></>,
+  inbox: <><path d="M4 4h16v14H4V4Z"/><path d="M4 13h5l2 3h2l2-3h5"/></>,
+  return: <><path d="M9 7 4 12l5 5"/><path d="M5 12h9a6 6 0 0 1 6 6v2"/></>,
+  house: <><path d="m3 11 9-7 9 7"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
+  oasis: <><path d="M12 21V9M12 9c-2-3-5-4-8-3 1 3 4 5 8 3ZM12 9c2-3 5-4 8-3-1 3-4 5-8 3Z"/><path d="M3 21h18M6 17c2-2 4-2 6 0 2-2 4-2 6 0"/></>,
+  arrowUp: <><path d="m6 14 6-6 6 6M12 8v11"/></>,
+  arrowDown: <><path d="m6 10 6 6 6-6M12 5v11"/></>,
+  arrowLeft: <><path d="m14 6-6 6 6 6M8 12h11"/></>,
+  arrowRight: <><path d="m10 6 6 6-6 6M5 12h11"/></>,
+  close: <><path d="M6 6l12 12M18 6 6 18"/></>,
+};
+
+const GameIcon = ({ name, size = 20, className = '' }) => (
+  <svg
+    viewBox="0 0 24 24"
+    width={size}
+    height={size}
+    className={className}
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+    focusable="false"
+  >
+    {iconShapes[name] || iconShapes.shield}
+  </svg>
+);
+
+export default GameIcon;
