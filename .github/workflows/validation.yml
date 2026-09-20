@@ -208,6 +208,7 @@ jobs:
           node e2e/g18-anticheat.mjs
           node e2e/g19-tutorial-help.mjs
           node e2e/g20-visual-assets.mjs
+          node e2e/g21-accessibility.mjs
       - name: Show service logs
         if: always()
         run: |
