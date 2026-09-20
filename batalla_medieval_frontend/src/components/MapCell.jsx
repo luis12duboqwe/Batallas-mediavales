@@ -19,17 +19,16 @@ const MapCell = memo(
     const relation = city?.relation || 'neutral';
     const glow = relationColors[relation] || relationColors.neutral;
     const bgGradient = tileStyles[tileType] || tileStyles.grass;
+    const accessibleLabel = city
+      ? `Casilla ${x}, ${y}: ${city.name || 'ciudad'}, relación ${relation}`
+      : `Casilla ${x}, ${y}: ${tileType || 'terreno'}`;
 
     return (
-      <div
-        role="button"
-        tabIndex={0}
+      <button
+        type="button"
         onClick={() => onClick({ x, y, city })}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            onClick({ x, y, city });
-          }
-        }}
+        aria-label={accessibleLabel}
+        aria-pressed={selected}
         className={`absolute rounded-lg transition transform-gpu duration-150 ease-out group ${
           selected ? 'ring-2 ring-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]' : ''
         }`}
@@ -41,15 +40,16 @@ const MapCell = memo(
           transform: `translate(${x * size}px, ${y * size}px)`,
         }}
       >
-        <div
-          className={`w-full h-full rounded-lg border border-amber-900/70 bg-gradient-to-br ${bgGradient} relative overflow-hidden group-hover:border-amber-200/70 group-hover:shadow-[0_0_0_2px_rgba(251,191,36,0.35)] ${glow}`}
+        <span
+          aria-hidden="true"
+          className={`block w-full h-full rounded-lg border border-amber-900/70 bg-gradient-to-br ${bgGradient} relative overflow-hidden group-hover:border-amber-200/70 group-hover:shadow-[0_0_0_2px_rgba(251,191,36,0.35)] ${glow}`}
         >
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.05),transparent_60%)]" />
-          <div className="absolute top-1 left-1 text-[10px] font-semibold text-amber-100/70 drop-shadow">
+          <span className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.05),transparent_60%)]" />
+          <span className="absolute top-1 left-1 text-[10px] font-semibold text-amber-100/70 drop-shadow">
             {x},{y}
-          </div>
+          </span>
           {city && (
-            <div className="absolute inset-0 flex items-center justify-center text-amber-100">
+            <span className="absolute inset-0 flex items-center justify-center text-amber-100">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
@@ -76,10 +76,10 @@ const MapCell = memo(
               >
                 {city.ownerTag || relation.toUpperCase()}
               </span>
-            </div>
+            </span>
           )}
-        </div>
-      </div>
+        </span>
+      </button>
     );
   },
   (prev, next) =>
