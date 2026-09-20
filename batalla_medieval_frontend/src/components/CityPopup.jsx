@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import axiosClient from '../api/axiosClient';
 import { useCityStore } from '../store/cityStore';
 import { troopList, TROOP_TYPES } from '../utils/gameMath';
 import GameIcon from './GameIcon';
+import useModalAccessibility from '../hooks/useModalAccessibility';
 
 const CityPopup = ({ cityId, coordinate, onClose }) => {
   const [loading, setLoading] = useState(true);
@@ -10,16 +11,17 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
   const [actionState, setActionState] = useState({ status: 'idle', message: '' });
   const [showTroopSelector, setShowTroopSelector] = useState(false);
   const [selectedTroops, setSelectedTroops] = useState({});
-  const popupRef = useRef(null);
+  const popupRef = useModalAccessibility(Boolean(cityId), onClose);
   const { currentCity } = useCityStore();
 
   useEffect(() => {
+    if (!cityId) return undefined;
     const handleClickOutside = (event) => {
       if (popupRef.current && !popupRef.current.contains(event.target)) onClose?.();
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [onClose]);
+  }, [cityId, onClose, popupRef]);
 
   useEffect(() => {
     if (!cityId) return;
@@ -63,14 +65,21 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div ref={popupRef} className="w-full max-w-md rounded-xl border border-amber-700/50 bg-gray-900 p-6 shadow-2xl">
+      <div
+        ref={popupRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="city-popup-title"
+        tabIndex={-1}
+        className="w-full max-w-md rounded-xl border border-amber-700/50 bg-gray-900 p-6 shadow-2xl"
+      >
         {loading ? (
-          <div className="flex justify-center py-8"><span className="loading loading-spinner text-amber-500"></span></div>
+          <div className="flex justify-center py-8" role="status" aria-label="Cargando detalles de ciudad"><span className="loading loading-spinner text-amber-500" /></div>
         ) : city ? (
           <div className="space-y-4">
             <div className="flex items-start justify-between">
               <div>
-                <h2 className="text-2xl font-bold text-amber-100">{city.name}</h2>
+                <h2 id="city-popup-title" className="text-2xl font-bold text-amber-100">{city.name}</h2>
                 <p className="text-amber-200/60">Jugador: <span className="text-amber-100">{city.owner?.username || 'Bárbaro'}</span></p>
                 <p className="text-sm text-gray-400">Coordenadas: ({city.x ?? coordinate?.x}, {city.y ?? coordinate?.y})</p>
               </div>
@@ -83,27 +92,31 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
                 <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
                   {troopList.map((unit) => (
                     <div key={unit} className="flex items-center gap-2">
-                      <label className="text-xs text-gray-300 w-20 truncate" title={TROOP_TYPES[unit]}>{TROOP_TYPES[unit]}</label>
-                      <input type="number" className="input input-xs w-16 bg-gray-900 border-gray-700" min="0" placeholder="0" onChange={(event) => handleTroopChange(unit, event.target.value)} />
+                      <label htmlFor={`city-popup-troop-${unit}`} className="text-xs text-gray-300 w-20 truncate" title={TROOP_TYPES[unit]}>{TROOP_TYPES[unit]}</label>
+                      <input id={`city-popup-troop-${unit}`} type="number" className="input input-xs w-16 bg-gray-900 border-gray-700" min="0" placeholder="0" onChange={(event) => handleTroopChange(unit, event.target.value)} />
                     </div>
                   ))}
                 </div>
                 <div className="flex gap-2 pt-2">
-                  <button className="btn btn-sm btn-error flex-1" onClick={() => setShowTroopSelector(false)}>Cancelar</button>
-                  <button className="btn btn-sm btn-primary flex-1" onClick={() => sendAction('attack')}>Confirmar Ataque</button>
+                  <button type="button" className="btn btn-sm btn-error flex-1" onClick={() => setShowTroopSelector(false)}>Cancelar</button>
+                  <button type="button" className="btn btn-sm btn-primary flex-1" onClick={() => sendAction('attack')}>Confirmar Ataque</button>
                 </div>
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3 pt-2">
-                <button className="btn bg-red-900/40 hover:bg-red-800/60 text-red-100 border-red-800/50 inline-flex items-center justify-center gap-2" onClick={() => sendAction('attack')}><GameIcon name="sword" size={18} /> Atacar</button>
-                <button className="btn bg-blue-900/40 hover:bg-blue-800/60 text-blue-100 border-blue-800/50 inline-flex items-center justify-center gap-2" onClick={() => sendAction('spy')}><GameIcon name="spy" size={18} /> Espiar</button>
+                <button type="button" className="btn bg-red-900/40 hover:bg-red-800/60 text-red-100 border-red-800/50 inline-flex items-center justify-center gap-2" onClick={() => sendAction('attack')}><GameIcon name="sword" size={18} /> Atacar</button>
+                <button type="button" className="btn bg-blue-900/40 hover:bg-blue-800/60 text-blue-100 border-blue-800/50 inline-flex items-center justify-center gap-2" onClick={() => sendAction('spy')}><GameIcon name="spy" size={18} /> Espiar</button>
               </div>
             )}
 
-            {actionState.message && <div className={`alert ${actionState.status === 'error' ? 'alert-error' : 'alert-success'} py-2 text-sm`}>{actionState.message}</div>}
+            {actionState.message && (
+              <div role={actionState.status === 'error' ? 'alert' : 'status'} className={`alert ${actionState.status === 'error' ? 'alert-error' : 'alert-success'} py-2 text-sm`}>
+                {actionState.message}
+              </div>
+            )}
           </div>
         ) : (
-          <div className="text-center py-8 text-gray-400">No se pudo cargar la información de la ciudad.</div>
+          <div id="city-popup-title" className="text-center py-8 text-gray-400">No se pudo cargar la información de la ciudad.</div>
         )}
       </div>
     </div>
