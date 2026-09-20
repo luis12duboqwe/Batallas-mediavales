@@ -9,8 +9,8 @@ export default {
         midnight: '#0b0f19'
       },
       fontFamily: {
-        display: ['"Cinzel"', 'serif'],
-        body: ['"Inter"', 'sans-serif']
+        display: ['Georgia', 'Cambria', 'Times New Roman', 'serif'],
+        body: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif']
       },
       boxShadow: {
         glow: '0 0 20px rgba(212, 175, 55, 0.3)'

@@ -117,6 +117,8 @@ jobs:
           cache-dependency-path: batalla_medieval_frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Validate visual asset policy
+        run: npm run lint:visual-assets
       - name: Lint frontend
         run: npm run lint
       - name: Build frontend
@@ -205,6 +207,7 @@ jobs:
           node e2e/g17-admin-support.mjs
           node e2e/g18-anticheat.mjs
           node e2e/g19-tutorial-help.mjs
+          node e2e/g20-visual-assets.mjs
       - name: Show service logs
         if: always()
         run: |

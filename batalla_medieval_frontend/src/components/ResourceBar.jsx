@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useCityStore } from '../store/cityStore';
 import { formatNumber } from '../utils/format';
+import GameIcon from './GameIcon';
 
 const ResourceItem = ({ label, value, icon, tip }) => (
   <div
@@ -9,7 +10,9 @@ const ResourceItem = ({ label, value, icon, tip }) => (
     data-tip={tip}
     aria-label={`${label}: ${value}. ${tip}`}
   >
-    <span className="text-yellow-400 drop-shadow" aria-hidden>{icon}</span>
+    <span className="text-yellow-400 drop-shadow" aria-hidden>
+      <GameIcon name={icon} size={17} />
+    </span>
     <span className="text-xs uppercase tracking-wide text-gray-300">{label}</span>
     <span className="font-semibold text-sm">{value}</span>
   </div>
@@ -37,42 +40,12 @@ const ResourceBar = () => {
       aria-label={t('resources.summary')}
       data-testid="resource-bar"
     >
-      <ResourceItem
-        label={t('resources.wood')}
-        value={`${formatNumber(resources.wood)}/${formatNumber(storageLimit)}`}
-        icon="🪵"
-        tip={t('resources.wood_tip')}
-      />
-      <ResourceItem
-        label={t('resources.stone')}
-        value={`${formatNumber(resources.stone)}/${formatNumber(storageLimit)}`}
-        icon="🪨"
-        tip={t('resources.stone_tip')}
-      />
-      <ResourceItem
-        label={t('resources.iron')}
-        value={`${formatNumber(resources.iron)}/${formatNumber(storageLimit)}`}
-        icon="⛓️"
-        tip={t('resources.iron_tip')}
-      />
-      <ResourceItem
-        label={t('resources.gold')}
-        value={`${formatNumber(resources.gold)}/${formatNumber(storageLimit)}`}
-        icon="🪙"
-        tip={t('resources.gold_tip_net', { rate: militaryEconomy.netGoldPerHour.toFixed(2) })}
-      />
-      <ResourceItem
-        label={t('resources.population')}
-        value={`${formatNumber(resources.population)}/${formatNumber(resources.populationMax)}`}
-        icon="👥"
-        tip={t('resources.population_tip')}
-      />
-      <ResourceItem
-        label={t('resources.upkeep')}
-        value={`${upkeepCommitted.toFixed(2)}/${militaryEconomy.upkeepCapacityPerHour.toFixed(2)}/h`}
-        icon={militaryEconomy.sustainable ? '🛡️' : '⚠️'}
-        tip={upkeepTip}
-      />
+      <ResourceItem label={t('resources.wood')} value={`${formatNumber(resources.wood)}/${formatNumber(storageLimit)}`} icon="wood" tip={t('resources.wood_tip')} />
+      <ResourceItem label={t('resources.stone')} value={`${formatNumber(resources.stone)}/${formatNumber(storageLimit)}`} icon="stone" tip={t('resources.stone_tip')} />
+      <ResourceItem label={t('resources.iron')} value={`${formatNumber(resources.iron)}/${formatNumber(storageLimit)}`} icon="iron" tip={t('resources.iron_tip')} />
+      <ResourceItem label={t('resources.gold')} value={`${formatNumber(resources.gold)}/${formatNumber(storageLimit)}`} icon="gold" tip={t('resources.gold_tip_net', { rate: militaryEconomy.netGoldPerHour.toFixed(2) })} />
+      <ResourceItem label={t('resources.population')} value={`${formatNumber(resources.population)}/${formatNumber(resources.populationMax)}`} icon="population" tip={t('resources.population_tip')} />
+      <ResourceItem label={t('resources.upkeep')} value={`${upkeepCommitted.toFixed(2)}/${militaryEconomy.upkeepCapacityPerHour.toFixed(2)}/h`} icon={militaryEconomy.sustainable ? 'shield' : 'warning'} tip={upkeepTip} />
     </div>
   );
 };
