@@ -44,25 +44,33 @@ const WorldSelector = () => {
   if (!user) return null;
 
   return (
-    <div className="space-y-4">
-      <div><h2 className="text-2xl font-bold mb-2">Seleccionar Mundo</h2><p className="text-gray-400 text-sm">Elige o únete a un mundo abierto</p></div>
+    <section className="space-y-4" aria-labelledby="world-selector-heading">
+      <div><h2 id="world-selector-heading" className="text-2xl font-bold mb-2">Seleccionar Mundo</h2><p className="text-gray-400 text-sm">Elige o únete a un mundo abierto</p></div>
       {worlds.length === 0 && <div className="card p-6 text-center text-gray-400">No hay mundos disponibles. Contacta con un administrador.</div>}
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
         {worlds.map((world) => {
           const isActive = world.id === currentWorldId;
           return (
-            <div key={world.id} data-testid={`world-selector-${world.id}`} className={`card p-5 cursor-pointer transition hover:scale-105 ${isActive ? 'border-2 border-yellow-500 shadow-yellow-500/50' : ''}`} onClick={() => !loading && handleWorldSelect(world.id)}>
-              <div className="flex items-start justify-between mb-3">
-                <div><h3 className="text-xl font-bold">{world.name}</h3><span className="text-xs uppercase tracking-wide text-green-400" data-testid={`world-status-${world.id}`}>{world.lifecycle_status || 'open'}</span>{isActive && <span className="badge mt-1">Mundo activo</span>}</div>
-                <div className="text-yellow-300"><GameIcon name="map" size={26} /></div>
-              </div>
-              <div className="space-y-2 text-sm text-gray-300"><p><span className="text-gray-400">Velocidad:</span> {world.speed_modifier}x</p><p><span className="text-gray-400">Recursos:</span> {world.resource_modifier}x</p><p><span className="text-gray-400">Tamaño mapa:</span> {world.map_size}x{world.map_size}</p></div>
-              {!isActive && <button type="button" onClick={(event) => { event.stopPropagation(); handleJoinWorld(world.id); }} disabled={loading} className="btn-primary w-full mt-4">{loading ? 'Procesando...' : 'Unirse'}</button>}
-            </div>
+            <article key={world.id} data-testid={`world-selector-${world.id}`} className={`card overflow-hidden transition ${isActive ? 'border-2 border-yellow-500 shadow-yellow-500/50' : ''}`} aria-current={isActive ? 'true' : undefined}>
+              <button
+                type="button"
+                className="w-full p-5 text-left hover:bg-white/5 disabled:cursor-default disabled:opacity-100"
+                onClick={() => !loading && handleWorldSelect(world.id)}
+                disabled={loading || isActive}
+                aria-label={isActive ? `${world.name}, mundo activo` : `Seleccionar mundo ${world.name}`}
+              >
+                <span className="flex items-start justify-between mb-3">
+                  <span><span className="text-xl font-bold block">{world.name}</span><span className="text-xs uppercase tracking-wide text-green-400 block" data-testid={`world-status-${world.id}`}>{world.lifecycle_status || 'open'}</span>{isActive && <span className="badge mt-1">Mundo activo</span>}</span>
+                  <span className="text-yellow-300"><GameIcon name="map" size={26} /></span>
+                </span>
+                <span className="space-y-2 text-sm text-gray-300 block"><span className="block"><span className="text-gray-400">Velocidad:</span> {world.speed_modifier}x</span><span className="block"><span className="text-gray-400">Recursos:</span> {world.resource_modifier}x</span><span className="block"><span className="text-gray-400">Tamaño mapa:</span> {world.map_size}x{world.map_size}</span></span>
+              </button>
+              {!isActive && <div className="px-5 pb-5"><button type="button" onClick={() => handleJoinWorld(world.id)} disabled={loading} className="btn-primary w-full">{loading ? 'Procesando...' : 'Unirse'}</button></div>}
+            </article>
           );
         })}
       </div>
-    </div>
+    </section>
   );
 };
 

@@ -99,11 +99,13 @@ const AllianceForum = ({ alliance }) => {
   if (view === 'create') {
     return (
       <div className="card bg-black/40 border border-amber-900/30 p-6" data-testid="alliance-forum-create">
-        <div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold text-amber-200">Nuevo Hilo</h3><button onClick={() => setView('list')} className="btn btn-sm btn-ghost">Volver</button></div>
+        <div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold text-amber-200">Nuevo Hilo</h3><button type="button" onClick={() => setView('list')} className="btn btn-sm btn-ghost">Volver</button></div>
         <form onSubmit={handleCreateThread} className="space-y-4">
-          <input type="text" placeholder="Título" className="input input-bordered w-full bg-black/50" value={newTitle} onChange={(event) => setNewTitle(event.target.value)} maxLength={TITLE_MAX} data-testid="forum-thread-title" required />
+          <label htmlFor="forum-thread-title" className="sr-only">Título del hilo</label>
+          <input id="forum-thread-title" type="text" placeholder="Título" className="input input-bordered w-full bg-black/50" value={newTitle} onChange={(event) => setNewTitle(event.target.value)} maxLength={TITLE_MAX} data-testid="forum-thread-title" required />
           <div className="text-xs text-gray-500 text-right">{newTitle.length}/{TITLE_MAX}</div>
-          <textarea placeholder="Contenido" className="textarea textarea-bordered w-full h-40 bg-black/50" value={newContent} onChange={(event) => setNewContent(event.target.value)} maxLength={POST_MAX} data-testid="forum-thread-content" required />
+          <label htmlFor="forum-thread-content" className="sr-only">Contenido del hilo</label>
+          <textarea id="forum-thread-content" placeholder="Contenido" className="textarea textarea-bordered w-full h-40 bg-black/50" value={newContent} onChange={(event) => setNewContent(event.target.value)} maxLength={POST_MAX} data-testid="forum-thread-content" required />
           <div className="text-xs text-gray-500 text-right">{newContent.length}/{POST_MAX}</div>
           <button type="submit" className="btn btn-primary" data-testid="forum-thread-submit">Publicar</button>
         </form>
@@ -114,10 +116,10 @@ const AllianceForum = ({ alliance }) => {
   if (view === 'detail' && activeThread) {
     return (
       <div className="space-y-4" data-testid={`forum-thread-${activeThread.id}`}>
-        <button onClick={() => setView('list')} className="btn btn-sm btn-ghost mb-2">← Volver al Foro</button>
-        <div className="card bg-black/40 border border-amber-900/30 p-6">
+        <button type="button" onClick={() => setView('list')} className="btn btn-sm btn-ghost mb-2">← Volver al Foro</button>
+        <article className="card bg-black/40 border border-amber-900/30 p-6" aria-labelledby={`forum-thread-heading-${activeThread.id}`}>
           <div className="flex flex-wrap justify-between gap-3">
-            <div><h1 className="text-2xl font-bold text-amber-100 mb-2">{activeThread.title}</h1><div className="text-xs text-gray-500 mb-4">Por {activeThread.author_name} • {formatDate(activeThread.created_at)}</div></div>
+            <div><h1 id={`forum-thread-heading-${activeThread.id}`} className="text-2xl font-bold text-amber-100 mb-2">{activeThread.title}</h1><div className="text-xs text-gray-500 mb-4">Por {activeThread.author_name} • {formatDate(activeThread.created_at)}</div></div>
             <div className="flex items-start gap-2" data-testid="forum-thread-status">
               {activeThread.is_pinned && <span className="badge badge-warning inline-flex items-center gap-1"><GameIcon name="pin" size={14} /> Fijado</span>}
               {activeThread.is_locked && <span className="badge badge-error inline-flex items-center gap-1"><GameIcon name="lock" size={14} /> Cerrado</span>}
@@ -133,18 +135,19 @@ const AllianceForum = ({ alliance }) => {
 
           <div className="space-y-6">
             {activeThread.posts.map((post, index) => (
-              <div key={post.id} className={`p-4 rounded ${index === 0 ? 'bg-amber-900/20 border border-amber-900/30' : 'bg-black/30 border border-gray-800'}`}>
+              <article key={post.id} className={`p-4 rounded ${index === 0 ? 'bg-amber-900/20 border border-amber-900/30' : 'bg-black/30 border border-gray-800'}`}>
                 <div className="flex justify-between items-baseline mb-2"><span className="font-bold text-amber-500">{post.author_name}</span><span className="text-xs text-gray-600">{formatDate(post.created_at)}</span></div>
                 <div className="text-gray-300 whitespace-pre-wrap">{post.content}</div>
-              </div>
+              </article>
             ))}
           </div>
-        </div>
+        </article>
 
         {!activeThread.is_locked && (
           <div className="card bg-black/40 border border-amber-900/30 p-4">
             <form onSubmit={handleReply} className="flex gap-2">
-              <textarea placeholder="Escribe una respuesta..." className="textarea textarea-bordered flex-1 bg-black/50" value={replyContent} onChange={(event) => setReplyContent(event.target.value)} maxLength={POST_MAX} data-testid="forum-reply-content" required />
+              <label htmlFor="forum-reply-content" className="sr-only">Escribe una respuesta</label>
+              <textarea id="forum-reply-content" placeholder="Escribe una respuesta..." className="textarea textarea-bordered flex-1 bg-black/50" value={replyContent} onChange={(event) => setReplyContent(event.target.value)} maxLength={POST_MAX} data-testid="forum-reply-content" required />
               <button type="submit" className="btn btn-primary self-end" data-testid="forum-reply-submit">Responder</button>
             </form>
           </div>
@@ -155,17 +158,17 @@ const AllianceForum = ({ alliance }) => {
 
   return (
     <div className="card bg-black/40 border border-amber-900/30 p-6" data-testid="alliance-forum">
-      <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold text-amber-200">Foro de la Alianza</h3><button onClick={() => setView('create')} className="btn btn-sm btn-primary" data-testid="forum-new-thread">Nuevo Hilo</button></div>
+      <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold text-amber-200">Foro de la Alianza</h3><button type="button" onClick={() => setView('create')} className="btn btn-sm btn-primary" data-testid="forum-new-thread">Nuevo Hilo</button></div>
       {threads.length === 0 ? <p className="text-gray-500 text-center py-8">No hay hilos de discusión.</p> : (
         <div className="space-y-2">
           {threads.map((thread) => (
-            <div key={thread.id} className="p-4 bg-black/30 border border-gray-800 hover:bg-white/5 cursor-pointer rounded flex justify-between items-center" onClick={() => handleOpenThread(thread.id)} data-testid={`forum-thread-row-${thread.id}`}>
-              <div>
-                <div className="flex items-center gap-2"><ThreadFlags thread={thread} compact /><span className="font-bold text-gray-200">{thread.title}</span></div>
-                <div className="text-xs text-gray-500 mt-1">Por {thread.author_name} • Última actividad: {formatDate(thread.updated_at)}</div>
-              </div>
-              <div className="text-sm text-gray-400">{thread.reply_count} respuestas</div>
-            </div>
+            <button type="button" key={thread.id} className="p-4 bg-black/30 border border-gray-800 hover:bg-white/5 cursor-pointer rounded flex justify-between items-center w-full text-left" onClick={() => handleOpenThread(thread.id)} data-testid={`forum-thread-row-${thread.id}`}>
+              <span>
+                <span className="flex items-center gap-2"><ThreadFlags thread={thread} compact /><span className="font-bold text-gray-200">{thread.title}</span></span>
+                <span className="block text-xs text-gray-500 mt-1">Por {thread.author_name} • Última actividad: {formatDate(thread.updated_at)}</span>
+              </span>
+              <span className="text-sm text-gray-400">{thread.reply_count} respuestas</span>
+            </button>
           ))}
         </div>
       )}

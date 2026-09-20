@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import ResourceBar from './components/ResourceBar';
@@ -77,8 +77,23 @@ const NavLink = ({ link, active, mobile = false, t }) => (
 const Layout = ({ children }) => {
   const { t } = useTranslation();
   const location = useLocation();
+  const mainRef = useRef(null);
+  const previousPathRef = useRef(location.pathname);
+
+  useEffect(() => {
+    if (previousPathRef.current === location.pathname) return;
+    previousPathRef.current = location.pathname;
+    mainRef.current?.focus({ preventScroll: false });
+  }, [location.pathname]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-midnight via-gray-950 to-black text-gray-100">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-yellow-300 focus:px-4 focus:py-2 focus:font-semibold focus:text-black focus:shadow-xl"
+      >
+        {t('accessibility.skip_to_content')}
+      </a>
       <TutorialOverlay />
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(252,211,77,0.12),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(248,180,0,0.08),transparent_30%)]" />
       <Navbar />
@@ -88,16 +103,17 @@ const Layout = ({ children }) => {
           <div className="mb-4 text-xs uppercase tracking-[0.2em] text-gray-500">{t('nav.navigation')}</div>
           <nav className="space-y-1" aria-label={t('nav.navigation')}>
             {sidebarLinks.map((link) => (
-              <NavLink
-                key={link.to}
-                link={link}
-                active={location.pathname === link.to}
-                t={t}
-              />
+              <NavLink key={link.to} link={link} active={location.pathname === link.to} t={t} />
             ))}
           </nav>
         </aside>
-        <main className="flex-1 p-4 pb-24 md:p-8 md:pb-8 space-y-6 relative overflow-hidden">
+        <main
+          id="main-content"
+          ref={mainRef}
+          tabIndex={-1}
+          aria-label={t('accessibility.main_content')}
+          className="flex-1 p-4 pb-24 md:p-8 md:pb-8 space-y-6 relative overflow-hidden focus:outline-none"
+        >
           <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_20%,rgba(255,215,128,0.03),transparent_35%)]" />
           <div className="relative animate-fade-in">{children}</div>
         </main>
@@ -109,13 +125,7 @@ const Layout = ({ children }) => {
       >
         <div className="flex overflow-x-auto overscroll-x-contain">
           {sidebarLinks.map((link) => (
-            <NavLink
-              key={link.to}
-              link={link}
-              active={location.pathname === link.to}
-              mobile
-              t={t}
-            />
+            <NavLink key={link.to} link={link} active={location.pathname === link.to} mobile t={t} />
           ))}
         </div>
       </nav>
