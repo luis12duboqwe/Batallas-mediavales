@@ -119,6 +119,8 @@ jobs:
         run: npm ci
       - name: Validate visual asset policy
         run: npm run lint:visual-assets
+      - name: Validate accessible interaction policy
+        run: npm run lint:accessible-interactions
       - name: Lint frontend
         run: npm run lint
       - name: Build frontend
