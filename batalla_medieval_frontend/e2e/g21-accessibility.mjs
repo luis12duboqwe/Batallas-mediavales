@@ -99,6 +99,13 @@ async function checkGeneralViewport(viewport, label, mobile) {
     await page.keyboard.press('Enter');
     if (await firstTile.getAttribute('aria-pressed') !== 'true') failures.push(`${label}: map tile did not activate from keyboard`);
 
+    if (mobile) {
+      const detailsBox = await page.getByTestId('map-details-panel').boundingBox();
+      if (!detailsBox || detailsBox.x < -1 || detailsBox.x + detailsBox.width > viewport.width + 1) {
+        failures.push(`${label}: map details panel is clipped outside the mobile viewport`);
+      }
+    }
+
     await openGameRoute(page, '/messages');
     const messageTabs = page.getByRole('tab');
     if (await messageTabs.count() !== 3) failures.push(`${label}: message tab semantics are incomplete`);

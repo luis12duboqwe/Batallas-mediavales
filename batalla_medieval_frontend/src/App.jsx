@@ -78,11 +78,8 @@ const Layout = ({ children }) => {
   const { t } = useTranslation();
   const location = useLocation();
   const mainRef = useRef(null);
-  const previousPathRef = useRef(location.pathname);
 
   useEffect(() => {
-    if (previousPathRef.current === location.pathname) return;
-    previousPathRef.current = location.pathname;
     mainRef.current?.focus({ preventScroll: false });
   }, [location.pathname]);
 
@@ -112,7 +109,7 @@ const Layout = ({ children }) => {
           ref={mainRef}
           tabIndex={-1}
           aria-label={t('accessibility.main_content')}
-          className="flex-1 p-4 pb-24 md:p-8 md:pb-8 space-y-6 relative overflow-hidden focus:outline-none"
+          className="flex-1 min-w-0 p-4 pb-24 md:p-8 md:pb-8 space-y-6 relative overflow-hidden focus:outline-none"
         >
           <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_20%,rgba(255,215,128,0.03),transparent_35%)]" />
           <div className="relative animate-fade-in">{children}</div>

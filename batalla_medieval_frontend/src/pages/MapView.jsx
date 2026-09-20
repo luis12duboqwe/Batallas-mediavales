@@ -132,18 +132,18 @@ const MapView = () => {
   const selectedSettlementIsMine = Boolean(user?.id && selectedTile?.owner_id === user.id);
 
   return (
-    <div className="p-4 h-full flex flex-col">
-      <div className="flex justify-between items-center mb-4 bg-black/40 p-4 rounded">
+    <div className="p-2 sm:p-4 h-full flex flex-col min-w-0">
+      <div className="flex flex-col gap-3 mb-4 bg-black/40 p-4 rounded sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-amber-500">Mapa Global</h1>
-        <form onSubmit={handleJump} className="flex gap-2" aria-label="Ir a coordenadas">
-          <input type="number" aria-label="Coordenada X" className="input input-sm w-20 bg-black/50" placeholder="X" value={jumpCoords.x} onChange={(event) => setJumpCoords({ ...jumpCoords, x: event.target.value })} />
-          <input type="number" aria-label="Coordenada Y" className="input input-sm w-20 bg-black/50" placeholder="Y" value={jumpCoords.y} onChange={(event) => setJumpCoords({ ...jumpCoords, y: event.target.value })} />
+        <form onSubmit={handleJump} className="grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 sm:w-auto" aria-label="Ir a coordenadas">
+          <input type="number" aria-label="Coordenada X" className="input input-sm min-w-0 w-full bg-black/50" placeholder="X" value={jumpCoords.x} onChange={(event) => setJumpCoords({ ...jumpCoords, x: event.target.value })} />
+          <input type="number" aria-label="Coordenada Y" className="input input-sm min-w-0 w-full bg-black/50" placeholder="Y" value={jumpCoords.y} onChange={(event) => setJumpCoords({ ...jumpCoords, y: event.target.value })} />
           <button type="submit" className="btn btn-sm btn-primary">Ir</button>
         </form>
       </div>
 
-      <div className="flex flex-1 gap-4 overflow-hidden">
-        <div className="flex-1 relative bg-gray-900 rounded overflow-auto flex items-center justify-center p-4">
+      <div className="flex flex-1 min-w-0 flex-col gap-4 lg:flex-row lg:overflow-hidden">
+        <div className="min-h-[28rem] min-w-0 flex-1 relative bg-gray-900 rounded overflow-auto flex items-center justify-center p-4" data-testid="map-grid-panel">
           {loading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20" role="status">Cargando...</div>}
           <div className="relative">
             <button type="button" aria-label="Mover mapa hacia arriba" onClick={() => handleMove(0, 5)} className="absolute top-0 left-1/2 -translate-x-1/2 -mt-8 btn btn-xs btn-circle"><GameIcon name="arrowUp" size={18} /></button>
@@ -160,7 +160,7 @@ const MapView = () => {
           </div>
         </div>
 
-        <aside className="w-80 bg-gray-800 p-4 rounded shadow-lg border border-gray-700 flex flex-col" aria-label="Detalles de la casilla seleccionada">
+        <aside className="w-full shrink-0 bg-gray-800 p-4 rounded shadow-lg border border-gray-700 flex flex-col lg:w-80" aria-label="Detalles de la casilla seleccionada" data-testid="map-details-panel">
           <h2 className="text-xl font-bold text-amber-400 mb-4">Detalles</h2>
           {selectedTile ? (
             <div className="space-y-4">
