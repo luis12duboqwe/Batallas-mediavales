@@ -119,7 +119,11 @@ async function assertWorldDetailsAccessible(page, label) {
 
 async function checkGeneralViewport(browser, viewport, label, mobile) {
   try {
-    await withIsolatedPage(browser, { viewport, isMobile: mobile, hasTouch: mobile }, label, async (page) => {
+    // Keep the narrow viewport and touch capability for responsive/mobile UI
+    // coverage, but use Chromium's standard keyboard focus model. Full
+    // isMobile emulation models touch-first browser behavior and does not
+    // represent a hardware-keyboard Tab sequence reliably.
+    await withIsolatedPage(browser, { viewport, hasTouch: mobile }, label, async (page) => {
       await login(page, USERS.general);
 
       // A real document load must leave focus at the document start so the
