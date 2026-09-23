@@ -126,10 +126,11 @@ async function checkGeneralViewport(browser, viewport, label, mobile) {
     await withIsolatedPage(browser, { viewport, hasTouch: mobile }, label, async (page) => {
       await login(page, USERS.general);
 
-      // A real document load must leave focus at the document start so the
-      // skip link is the first keyboard stop. The persisted auth token lets us
-      // test this without the artificial blur/reset that browsers do not honor.
-      await page.reload({ waitUntil: 'domcontentloaded' });
+      // Establish a genuinely fresh document instead of reload(), which may
+      // preserve Chromium's sequential focus-navigation starting point. Auth
+      // remains available in the browser context's origin storage.
+      await page.goto('about:blank');
+      await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded' });
       await waitForExperienceReady(page);
       const main = page.locator('main#main-content');
       await main.waitFor({ state: 'visible', timeout: 10000 });
@@ -140,7 +141,19 @@ async function checkGeneralViewport(browser, viewport, label, mobile) {
 
       await page.keyboard.press('Tab');
       const skipFocused = await skipLink.evaluate((element) => document.activeElement === element);
-      if (!skipFocused) failures.push(`${label}: first keyboard stop is not the skip-to-content link`);
+      if (!skipFocused) {
+        const focused = await page.evaluate(() => {
+          const element = document.activeElement;
+          if (!(element instanceof HTMLElement)) return 'unknown';
+          const id = element.id ? `#${element.id}` : '';
+          const testId = element.dataset.testid ? `[data-testid="${element.dataset.testid}"]` : '';
+          const text = element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 80) || '';
+          return `${element.tagName.toLowerCase()}${id}${testId}${text ? ` "${text}"` : ''}`;
+        });
+        failures.push(`${label}: first keyboard stop is not the skip-to-content link; focused ${focused}`);
+        return;
+      }
+
       await page.keyboard.press('Enter');
       await page.waitForFunction(() => document.activeElement?.id === 'main-content', null, { timeout: 2000 }).catch(() => {});
       const mainFocusedAfterSkip = await main.evaluate((element) => document.activeElement === element);
