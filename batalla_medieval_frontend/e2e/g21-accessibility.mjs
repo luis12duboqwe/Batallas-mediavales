@@ -117,6 +117,12 @@ async function assertWorldDetailsAccessible(page, label) {
   }
 }
 
+async function assertMainFocused(page, label, transition) {
+  await page.waitForFunction(() => document.activeElement?.id === 'main-content', null, { timeout: 2000 }).catch(() => {});
+  const focused = await page.locator('main#main-content').evaluate((element) => document.activeElement === element);
+  if (!focused) failures.push(`${label}: ${transition} did not move focus to main content`);
+}
+
 async function checkGeneralViewport(browser, viewport, label, mobile) {
   try {
     // Keep the narrow viewport and touch capability for responsive/mobile UI
@@ -155,9 +161,7 @@ async function checkGeneralViewport(browser, viewport, label, mobile) {
       }
 
       await page.keyboard.press('Enter');
-      await page.waitForFunction(() => document.activeElement?.id === 'main-content', null, { timeout: 2000 }).catch(() => {});
-      const mainFocusedAfterSkip = await main.evaluate((element) => document.activeElement === element);
-      if (!mainFocusedAfterSkip) failures.push(`${label}: skip link did not move focus to main content`);
+      await assertMainFocused(page, label, 'skip link');
 
       const navigation = mobile
         ? page.getByTestId('mobile-navigation')
@@ -169,8 +173,7 @@ async function checkGeneralViewport(browser, viewport, label, mobile) {
       await page.keyboard.press('Enter');
       await page.waitForURL((url) => url.pathname === '/map', { timeout: 10000 });
       await waitForExperienceReady(page);
-      const mainFocusedAfterRoute = await page.locator('main#main-content').evaluate((element) => document.activeElement === element);
-      if (!mainFocusedAfterRoute) failures.push(`${label}: SPA route change did not move focus to main content`);
+      await assertMainFocused(page, label, 'SPA route change');
 
       const firstTile = page.locator('[data-testid^="map-tile-"]').first();
       await firstTile.waitFor({ state: 'visible', timeout: 10000 });
@@ -182,6 +185,19 @@ async function checkGeneralViewport(browser, viewport, label, mobile) {
       await firstTile.focus();
       await page.keyboard.press('Enter');
       if (await firstTile.getAttribute('aria-pressed') !== 'true') failures.push(`${label}: map tile did not activate from keyboard`);
+
+      // Returning to the initial history entry restores React Router's
+      // `default` location key. Focus management must still run because only
+      // the first effect invocation, not every `default` key, is a hard load.
+      await page.goBack();
+      await page.waitForURL((url) => url.pathname === '/', { timeout: 10000 });
+      await waitForExperienceReady(page);
+      await assertMainFocused(page, label, 'browser Back');
+
+      await page.goForward();
+      await page.waitForURL((url) => url.pathname === '/map', { timeout: 10000 });
+      await waitForExperienceReady(page);
+      await assertMainFocused(page, label, 'browser Forward');
 
       if (mobile) {
         await assertMapInternalScrollReachable(page, label);
@@ -299,4 +315,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('G21 BM-0081 accessibility passed: mobile/desktop layout, world descriptions, internal map scrolling, SPA navigation, keyboard tabs, reports and modal focus trap');
+console.log('G21 BM-0081 accessibility passed: mobile/desktop layout, hard-load skip navigation, SPA/history focus, world descriptions, internal map scrolling, keyboard tabs, reports and modal focus trap');
