@@ -6,7 +6,7 @@ const failures = [];
 const USERS = {
   general: { username: 'g2_browser', password: 'G2-Browser-Test-2026!' },
   report: { username: 'g9_combat', password: 'G9-Combat-Test-2026!' },
-  alliance: { username: 'g14_member', password: 'G14-Community-Test-2026!' },
+  alliance: { username: 'g14_rival', password: 'G14-Community-Test-2026!' },
 };
 
 const browser = await chromium.launch({ headless: true });
@@ -38,7 +38,13 @@ async function login(page, credentials) {
 }
 
 async function openGameRoute(page, route) {
-  await page.goto(`${BASE_URL}${route}`, { waitUntil: 'domcontentloaded' });
+  const currentPath = new URL(page.url()).pathname;
+  if (currentPath !== route) {
+    const link = page.locator(`a[href="${route}"]:visible`).first();
+    if (await link.count() !== 1) throw new Error(`No visible SPA navigation link for ${route}`);
+    await link.click();
+    await page.waitForURL((url) => url.pathname === route, { timeout: 10000 });
+  }
   await waitForExperienceReady(page);
   await page.locator('main#main-content').waitFor({ state: 'visible', timeout: 10000 });
 }
@@ -84,7 +90,8 @@ async function checkGeneralViewport(viewport, label, mobile) {
     const mapLink = page.locator('a[href="/map"]:visible').first();
     await mapLink.focus();
     await page.keyboard.press('Enter');
-    await page.waitForURL(`${BASE_URL}/map`, { timeout: 10000 });
+    await page.waitForURL((url) => url.pathname === '/map', { timeout: 10000 });
+    await waitForExperienceReady(page);
     const mainFocusedAfterRoute = await page.locator('main#main-content').evaluate((element) => document.activeElement === element);
     if (!mainFocusedAfterRoute) failures.push(`${label}: SPA route change did not move focus to main content`);
 
@@ -100,7 +107,9 @@ async function checkGeneralViewport(viewport, label, mobile) {
     if (await firstTile.getAttribute('aria-pressed') !== 'true') failures.push(`${label}: map tile did not activate from keyboard`);
 
     if (mobile) {
-      const detailsBox = await page.getByTestId('map-details-panel').boundingBox();
+      const details = page.getByTestId('map-details-panel');
+      await details.scrollIntoViewIfNeeded();
+      const detailsBox = await details.boundingBox();
       if (!detailsBox || detailsBox.x < -1 || detailsBox.x + detailsBox.width > viewport.width + 1) {
         failures.push(`${label}: map details panel is clipped outside the mobile viewport`);
       }
@@ -111,6 +120,15 @@ async function checkGeneralViewport(viewport, label, mobile) {
     if (await messageTabs.count() !== 3) failures.push(`${label}: message tab semantics are incomplete`);
     const nonButtons = await messageTabs.evaluateAll((elements) => elements.filter((element) => element.tagName !== 'BUTTON').length);
     if (nonButtons > 0) failures.push(`${label}: message tabs are not native buttons`);
+
+    const inboxTab = page.getByRole('tab', { name: 'Bandeja de Entrada' });
+    const sentTab = page.getByRole('tab', { name: 'Enviados' });
+    await inboxTab.focus();
+    await page.keyboard.press('ArrowRight');
+    if (await sentTab.getAttribute('aria-selected') !== 'true') failures.push(`${label}: message tabs do not activate with ArrowRight`);
+    if (!await sentTab.evaluate((element) => document.activeElement === element)) failures.push(`${label}: ArrowRight did not move focus to the next message tab`);
+    await page.keyboard.press('Home');
+    if (await inboxTab.getAttribute('aria-selected') !== 'true') failures.push(`${label}: Home did not activate the first message tab`);
 
     for (const route of ['/', '/map', '/messages', '/reports', '/alliance']) {
       await assertNoDocumentOverflow(page, route, label);
@@ -153,6 +171,16 @@ async function checkDialogKeyboard() {
   try {
     await login(page, USERS.alliance);
     await openGameRoute(page, '/alliance');
+
+    const generalTab = page.getByRole('tab', { name: 'General' });
+    const membersTab = page.getByRole('tab', { name: 'Miembros' });
+    await generalTab.focus();
+    await page.keyboard.press('ArrowRight');
+    if (await membersTab.getAttribute('aria-selected') !== 'true') failures.push('dialog: alliance tabs do not activate with ArrowRight');
+    if (!await membersTab.evaluate((element) => document.activeElement === element)) failures.push('dialog: ArrowRight did not move focus to the next alliance tab');
+    await page.keyboard.press('Home');
+    if (await generalTab.getAttribute('aria-selected') !== 'true') failures.push('dialog: Home did not return to the first alliance tab');
+
     const opener = page.getByRole('button', { name: 'Invitar Jugador' });
     await opener.waitFor({ state: 'visible', timeout: 10000 });
     await opener.focus();
@@ -188,4 +216,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('G21 BM-0081 accessibility passed: mobile/desktop layout, skip navigation, keyboard controls, reports and modal focus');
+console.log('G21 BM-0081 accessibility passed: mobile/desktop layout, SPA navigation, keyboard tabs, reports and modal focus');

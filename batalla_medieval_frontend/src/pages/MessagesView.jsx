@@ -2,6 +2,14 @@ import { useState, useEffect } from 'react';
 import { api } from '../api/axiosClient';
 import { useCityStore } from '../store/cityStore';
 import { formatDate } from '../utils/format';
+import { handleTablistKeyDown } from '../utils/accessibility';
+
+const MESSAGE_TABS = [
+  ['inbox', 'Bandeja de Entrada'],
+  ['sent', 'Enviados'],
+  ['compose', 'Redactar'],
+];
+const MESSAGE_TAB_KEYS = MESSAGE_TABS.map(([tab]) => tab);
 
 const MessagesView = () => {
   const { currentCity } = useCityStore();
@@ -98,18 +106,17 @@ const MessagesView = () => {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <h1 className="text-3xl font-bold text-yellow-500">Mensajería</h1>
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="Carpetas de mensajes">
-          {[
-            ['inbox', 'Bandeja de Entrada'],
-            ['sent', 'Enviados'],
-            ['compose', 'Redactar'],
-          ].map(([tab, label]) => (
+          {MESSAGE_TABS.map(([tab, label]) => (
             <button
               type="button"
               key={tab}
+              id={`messages-tab-${tab}`}
               role="tab"
+              tabIndex={activeTab === tab ? 0 : -1}
               aria-selected={activeTab === tab}
               aria-controls="messages-panel"
               onClick={() => selectTab(tab)}
+              onKeyDown={(event) => handleTablistKeyDown(event, MESSAGE_TAB_KEYS, tab, selectTab, 'messages-tab-')}
               className={`px-4 py-2 rounded ${activeTab === tab ? 'bg-yellow-600 text-black' : 'bg-gray-700'}`}
             >
               {label}
@@ -118,7 +125,7 @@ const MessagesView = () => {
         </div>
       </div>
 
-      <div id="messages-panel" role="tabpanel" className="focus:outline-none">
+      <div id="messages-panel" role="tabpanel" aria-labelledby={`messages-tab-${activeTab}`} className="focus:outline-none">
         {activeTab === 'compose' ? (
           <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 max-w-2xl mx-auto">
             <h2 className="text-xl mb-4">Nuevo Mensaje</h2>

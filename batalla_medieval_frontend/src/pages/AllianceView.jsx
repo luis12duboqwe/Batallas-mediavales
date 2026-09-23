@@ -3,9 +3,18 @@ import axiosClient, { api } from '../api/axiosClient';
 import { useCityStore } from '../store/cityStore';
 import { useUserStore } from '../store/userStore';
 import { formatDate } from '../utils/format';
+import { handleTablistKeyDown } from '../utils/accessibility';
 import AllianceDiplomacy from '../components/AllianceDiplomacy';
 import AllianceForum from '../components/AllianceForum';
 import useModalAccessibility from '../hooks/useModalAccessibility';
+
+const ALLIANCE_TABS = [
+  ['general', 'General'],
+  ['members', 'Miembros'],
+  ['diplomacy', 'Diplomacia'],
+  ['forum', 'Foro'],
+];
+const ALLIANCE_TAB_KEYS = ALLIANCE_TABS.map(([tab]) => tab);
 
 const AllianceView = () => {
   const { user } = useUserStore();
@@ -176,14 +185,9 @@ const AllianceView = () => {
     }
   };
 
+  const selectAllianceTab = (tab) => setActiveTab(tab);
   const myRank = Number(members.find((member) => Number(member.user_id) === Number(user?.id))?.rank || 0);
   const canSendMassMessage = myRank >= 2;
-  const tabs = [
-    ['general', 'General'],
-    ['members', 'Miembros'],
-    ['diplomacy', 'Diplomacia'],
-    ['forum', 'Foro'],
-  ];
 
   if (!alliance) {
     return (
@@ -253,16 +257,18 @@ const AllianceView = () => {
           <p className="text-gray-400 text-sm">{alliance.description}</p>
         </div>
         <div className="tabs tabs-boxed bg-black/40 flex-wrap" role="tablist" aria-label="Secciones de alianza">
-          {tabs.map(([tab, label]) => (
+          {ALLIANCE_TABS.map(([tab, label]) => (
             <button
               type="button"
               key={tab}
               role="tab"
+              tabIndex={activeTab === tab ? 0 : -1}
               aria-selected={activeTab === tab}
               aria-controls={`alliance-panel-${tab}`}
               id={`alliance-tab-${tab}`}
               className={`tab ${activeTab === tab ? 'tab-active' : ''}`}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => selectAllianceTab(tab)}
+              onKeyDown={(event) => handleTablistKeyDown(event, ALLIANCE_TAB_KEYS, tab, selectAllianceTab, 'alliance-tab-')}
               data-testid={tab === 'members' ? 'alliance-members-tab' : tab === 'forum' ? 'alliance-forum-tab' : undefined}
             >
               {label}
@@ -309,7 +315,7 @@ const AllianceView = () => {
 
             <section className="flex-1 card bg-black/40 border border-amber-900/30 p-4 flex flex-col min-h-[24rem]" aria-labelledby="alliance-chat-title">
               <h2 id="alliance-chat-title" className="text-lg font-bold text-amber-200 mb-4">Chat de Alianza</h2>
-              <div className="flex-1 overflow-y-auto space-y-3 mb-4 custom-scrollbar pr-2" data-testid="alliance-chat-history" aria-live="polite">
+              <div className="flex-1 overflow-y-auto space-y-3 mb-4 custom-scrollbar pr-2" data-testid="alliance-chat-history">
                 {chatMessages.map((message) => (
                   <div key={message.id} className="bg-black/20 p-2 rounded border border-gray-800/50">
                     <div className="flex justify-between items-baseline mb-1">
