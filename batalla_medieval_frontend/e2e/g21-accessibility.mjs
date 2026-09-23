@@ -84,6 +84,26 @@ async function assertMapInternalScrollReachable(page, label) {
   }
 }
 
+async function assertWorldDetailsAccessible(page, label) {
+  const worldButton = page.locator('[data-testid^="world-selector-"] > button').first();
+  await worldButton.waitFor({ state: 'visible', timeout: 10000 });
+  const semantics = await worldButton.evaluate((element) => {
+    const textForIds = (attribute) => (element.getAttribute(attribute) || '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((id) => document.getElementById(id)?.textContent?.trim() || '')
+      .join(' ');
+    return {
+      labelledText: textForIds('aria-labelledby'),
+      describedText: textForIds('aria-describedby'),
+    };
+  });
+  if (!/mundo/i.test(semantics.labelledText)) failures.push(`${label}: world selector action/name is not labelled`);
+  for (const expected of ['Estado:', 'Velocidad:', 'Recursos:', 'Tamaño mapa:']) {
+    if (!semantics.describedText.includes(expected)) failures.push(`${label}: world selector description lost ${expected}`);
+  }
+}
+
 async function checkGeneralViewport(viewport, label, mobile) {
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile });
   const page = await context.newPage();
@@ -91,6 +111,7 @@ async function checkGeneralViewport(viewport, label, mobile) {
 
   try {
     await login(page, USERS.general);
+    await assertWorldDetailsAccessible(page, label);
 
     const main = page.locator('main#main-content');
     const skipLink = page.locator('a[href="#main-content"]');
@@ -147,7 +168,6 @@ async function checkGeneralViewport(viewport, label, mobile) {
     if (nonButtons > 0) failures.push(`${label}: message tabs are not native buttons`);
 
     const inboxTab = page.getByRole('tab', { name: 'Bandeja de Entrada' });
-    const sentTab = page.getByRole('tab', { name: 'Enviados' });
     await inboxTab.focus();
     await page.keyboard.press('ArrowRight');
     await page.waitForFunction(() => document.getElementById('messages-tab-sent')?.getAttribute('aria-selected') === 'true');
@@ -199,7 +219,6 @@ async function checkDialogKeyboard() {
     await openGameRoute(page, '/alliance');
 
     const generalTab = page.getByRole('tab', { name: 'General' });
-    const membersTab = page.getByRole('tab', { name: 'Miembros' });
     await generalTab.focus();
     await page.keyboard.press('ArrowRight');
     await page.waitForFunction(() => document.getElementById('alliance-tab-members')?.getAttribute('aria-selected') === 'true');
@@ -254,4 +273,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('G21 BM-0081 accessibility passed: mobile/desktop layout, internal map scrolling, SPA navigation, keyboard tabs, reports and modal focus trap');
+console.log('G21 BM-0081 accessibility passed: mobile/desktop layout, world descriptions, internal map scrolling, SPA navigation, keyboard tabs, reports and modal focus trap');

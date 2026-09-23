@@ -189,6 +189,13 @@ try {
   if (uiVersion !== RULES_VERSION) failures.push(`Adventure result rules mismatch: ${uiVersion}`);
   if (uiSeed !== seedText) failures.push(`Adventure UI seed changed from start to claim: ${seedText} -> ${uiSeed}`);
 
+  // Claim refreshes the adventure list and removes the focused claim button.
+  // Closing the dialog must therefore restore focus to the main landmark fallback.
+  await claimButton.waitFor({ state: 'detached', timeout: 10000 });
+  await resultModal.getByRole('button', { name: 'Continuar' }).click();
+  await resultModal.waitFor({ state: 'detached', timeout: 5000 });
+  await page.waitForFunction(() => document.activeElement?.id === 'main-content');
+
   const afterUiClaim = await stateSnapshot();
   const afterUiCompact = compactState(afterUiClaim, fixtureAdventure.id);
   if (!afterUiCompact.adventure?.result) failures.push('Adventure result was not persisted after UI claim');

@@ -83,9 +83,13 @@ const useModalAccessibility = (isOpen, onClose) => {
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('focusin', handleFocusIn);
       const previous = previousFocusRef.current;
-      window.requestAnimationFrame(() => {
-        if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
-      });
+      const mainFallback = document.getElementById('main-content');
+      const restoreTarget = previous instanceof HTMLElement && previous.isConnected
+        ? previous
+        : mainFallback instanceof HTMLElement && mainFallback.isConnected
+          ? mainFallback
+          : null;
+      window.requestAnimationFrame(() => restoreTarget?.focus());
     };
   }, [isOpen]);
 
