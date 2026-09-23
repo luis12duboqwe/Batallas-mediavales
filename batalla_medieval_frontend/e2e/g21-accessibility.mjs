@@ -16,8 +16,7 @@ const recordPageErrors = (page, label) => {
   });
 };
 
-async function withIsolatedPage(contextOptions, label, callback) {
-  const browser = await chromium.launch({ headless: true });
+async function withIsolatedPage(browser, contextOptions, label, callback) {
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   recordPageErrors(page, label);
@@ -25,12 +24,10 @@ async function withIsolatedPage(contextOptions, label, callback) {
   try {
     await callback(page);
   } finally {
-    // Teardown is deliberately best-effort. Any browser/page closure that
-    // occurs while the journey is running still rejects the awaited action
-    // above and is recorded as a journey failure; teardown itself must not
-    // overwrite that evidence with a secondary close error.
+    // Each journey gets a fresh context while reusing one Chromium process.
+    // A journey-time page/browser closure still rejects the awaited action;
+    // teardown only avoids replacing that evidence with a secondary close error.
     await context.close().catch(() => {});
-    await browser.close().catch(() => {});
   }
 }
 
@@ -120,9 +117,9 @@ async function assertWorldDetailsAccessible(page, label) {
   }
 }
 
-async function checkGeneralViewport(viewport, label, mobile) {
+async function checkGeneralViewport(browser, viewport, label, mobile) {
   try {
-    await withIsolatedPage({ viewport, isMobile: mobile, hasTouch: mobile }, label, async (page) => {
+    await withIsolatedPage(browser, { viewport, isMobile: mobile, hasTouch: mobile }, label, async (page) => {
       await login(page, USERS.general);
       await assertWorldDetailsAccessible(page, label);
 
@@ -198,9 +195,9 @@ async function checkGeneralViewport(viewport, label, mobile) {
   }
 }
 
-async function checkReportKeyboard() {
+async function checkReportKeyboard(browser) {
   try {
-    await withIsolatedPage({ viewport: { width: 1440, height: 900 } }, 'report', async (page) => {
+    await withIsolatedPage(browser, { viewport: { width: 1440, height: 900 } }, 'report', async (page) => {
       await login(page, USERS.report);
       await openGameRoute(page, '/reports');
       const toggle = page.locator('[data-testid^="report-toggle-"]').first();
@@ -219,9 +216,9 @@ async function checkReportKeyboard() {
   }
 }
 
-async function checkDialogKeyboard() {
+async function checkDialogKeyboard(browser) {
   try {
-    await withIsolatedPage({ viewport: { width: 1440, height: 900 } }, 'dialog', async (page) => {
+    await withIsolatedPage(browser, { viewport: { width: 1440, height: 900 } }, 'dialog', async (page) => {
       await login(page, USERS.alliance);
       await openGameRoute(page, '/alliance');
 
@@ -265,10 +262,15 @@ async function checkDialogKeyboard() {
   }
 }
 
-await checkGeneralViewport({ width: 1440, height: 900 }, 'desktop', false);
-await checkGeneralViewport({ width: 390, height: 844 }, 'mobile', true);
-await checkReportKeyboard();
-await checkDialogKeyboard();
+const browser = await chromium.launch({ headless: true });
+try {
+  await checkGeneralViewport(browser, { width: 1440, height: 900 }, 'desktop', false);
+  await checkGeneralViewport(browser, { width: 390, height: 844 }, 'mobile', true);
+  await checkReportKeyboard(browser);
+  await checkDialogKeyboard(browser);
+} finally {
+  await browser.close().catch(() => {});
+}
 
 if (failures.length) {
   console.error(failures.join('\n'));
