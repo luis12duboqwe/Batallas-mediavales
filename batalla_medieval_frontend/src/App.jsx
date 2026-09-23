@@ -80,8 +80,13 @@ const Layout = ({ children }) => {
   const mainRef = useRef(null);
 
   useEffect(() => {
+    // On a hard page load React Router uses the default location key. Leave
+    // focus at the document start so the skip link is the first keyboard stop.
+    // Subsequent SPA/history navigations have a real key and should move focus
+    // to the new main content instead of forcing users through navigation again.
+    if (location.key === 'default') return;
     mainRef.current?.focus({ preventScroll: false });
-  }, [location.pathname]);
+  }, [location.key, location.pathname]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-midnight via-gray-950 to-black text-gray-100">
