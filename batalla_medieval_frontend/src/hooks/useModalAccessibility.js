@@ -14,6 +14,7 @@ const visibleFocusableElements = (dialog) => (
     element instanceof HTMLElement
     && !element.hasAttribute('hidden')
     && element.getAttribute('aria-hidden') !== 'true'
+    && element.getClientRects().length > 0
   ))
 );
 
@@ -31,8 +32,12 @@ const useModalAccessibility = (isOpen, onClose) => {
 
     previousFocusRef.current = document.activeElement;
     const dialog = dialogRef.current;
-    const initialTarget = visibleFocusableElements(dialog)[0] || dialog;
-    const focusFrame = window.requestAnimationFrame(() => initialTarget?.focus());
+    const focusInsideDialog = (preferLast = false) => {
+      const focusable = visibleFocusableElements(dialog);
+      const target = preferLast ? focusable[focusable.length - 1] : focusable[0];
+      (target || dialog)?.focus();
+    };
+    const focusFrame = window.requestAnimationFrame(() => focusInsideDialog(false));
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -49,21 +54,34 @@ const useModalAccessibility = (isOpen, onClose) => {
         return;
       }
 
+      const active = document.activeElement;
+      const activeIndex = focusable.indexOf(active);
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+
+      if (!dialog.contains(active) || activeIndex === -1) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && active === first) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
+      } else if (!event.shiftKey && active === last) {
         event.preventDefault();
         first.focus();
       }
     };
 
+    const handleFocusIn = (event) => {
+      if (!dialog || dialog.contains(event.target)) return;
+      focusInsideDialog(false);
+    };
+
     document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('focusin', handleFocusIn);
     return () => {
       window.cancelAnimationFrame(focusFrame);
       document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('focusin', handleFocusIn);
       const previous = previousFocusRef.current;
       window.requestAnimationFrame(() => {
         if (previous instanceof HTMLElement && previous.isConnected) previous.focus();

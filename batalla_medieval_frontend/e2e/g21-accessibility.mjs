@@ -60,6 +60,30 @@ async function assertNoDocumentOverflow(page, route, label) {
   }
 }
 
+async function assertMapInternalScrollReachable(page, label) {
+  const panel = page.getByTestId('map-grid-panel');
+  const metrics = await panel.evaluate((element) => ({
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  }));
+  if (metrics.scrollWidth <= metrics.clientWidth + 1) return;
+
+  const firstTile = page.locator('[data-testid^="map-tile-"]').first();
+  const lastTile = page.locator('[data-testid^="map-tile-"]').last();
+
+  await panel.evaluate((element) => { element.scrollLeft = 0; });
+  const [panelAtStart, firstAtStart] = await Promise.all([panel.boundingBox(), firstTile.boundingBox()]);
+  if (!panelAtStart || !firstAtStart || firstAtStart.x < panelAtStart.x - 1) {
+    failures.push(`${label}: western map columns are clipped before the scrollable origin`);
+  }
+
+  await panel.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  const [panelAtEnd, lastAtEnd] = await Promise.all([panel.boundingBox(), lastTile.boundingBox()]);
+  if (!panelAtEnd || !lastAtEnd || lastAtEnd.x + lastAtEnd.width > panelAtEnd.x + panelAtEnd.width + 1) {
+    failures.push(`${label}: eastern map columns are unreachable at the scrollable end`);
+  }
+}
+
 async function checkGeneralViewport(viewport, label, mobile) {
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile });
   const page = await context.newPage();
@@ -107,6 +131,7 @@ async function checkGeneralViewport(viewport, label, mobile) {
     if (await firstTile.getAttribute('aria-pressed') !== 'true') failures.push(`${label}: map tile did not activate from keyboard`);
 
     if (mobile) {
+      await assertMapInternalScrollReachable(page, label);
       const details = page.getByTestId('map-details-panel');
       await details.scrollIntoViewIfNeeded();
       const detailsBox = await details.boundingBox();
@@ -125,10 +150,11 @@ async function checkGeneralViewport(viewport, label, mobile) {
     const sentTab = page.getByRole('tab', { name: 'Enviados' });
     await inboxTab.focus();
     await page.keyboard.press('ArrowRight');
-    if (await sentTab.getAttribute('aria-selected') !== 'true') failures.push(`${label}: message tabs do not activate with ArrowRight`);
-    if (!await sentTab.evaluate((element) => document.activeElement === element)) failures.push(`${label}: ArrowRight did not move focus to the next message tab`);
+    await page.waitForFunction(() => document.getElementById('messages-tab-sent')?.getAttribute('aria-selected') === 'true');
+    await page.waitForFunction(() => document.activeElement?.id === 'messages-tab-sent');
     await page.keyboard.press('Home');
-    if (await inboxTab.getAttribute('aria-selected') !== 'true') failures.push(`${label}: Home did not activate the first message tab`);
+    await page.waitForFunction(() => document.getElementById('messages-tab-inbox')?.getAttribute('aria-selected') === 'true');
+    await page.waitForFunction(() => document.activeElement?.id === 'messages-tab-inbox');
 
     for (const route of ['/', '/map', '/messages', '/reports', '/alliance']) {
       await assertNoDocumentOverflow(page, route, label);
@@ -176,10 +202,11 @@ async function checkDialogKeyboard() {
     const membersTab = page.getByRole('tab', { name: 'Miembros' });
     await generalTab.focus();
     await page.keyboard.press('ArrowRight');
-    if (await membersTab.getAttribute('aria-selected') !== 'true') failures.push('dialog: alliance tabs do not activate with ArrowRight');
-    if (!await membersTab.evaluate((element) => document.activeElement === element)) failures.push('dialog: ArrowRight did not move focus to the next alliance tab');
+    await page.waitForFunction(() => document.getElementById('alliance-tab-members')?.getAttribute('aria-selected') === 'true');
+    await page.waitForFunction(() => document.activeElement?.id === 'alliance-tab-members');
     await page.keyboard.press('Home');
-    if (await generalTab.getAttribute('aria-selected') !== 'true') failures.push('dialog: Home did not return to the first alliance tab');
+    await page.waitForFunction(() => document.getElementById('alliance-tab-general')?.getAttribute('aria-selected') === 'true');
+    await page.waitForFunction(() => document.activeElement?.id === 'alliance-tab-general');
 
     const opener = page.getByRole('button', { name: 'Invitar Jugador' });
     await opener.waitFor({ state: 'visible', timeout: 10000 });
@@ -190,6 +217,17 @@ async function checkDialogKeyboard() {
     const focusInside = await dialog.evaluate((element) => element.contains(document.activeElement));
     if (!focusInside) failures.push('dialog: initial focus did not move inside modal');
     if (await dialog.getAttribute('aria-modal') !== 'true') failures.push('dialog: aria-modal is missing');
+
+    const cancel = dialog.getByRole('button', { name: 'Cancelar' });
+    await dialog.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.waitForFunction(() => document.activeElement?.textContent?.trim() === 'Cancelar');
+    await page.keyboard.press('Tab');
+    await page.waitForFunction(() => document.activeElement?.id === 'alliance-invite-search');
+
+    await page.locator('main#main-content').focus();
+    await page.waitForFunction(() => document.querySelector('[role="dialog"]')?.contains(document.activeElement));
+
     await page.keyboard.press('Escape');
     await dialog.waitFor({ state: 'detached', timeout: 5000 });
     await page.waitForTimeout(50);
@@ -216,4 +254,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('G21 BM-0081 accessibility passed: mobile/desktop layout, SPA navigation, keyboard tabs, reports and modal focus');
+console.log('G21 BM-0081 accessibility passed: mobile/desktop layout, internal map scrolling, SPA navigation, keyboard tabs, reports and modal focus trap');
