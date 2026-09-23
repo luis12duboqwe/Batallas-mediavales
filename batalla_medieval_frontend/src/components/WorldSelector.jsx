@@ -64,7 +64,7 @@ const WorldSelector = () => {
                 aria-labelledby={`${actionId} ${nameId}`}
                 aria-describedby={`${statusDescriptionId} ${detailsId}`}
               >
-                <span id={actionId} className="sr-only">{isActive ? 'Mundo activo' : 'Seleccionar mundo'}</span>
+                <span id={actionId} className="sr-only">{isActive ? 'Mundo seleccionado' : 'Seleccionar mundo'}</span>
                 <span id={statusDescriptionId} className="sr-only">Estado: {world.lifecycle_status || 'open'}</span>
                 <span className="flex items-start justify-between mb-3">
                   <span>
