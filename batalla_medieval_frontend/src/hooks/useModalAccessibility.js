@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -27,7 +27,7 @@ const useModalAccessibility = (isOpen, onClose) => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isOpen) return undefined;
 
     previousFocusRef.current = document.activeElement;
@@ -37,7 +37,10 @@ const useModalAccessibility = (isOpen, onClose) => {
       const target = preferLast ? focusable[focusable.length - 1] : focusable[0];
       (target || dialog)?.focus();
     };
-    const focusFrame = window.requestAnimationFrame(() => focusInsideDialog(false));
+
+    // Move focus before paint so an open modal is never visibly exposed while
+    // keyboard focus remains in the page behind it.
+    focusInsideDialog(false);
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -79,7 +82,6 @@ const useModalAccessibility = (isOpen, onClose) => {
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('focusin', handleFocusIn);
     return () => {
-      window.cancelAnimationFrame(focusFrame);
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('focusin', handleFocusIn);
       const previous = previousFocusRef.current;
