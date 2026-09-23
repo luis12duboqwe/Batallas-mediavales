@@ -121,19 +121,24 @@ async function checkGeneralViewport(browser, viewport, label, mobile) {
   try {
     await withIsolatedPage(browser, { viewport, isMobile: mobile, hasTouch: mobile }, label, async (page) => {
       await login(page, USERS.general);
+
+      // A real document load must leave focus at the document start so the
+      // skip link is the first keyboard stop. The persisted auth token lets us
+      // test this without the artificial blur/reset that browsers do not honor.
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await waitForExperienceReady(page);
+      const main = page.locator('main#main-content');
+      await main.waitFor({ state: 'visible', timeout: 10000 });
       await assertWorldDetailsAccessible(page, label);
 
-      const main = page.locator('main#main-content');
       const skipLink = page.locator('a[href="#main-content"]');
       if (await skipLink.count() !== 1) failures.push(`${label}: skip-to-content link missing`);
 
-      await page.evaluate(() => {
-        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-      });
       await page.keyboard.press('Tab');
       const skipFocused = await skipLink.evaluate((element) => document.activeElement === element);
       if (!skipFocused) failures.push(`${label}: first keyboard stop is not the skip-to-content link`);
       await page.keyboard.press('Enter');
+      await page.waitForFunction(() => document.activeElement?.id === 'main-content', null, { timeout: 2000 }).catch(() => {});
       const mainFocusedAfterSkip = await main.evaluate((element) => document.activeElement === element);
       if (!mainFocusedAfterSkip) failures.push(`${label}: skip link did not move focus to main content`);
 
