@@ -52,7 +52,7 @@ const WorldSelector = () => {
           const isActive = world.id === currentWorldId;
           const nameId = `world-name-${world.id}`;
           const actionId = `world-action-${world.id}`;
-          const statusId = `world-status-description-${world.id}`;
+          const statusDescriptionId = `world-status-description-${world.id}`;
           const detailsId = `world-details-${world.id}`;
           return (
             <article key={world.id} data-testid={`world-selector-${world.id}`} className={`card overflow-hidden transition ${isActive ? 'border-2 border-yellow-500 shadow-yellow-500/50' : ''}`} aria-current={isActive ? 'true' : undefined}>
@@ -62,13 +62,14 @@ const WorldSelector = () => {
                 onClick={() => !loading && handleWorldSelect(world.id)}
                 disabled={loading || isActive}
                 aria-labelledby={`${actionId} ${nameId}`}
-                aria-describedby={`${statusId} ${detailsId}`}
+                aria-describedby={`${statusDescriptionId} ${detailsId}`}
               >
                 <span id={actionId} className="sr-only">{isActive ? 'Mundo activo' : 'Seleccionar mundo'}</span>
+                <span id={statusDescriptionId} className="sr-only">Estado: {world.lifecycle_status || 'open'}</span>
                 <span className="flex items-start justify-between mb-3">
                   <span>
                     <span id={nameId} className="text-xl font-bold block">{world.name}</span>
-                    <span id={statusId} className="text-xs uppercase tracking-wide text-green-400 block" data-testid={`world-status-${world.id}`}>Estado: {world.lifecycle_status || 'open'}</span>
+                    <span className="text-xs uppercase tracking-wide text-green-400 block" data-testid={`world-status-${world.id}`} aria-hidden="true">{world.lifecycle_status || 'open'}</span>
                     {isActive && <span className="badge mt-1" aria-hidden="true">Mundo activo</span>}
                   </span>
                   <span className="text-yellow-300" aria-hidden="true"><GameIcon name="map" size={26} /></span>
