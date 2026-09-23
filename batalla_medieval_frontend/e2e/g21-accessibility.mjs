@@ -9,14 +9,30 @@ const USERS = {
   alliance: { username: 'g14_rival', password: 'G14-Community-Test-2026!' },
 };
 
-const browser = await chromium.launch({ headless: true });
-
 const recordPageErrors = (page, label) => {
   page.on('pageerror', (error) => failures.push(`${label} pageerror: ${error.message}`));
   page.on('response', (response) => {
     if (response.status() >= 500) failures.push(`${label} HTTP ${response.status()}: ${response.url()}`);
   });
 };
+
+async function withIsolatedPage(contextOptions, label, callback) {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext(contextOptions);
+  const page = await context.newPage();
+  recordPageErrors(page, label);
+
+  try {
+    await callback(page);
+  } finally {
+    // Teardown is deliberately best-effort. Any browser/page closure that
+    // occurs while the journey is running still rejects the awaited action
+    // above and is recorded as a journey failure; teardown itself must not
+    // overwrite that evidence with a secondary close error.
+    await context.close().catch(() => {});
+    await browser.close().catch(() => {});
+  }
+}
 
 async function waitForExperienceReady(page) {
   const intro = page.getByTestId('intro-animation');
@@ -105,168 +121,154 @@ async function assertWorldDetailsAccessible(page, label) {
 }
 
 async function checkGeneralViewport(viewport, label, mobile) {
-  const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile });
-  const page = await context.newPage();
-  recordPageErrors(page, label);
-
   try {
-    await login(page, USERS.general);
-    await assertWorldDetailsAccessible(page, label);
+    await withIsolatedPage({ viewport, isMobile: mobile, hasTouch: mobile }, label, async (page) => {
+      await login(page, USERS.general);
+      await assertWorldDetailsAccessible(page, label);
 
-    const main = page.locator('main#main-content');
-    const skipLink = page.locator('a[href="#main-content"]');
-    if (await skipLink.count() !== 1) failures.push(`${label}: skip-to-content link missing`);
+      const main = page.locator('main#main-content');
+      const skipLink = page.locator('a[href="#main-content"]');
+      if (await skipLink.count() !== 1) failures.push(`${label}: skip-to-content link missing`);
 
-    await page.evaluate(() => {
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    });
-    await page.keyboard.press('Tab');
-    const skipFocused = await skipLink.evaluate((element) => document.activeElement === element);
-    if (!skipFocused) failures.push(`${label}: first keyboard stop is not the skip-to-content link`);
-    await page.keyboard.press('Enter');
-    const mainFocusedAfterSkip = await main.evaluate((element) => document.activeElement === element);
-    if (!mainFocusedAfterSkip) failures.push(`${label}: skip link did not move focus to main content`);
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      });
+      await page.keyboard.press('Tab');
+      const skipFocused = await skipLink.evaluate((element) => document.activeElement === element);
+      if (!skipFocused) failures.push(`${label}: first keyboard stop is not the skip-to-content link`);
+      await page.keyboard.press('Enter');
+      const mainFocusedAfterSkip = await main.evaluate((element) => document.activeElement === element);
+      if (!mainFocusedAfterSkip) failures.push(`${label}: skip link did not move focus to main content`);
 
-    const navigation = mobile
-      ? page.getByTestId('mobile-navigation')
-      : page.locator('aside nav[aria-label]').first();
-    if (await navigation.count() !== 1) failures.push(`${label}: labelled primary game navigation missing`);
+      const navigation = mobile
+        ? page.getByTestId('mobile-navigation')
+        : page.locator('aside nav[aria-label]').first();
+      if (await navigation.count() !== 1) failures.push(`${label}: labelled primary game navigation missing`);
 
-    const mapLink = page.locator('a[href="/map"]:visible').first();
-    await mapLink.focus();
-    await page.keyboard.press('Enter');
-    await page.waitForURL((url) => url.pathname === '/map', { timeout: 10000 });
-    await waitForExperienceReady(page);
-    const mainFocusedAfterRoute = await page.locator('main#main-content').evaluate((element) => document.activeElement === element);
-    if (!mainFocusedAfterRoute) failures.push(`${label}: SPA route change did not move focus to main content`);
+      const mapLink = page.locator('a[href="/map"]:visible').first();
+      await mapLink.focus();
+      await page.keyboard.press('Enter');
+      await page.waitForURL((url) => url.pathname === '/map', { timeout: 10000 });
+      await waitForExperienceReady(page);
+      const mainFocusedAfterRoute = await page.locator('main#main-content').evaluate((element) => document.activeElement === element);
+      if (!mainFocusedAfterRoute) failures.push(`${label}: SPA route change did not move focus to main content`);
 
-    const firstTile = page.locator('[data-testid^="map-tile-"]').first();
-    await firstTile.waitFor({ state: 'visible', timeout: 10000 });
-    const tileSemantics = await firstTile.evaluate((element) => ({
-      tag: element.tagName,
-      label: element.getAttribute('aria-label'),
-    }));
-    if (tileSemantics.tag !== 'BUTTON' || !tileSemantics.label) failures.push(`${label}: map tile is not an accessible button`);
-    await firstTile.focus();
-    await page.keyboard.press('Enter');
-    if (await firstTile.getAttribute('aria-pressed') !== 'true') failures.push(`${label}: map tile did not activate from keyboard`);
+      const firstTile = page.locator('[data-testid^="map-tile-"]').first();
+      await firstTile.waitFor({ state: 'visible', timeout: 10000 });
+      const tileSemantics = await firstTile.evaluate((element) => ({
+        tag: element.tagName,
+        label: element.getAttribute('aria-label'),
+      }));
+      if (tileSemantics.tag !== 'BUTTON' || !tileSemantics.label) failures.push(`${label}: map tile is not an accessible button`);
+      await firstTile.focus();
+      await page.keyboard.press('Enter');
+      if (await firstTile.getAttribute('aria-pressed') !== 'true') failures.push(`${label}: map tile did not activate from keyboard`);
 
-    if (mobile) {
-      await assertMapInternalScrollReachable(page, label);
-      const details = page.getByTestId('map-details-panel');
-      await details.scrollIntoViewIfNeeded();
-      const detailsBox = await details.boundingBox();
-      if (!detailsBox || detailsBox.x < -1 || detailsBox.x + detailsBox.width > viewport.width + 1) {
-        failures.push(`${label}: map details panel is clipped outside the mobile viewport`);
+      if (mobile) {
+        await assertMapInternalScrollReachable(page, label);
+        const details = page.getByTestId('map-details-panel');
+        await details.scrollIntoViewIfNeeded();
+        const detailsBox = await details.boundingBox();
+        if (!detailsBox || detailsBox.x < -1 || detailsBox.x + detailsBox.width > viewport.width + 1) {
+          failures.push(`${label}: map details panel is clipped outside the mobile viewport`);
+        }
       }
-    }
 
-    await openGameRoute(page, '/messages');
-    const messageTabs = page.getByRole('tab');
-    if (await messageTabs.count() !== 3) failures.push(`${label}: message tab semantics are incomplete`);
-    const nonButtons = await messageTabs.evaluateAll((elements) => elements.filter((element) => element.tagName !== 'BUTTON').length);
-    if (nonButtons > 0) failures.push(`${label}: message tabs are not native buttons`);
+      await openGameRoute(page, '/messages');
+      const messageTabs = page.getByRole('tab');
+      if (await messageTabs.count() !== 3) failures.push(`${label}: message tab semantics are incomplete`);
+      const nonButtons = await messageTabs.evaluateAll((elements) => elements.filter((element) => element.tagName !== 'BUTTON').length);
+      if (nonButtons > 0) failures.push(`${label}: message tabs are not native buttons`);
 
-    const inboxTab = page.getByRole('tab', { name: 'Bandeja de Entrada' });
-    await inboxTab.focus();
-    await page.keyboard.press('ArrowRight');
-    await page.waitForFunction(() => document.getElementById('messages-tab-sent')?.getAttribute('aria-selected') === 'true');
-    await page.waitForFunction(() => document.activeElement?.id === 'messages-tab-sent');
-    await page.keyboard.press('Home');
-    await page.waitForFunction(() => document.getElementById('messages-tab-inbox')?.getAttribute('aria-selected') === 'true');
-    await page.waitForFunction(() => document.activeElement?.id === 'messages-tab-inbox');
+      const inboxTab = page.getByRole('tab', { name: 'Bandeja de Entrada' });
+      await inboxTab.focus();
+      await page.keyboard.press('ArrowRight');
+      await page.waitForFunction(() => document.getElementById('messages-tab-sent')?.getAttribute('aria-selected') === 'true');
+      await page.waitForFunction(() => document.activeElement?.id === 'messages-tab-sent');
+      await page.keyboard.press('Home');
+      await page.waitForFunction(() => document.getElementById('messages-tab-inbox')?.getAttribute('aria-selected') === 'true');
+      await page.waitForFunction(() => document.activeElement?.id === 'messages-tab-inbox');
 
-    for (const route of ['/', '/map', '/messages', '/reports', '/alliance']) {
-      await assertNoDocumentOverflow(page, route, label);
-    }
+      for (const route of ['/', '/map', '/messages', '/reports', '/alliance']) {
+        await assertNoDocumentOverflow(page, route, label);
+      }
+    });
   } catch (error) {
     failures.push(`${label} journey-error: ${error.stack || error.message}`);
-  } finally {
-    await context.close();
   }
 }
 
 async function checkReportKeyboard() {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = await context.newPage();
-  recordPageErrors(page, 'report');
   try {
-    await login(page, USERS.report);
-    await openGameRoute(page, '/reports');
-    const toggle = page.locator('[data-testid^="report-toggle-"]').first();
-    await toggle.waitFor({ state: 'visible', timeout: 10000 });
-    if (await toggle.evaluate((element) => element.tagName) !== 'BUTTON') failures.push('report: expandable report header is not a native button');
-    if (await toggle.getAttribute('aria-expanded') !== 'false') failures.push('report: initial aria-expanded state is invalid');
-    const detailsId = await toggle.getAttribute('aria-controls');
-    if (!detailsId) failures.push('report: aria-controls missing');
-    await toggle.focus();
-    await page.keyboard.press('Enter');
-    if (await toggle.getAttribute('aria-expanded') !== 'true') failures.push('report: Enter did not expand report');
-    if (detailsId && !await page.locator(`#${detailsId}`).isVisible()) failures.push('report: controlled details region did not become visible');
+    await withIsolatedPage({ viewport: { width: 1440, height: 900 } }, 'report', async (page) => {
+      await login(page, USERS.report);
+      await openGameRoute(page, '/reports');
+      const toggle = page.locator('[data-testid^="report-toggle-"]').first();
+      await toggle.waitFor({ state: 'visible', timeout: 10000 });
+      if (await toggle.evaluate((element) => element.tagName) !== 'BUTTON') failures.push('report: expandable report header is not a native button');
+      if (await toggle.getAttribute('aria-expanded') !== 'false') failures.push('report: initial aria-expanded state is invalid');
+      const detailsId = await toggle.getAttribute('aria-controls');
+      if (!detailsId) failures.push('report: aria-controls missing');
+      await toggle.focus();
+      await page.keyboard.press('Enter');
+      if (await toggle.getAttribute('aria-expanded') !== 'true') failures.push('report: Enter did not expand report');
+      if (detailsId && !await page.locator(`#${detailsId}`).isVisible()) failures.push('report: controlled details region did not become visible');
+    });
   } catch (error) {
     failures.push(`report journey-error: ${error.stack || error.message}`);
-  } finally {
-    await context.close();
   }
 }
 
 async function checkDialogKeyboard() {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = await context.newPage();
-  recordPageErrors(page, 'dialog');
   try {
-    await login(page, USERS.alliance);
-    await openGameRoute(page, '/alliance');
+    await withIsolatedPage({ viewport: { width: 1440, height: 900 } }, 'dialog', async (page) => {
+      await login(page, USERS.alliance);
+      await openGameRoute(page, '/alliance');
 
-    const generalTab = page.getByRole('tab', { name: 'General' });
-    await generalTab.focus();
-    await page.keyboard.press('ArrowRight');
-    await page.waitForFunction(() => document.getElementById('alliance-tab-members')?.getAttribute('aria-selected') === 'true');
-    await page.waitForFunction(() => document.activeElement?.id === 'alliance-tab-members');
-    await page.keyboard.press('Home');
-    await page.waitForFunction(() => document.getElementById('alliance-tab-general')?.getAttribute('aria-selected') === 'true');
-    await page.waitForFunction(() => document.activeElement?.id === 'alliance-tab-general');
+      const generalTab = page.getByRole('tab', { name: 'General' });
+      await generalTab.focus();
+      await page.keyboard.press('ArrowRight');
+      await page.waitForFunction(() => document.getElementById('alliance-tab-members')?.getAttribute('aria-selected') === 'true');
+      await page.waitForFunction(() => document.activeElement?.id === 'alliance-tab-members');
+      await page.keyboard.press('Home');
+      await page.waitForFunction(() => document.getElementById('alliance-tab-general')?.getAttribute('aria-selected') === 'true');
+      await page.waitForFunction(() => document.activeElement?.id === 'alliance-tab-general');
 
-    const opener = page.getByRole('button', { name: 'Invitar Jugador' });
-    await opener.waitFor({ state: 'visible', timeout: 10000 });
-    await opener.focus();
-    await page.keyboard.press('Enter');
-    const dialog = page.getByRole('dialog', { name: 'Invitar Jugador' });
-    await dialog.waitFor({ state: 'visible', timeout: 5000 });
-    const focusInside = await dialog.evaluate((element) => element.contains(document.activeElement));
-    if (!focusInside) failures.push('dialog: initial focus did not move inside modal');
-    if (await dialog.getAttribute('aria-modal') !== 'true') failures.push('dialog: aria-modal is missing');
+      const opener = page.getByRole('button', { name: 'Invitar Jugador' });
+      await opener.waitFor({ state: 'visible', timeout: 10000 });
+      await opener.focus();
+      await page.keyboard.press('Enter');
+      const dialog = page.getByRole('dialog', { name: 'Invitar Jugador' });
+      await dialog.waitFor({ state: 'visible', timeout: 5000 });
+      const focusInside = await dialog.evaluate((element) => element.contains(document.activeElement));
+      if (!focusInside) failures.push('dialog: initial focus did not move inside modal');
+      if (await dialog.getAttribute('aria-modal') !== 'true') failures.push('dialog: aria-modal is missing');
 
-    const cancel = dialog.getByRole('button', { name: 'Cancelar' });
-    await dialog.focus();
-    await page.keyboard.press('Shift+Tab');
-    await page.waitForFunction(() => document.activeElement?.textContent?.trim() === 'Cancelar');
-    await page.keyboard.press('Tab');
-    await page.waitForFunction(() => document.activeElement?.id === 'alliance-invite-search');
+      const cancel = dialog.getByRole('button', { name: 'Cancelar' });
+      await dialog.focus();
+      await page.keyboard.press('Shift+Tab');
+      await page.waitForFunction(() => document.activeElement?.textContent?.trim() === 'Cancelar');
+      await page.keyboard.press('Tab');
+      await page.waitForFunction(() => document.activeElement?.id === 'alliance-invite-search');
 
-    await page.locator('main#main-content').focus();
-    await page.waitForFunction(() => document.querySelector('[role="dialog"]')?.contains(document.activeElement));
+      await page.locator('main#main-content').focus();
+      await page.waitForFunction(() => document.querySelector('[role="dialog"]')?.contains(document.activeElement));
 
-    await page.keyboard.press('Escape');
-    await dialog.waitFor({ state: 'detached', timeout: 5000 });
-    await page.waitForTimeout(50);
-    const focusRestored = await opener.evaluate((element) => document.activeElement === element);
-    if (!focusRestored) failures.push('dialog: focus was not restored to opener after Escape');
+      await page.keyboard.press('Escape');
+      await dialog.waitFor({ state: 'detached', timeout: 5000 });
+      await page.waitForTimeout(50);
+      const focusRestored = await opener.evaluate((element) => document.activeElement === element);
+      if (!focusRestored) failures.push('dialog: focus was not restored to opener after Escape');
+    });
   } catch (error) {
     failures.push(`dialog journey-error: ${error.stack || error.message}`);
-  } finally {
-    await context.close();
   }
 }
 
-try {
-  await checkGeneralViewport({ width: 1440, height: 900 }, 'desktop', false);
-  await checkGeneralViewport({ width: 390, height: 844 }, 'mobile', true);
-  await checkReportKeyboard();
-  await checkDialogKeyboard();
-} finally {
-  await browser.close();
-}
+await checkGeneralViewport({ width: 1440, height: 900 }, 'desktop', false);
+await checkGeneralViewport({ width: 390, height: 844 }, 'mobile', true);
+await checkReportKeyboard();
+await checkDialogKeyboard();
 
 if (failures.length) {
   console.error(failures.join('\n'));
