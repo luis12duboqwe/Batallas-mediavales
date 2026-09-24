@@ -182,6 +182,7 @@ const ReportCard = ({ report }) => {
   const isTrade = report.report_type === 'trade';
   const isReturn = report.report_type === 'return';
   const isReinforce = report.report_type === 'reinforce';
+  const detailsId = `report-details-${report.id}`;
   const visibleDefenderSpies = isSpy
     ? (
       defender?.spies
@@ -193,9 +194,13 @@ const ReportCard = ({ report }) => {
   return (
     <div className={`card bg-black/40 border border-amber-900/30 overflow-hidden transition-all duration-300 ${expanded ? 'ring-1 ring-amber-500/50' : ''}`}>
       {/* Header Summary */}
-      <div
-        className="p-4 cursor-pointer hover:bg-white/5 flex items-center gap-4"
+      <button
+        type="button"
+        className="w-full p-4 cursor-pointer hover:bg-white/5 flex items-center gap-4 text-left"
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-controls={detailsId}
+        data-testid={`report-toggle-${report.id}`}
       >
         {isBattle && <BattleIcon />}
         {isSpy && <SpyIcon />}
@@ -203,19 +208,19 @@ const ReportCard = ({ report }) => {
         {isReturn && <ReturnIcon />}
         {isReinforce && <ReinforceIcon />}
 
-        <div className="flex-1">
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold text-amber-100 text-lg">
+        <span className="flex-1 min-w-0">
+          <span className="flex justify-between items-center gap-3">
+            <span className="font-bold text-amber-100 text-lg">
               {isBattle && `Batalla en ${defender.name}`}
               {isSpy && `Espionaje en ${defender.name}`}
-              {isTrade && `Comercio`}
-              {isReturn && `Tropas regresaron`}
-              {isReinforce && `Refuerzos`}
-            </h3>
+              {isTrade && 'Comercio'}
+              {isReturn && 'Tropas regresaron'}
+              {isReinforce && 'Refuerzos'}
+            </span>
             <span className="text-xs text-gray-400">{formatDate(report.created_at)}</span>
-          </div>
+          </span>
 
-          <div className="flex items-center gap-2 text-sm mt-1">
+          <span className="flex items-center gap-2 text-sm mt-1 flex-wrap">
             {isBattle && (
               <>
                 <span className="text-red-400 font-semibold">{attacker.name}</span>
@@ -250,19 +255,19 @@ const ReportCard = ({ report }) => {
                 <span className="text-purple-400 font-semibold">{receiver?.name}</span>
               </>
             )}
-          </div>
-        </div>
+          </span>
+        </span>
 
-        <div className={`transform transition-transform ${expanded ? 'rotate-180' : ''}`}>
+        <span className={`transform transition-transform shrink-0 ${expanded ? 'rotate-180' : ''}`} aria-hidden="true">
           <svg viewBox="0 0 24 24" className="h-6 w-6 text-gray-500" fill="none" stroke="currentColor">
             <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
           </svg>
-        </div>
-      </div>
+        </span>
+      </button>
 
       {/* Expanded Details */}
       {expanded && (
-        <div className="p-4 border-t border-gray-800 bg-black/20 space-y-6">
+        <div id={detailsId} className="p-4 border-t border-gray-800 bg-black/20 space-y-6">
           {/* Trade Details */}
           {isTrade && resources && (
             <div className="bg-green-900/10 border border-green-900/30 rounded p-3">
@@ -284,7 +289,7 @@ const ReportCard = ({ report }) => {
                 ))}
                 {(!troops || Object.keys(troops).length === 0) && <p className="text-gray-500 italic">Sin tropas</p>}
               </div>
-              {resources && Object.values(resources).some(v => v > 0) && (
+              {resources && Object.values(resources).some((value) => value > 0) && (
                 <div className="mt-4 pt-2 border-t border-blue-900/30">
                   <h5 className="font-bold text-blue-300 mb-2 text-xs uppercase">Recursos Traídos</h5>
                   <ResourceAmounts values={resources} onlyPositive />

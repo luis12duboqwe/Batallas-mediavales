@@ -95,11 +95,28 @@ const MapView = () => {
       );
     }
 
+    const settlementType = tile.settlement_type === 'camp' ? 'campamento' : 'ciudad';
+    const oasisLabel = OASIS_RESOURCE_META[tile.resource_type]?.label || tile.resource_type;
+    const accessibleLabel = tile.city_id
+      ? `Casilla ${tile.x}, ${tile.y}: ${settlementType} ${tile.city_name || ''}, ${tile.owner_name || 'Bárbaros'}`
+      : isOasis
+        ? `Casilla ${tile.x}, ${tile.y}: oasis de ${oasisLabel}`
+        : `Casilla ${tile.x}, ${tile.y}: ${tile.type}`;
+
     return (
-      <div key={`${tile.x},${tile.y}`} className={`w-12 h-12 border border-black/20 relative cursor-pointer hover:brightness-110 transition ${getTileColor(tile.type)} ${isSelected ? 'ring-2 ring-yellow-400 z-10' : ''}`} onClick={() => setSelectedTile(tile)} title={`(${tile.x}, ${tile.y}) ${tile.type}`}>
+      <button
+        type="button"
+        key={`${tile.x},${tile.y}`}
+        className={`w-12 h-12 border border-black/20 relative cursor-pointer hover:brightness-110 transition ${getTileColor(tile.type)} ${isSelected ? 'ring-2 ring-yellow-400 z-10' : ''}`}
+        onClick={() => setSelectedTile(tile)}
+        title={`(${tile.x}, ${tile.y}) ${tile.type}`}
+        aria-label={accessibleLabel}
+        aria-pressed={Boolean(isSelected)}
+        data-testid={`map-tile-${tile.x}-${tile.y}`}
+      >
         {content}
-        {isCenter && <div className="absolute inset-0 border-2 border-white/50 pointer-events-none" />}
-      </div>
+        {isCenter && <span className="absolute inset-0 border-2 border-white/50 pointer-events-none" aria-hidden="true" />}
+      </button>
     );
   };
 
@@ -115,25 +132,25 @@ const MapView = () => {
   const selectedSettlementIsMine = Boolean(user?.id && selectedTile?.owner_id === user.id);
 
   return (
-    <div className="p-4 h-full flex flex-col">
-      <div className="flex justify-between items-center mb-4 bg-black/40 p-4 rounded">
+    <div className="p-2 sm:p-4 h-full flex flex-col min-w-0">
+      <div className="flex flex-col gap-3 mb-4 bg-black/40 p-4 rounded sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-amber-500">Mapa Global</h1>
-        <form onSubmit={handleJump} className="flex gap-2">
-          <input type="number" className="input input-sm w-20 bg-black/50" placeholder="X" value={jumpCoords.x} onChange={(event) => setJumpCoords({ ...jumpCoords, x: event.target.value })} />
-          <input type="number" className="input input-sm w-20 bg-black/50" placeholder="Y" value={jumpCoords.y} onChange={(event) => setJumpCoords({ ...jumpCoords, y: event.target.value })} />
+        <form onSubmit={handleJump} className="grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 sm:w-auto" aria-label="Ir a coordenadas">
+          <input type="number" aria-label="Coordenada X" className="input input-sm min-w-0 w-full bg-black/50" placeholder="X" value={jumpCoords.x} onChange={(event) => setJumpCoords({ ...jumpCoords, x: event.target.value })} />
+          <input type="number" aria-label="Coordenada Y" className="input input-sm min-w-0 w-full bg-black/50" placeholder="Y" value={jumpCoords.y} onChange={(event) => setJumpCoords({ ...jumpCoords, y: event.target.value })} />
           <button type="submit" className="btn btn-sm btn-primary">Ir</button>
         </form>
       </div>
 
-      <div className="flex flex-1 gap-4 overflow-hidden">
-        <div className="flex-1 relative bg-gray-900 rounded overflow-auto flex items-center justify-center p-4">
-          {loading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20">Cargando...</div>}
-          <div className="relative">
-            <button type="button" aria-label="Mover mapa hacia arriba" onClick={() => handleMove(0, 5)} className="absolute top-0 left-1/2 -translate-x-1/2 -mt-8 btn btn-xs btn-circle"><GameIcon name="arrowUp" size={18} /></button>
-            <button type="button" aria-label="Mover mapa hacia abajo" onClick={() => handleMove(0, -5)} className="absolute bottom-0 left-1/2 -translate-x-1/2 -mb-8 btn btn-xs btn-circle"><GameIcon name="arrowDown" size={18} /></button>
-            <button type="button" aria-label="Mover mapa hacia la izquierda" onClick={() => handleMove(-5, 0)} className="absolute left-0 top-1/2 -translate-y-1/2 -ml-8 btn btn-xs btn-circle"><GameIcon name="arrowLeft" size={18} /></button>
-            <button type="button" aria-label="Mover mapa hacia la derecha" onClick={() => handleMove(5, 0)} className="absolute right-0 top-1/2 -translate-y-1/2 -mr-8 btn btn-xs btn-circle"><GameIcon name="arrowRight" size={18} /></button>
-            <div className="grid gap-0.5 bg-black/50 p-1">
+      <div className="flex flex-1 min-w-0 flex-col gap-4 lg:flex-row lg:overflow-hidden">
+        <div className="min-h-[28rem] min-w-0 flex-1 relative bg-gray-900 rounded overflow-auto p-4" data-testid="map-grid-panel">
+          {loading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20" role="status">Cargando...</div>}
+          <div className="relative w-max mx-auto p-10" data-testid="map-grid-content">
+            <button type="button" aria-label="Mover mapa hacia arriba" onClick={() => handleMove(0, 5)} className="absolute top-2 left-1/2 -translate-x-1/2 btn btn-xs btn-circle"><GameIcon name="arrowUp" size={18} /></button>
+            <button type="button" aria-label="Mover mapa hacia abajo" onClick={() => handleMove(0, -5)} className="absolute bottom-2 left-1/2 -translate-x-1/2 btn btn-xs btn-circle"><GameIcon name="arrowDown" size={18} /></button>
+            <button type="button" aria-label="Mover mapa hacia la izquierda" onClick={() => handleMove(-5, 0)} className="absolute left-2 top-1/2 -translate-y-1/2 btn btn-xs btn-circle"><GameIcon name="arrowLeft" size={18} /></button>
+            <button type="button" aria-label="Mover mapa hacia la derecha" onClick={() => handleMove(5, 0)} className="absolute right-2 top-1/2 -translate-y-1/2 btn btn-xs btn-circle"><GameIcon name="arrowRight" size={18} /></button>
+            <div className="grid gap-0.5 bg-black/50 p-1" role="group" aria-label="Cuadrícula del mapa">
               {sortedY.map((y) => (
                 <div key={y} className="flex gap-0.5">
                   {rows[y].sort((a, b) => a.x - b.x).map((tile) => renderTile(tile))}
@@ -143,7 +160,7 @@ const MapView = () => {
           </div>
         </div>
 
-        <div className="w-80 bg-gray-800 p-4 rounded shadow-lg border border-gray-700 flex flex-col">
+        <aside className="w-full shrink-0 bg-gray-800 p-4 rounded shadow-lg border border-gray-700 flex flex-col lg:w-80" aria-label="Detalles de la casilla seleccionada" data-testid="map-details-panel">
           <h2 className="text-xl font-bold text-amber-400 mb-4">Detalles</h2>
           {selectedTile ? (
             <div className="space-y-4">
@@ -157,41 +174,29 @@ const MapView = () => {
                 <div className="space-y-3">
                   <div>
                     <div className="text-sm text-gray-400">{selectedSettlementLabel}</div>
-                    <div className="font-bold text-lg text-white flex items-center gap-2">
-                      <GameIcon name={selectedTile.settlement_type === 'camp' ? 'camp' : 'castle'} size={20} />
-                      {selectedTile.city_name}
-                    </div>
+                    <div className="font-bold text-lg text-white flex items-center gap-2"><GameIcon name={selectedTile.settlement_type === 'camp' ? 'camp' : 'castle'} size={20} />{selectedTile.city_name}</div>
                     <div className="text-xs text-yellow-500">{selectedTile.points} puntos</div>
                   </div>
-                  <div>
-                    <div className="text-sm text-gray-400">Jugador</div>
-                    <div className="font-bold text-white">{selectedTile.owner_name || 'Bárbaros'}</div>
-                  </div>
+                  <div><div className="text-sm text-gray-400">Jugador</div><div className="font-bold text-white">{selectedTile.owner_name || 'Bárbaros'}</div></div>
                   {!selectedTile.owner_id && <PveDifficulty tile={selectedTile} />}
                   {selectedTile.alliance_name && <div><div className="text-sm text-gray-400">Alianza</div><div className="font-bold text-blue-400">[{selectedTile.alliance_name}]</div></div>}
                   {selectedSettlementIsMine && <div className="rounded border border-blue-700/50 bg-blue-950/30 p-2 text-xs text-blue-200">Este asentamiento te pertenece.</div>}
                   <div className="divider" />
                   {currentCity && !selectedSettlementIsMine && (
                     <div className="grid grid-cols-2 gap-2">
-                      <button className="btn btn-sm btn-error w-full" onClick={() => navigate(`/send-movement/${selectedTile.city_id}`)}>Atacar</button>
-                      <button className="btn btn-sm btn-info w-full">Espiar</button>
-                      <button className="btn btn-sm btn-success w-full">Comerciar</button>
-                      <button className="btn btn-sm btn-warning w-full">Mensaje</button>
+                      <button type="button" className="btn btn-sm btn-error w-full" onClick={() => navigate(`/send-movement/${selectedTile.city_id}`)}>Atacar</button>
+                      <button type="button" className="btn btn-sm btn-info w-full">Espiar</button>
+                      <button type="button" className="btn btn-sm btn-success w-full">Comerciar</button>
+                      <button type="button" className="btn btn-sm btn-warning w-full">Mensaje</button>
                     </div>
                   )}
                 </div>
               ) : selectedTile.oasis_id ? (
                 <div className="space-y-3">
-                  <div>
-                    <div className="text-sm text-gray-400">Oasis</div>
-                    <div className="font-bold text-lg text-white flex items-center gap-2">
-                      <GameIcon name={selectedOasisResource?.icon || 'oasis'} size={20} />
-                      {selectedOasisResource?.label || selectedTile.resource_type} (+{selectedTile.bonus_percent}%)
-                    </div>
-                  </div>
+                  <div><div className="text-sm text-gray-400">Oasis</div><div className="font-bold text-lg text-white flex items-center gap-2"><GameIcon name={selectedOasisResource?.icon || 'oasis'} size={20} />{selectedOasisResource?.label || selectedTile.resource_type} (+{selectedTile.bonus_percent}%)</div></div>
                   <PveDifficulty tile={selectedTile} />
                   <div><div className="text-sm text-gray-400">Estado</div><div className="font-bold text-white">{selectedTile.is_conquered ? (selectedTile.owner_id ? 'Conquistado' : 'Ocupado') : 'Salvaje'}</div></div>
-                  {currentCity && <div className="grid grid-cols-2 gap-2"><button className="btn btn-sm btn-error w-full" onClick={() => navigate(`/send-movement/${selectedTile.oasis_id}?type=oasis`)}>Atacar</button><button className="btn btn-sm btn-info w-full">Espiar</button></div>}
+                  {currentCity && <div className="grid grid-cols-2 gap-2"><button type="button" className="btn btn-sm btn-error w-full" onClick={() => navigate(`/send-movement/${selectedTile.oasis_id}?type=oasis`)}>Atacar</button><button type="button" className="btn btn-sm btn-info w-full">Espiar</button></div>}
                 </div>
               ) : (
                 <div className="text-gray-500 italic mt-4">Terreno salvaje. No hay asentamientos aquí.</div>
@@ -200,7 +205,7 @@ const MapView = () => {
           ) : (
             <div className="text-gray-500 text-center mt-10">Selecciona una casilla en el mapa para ver información.</div>
           )}
-        </div>
+        </aside>
       </div>
     </div>
   );

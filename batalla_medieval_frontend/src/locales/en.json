@@ -30,6 +30,10 @@
     "mobile_navigation": "Mobile navigation",
     "top_navigation": "Main navigation"
   },
+  "accessibility": {
+    "skip_to_content": "Skip to main content",
+    "main_content": "Main content"
+  },
   "common": {
     "loading": "Loading...",
     "error": "Error",

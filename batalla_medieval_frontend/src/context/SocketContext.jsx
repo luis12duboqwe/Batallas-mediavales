@@ -36,10 +36,15 @@ export const SocketProvider = ({ children }) => {
             return undefined;
         }
 
+        // Register lifecycle listeners before opening the transport. With
+        // auto-connect enabled, a fast local/CI connection can complete before
+        // the `connect` listener exists, making connection state and diagnostics
+        // nondeterministic for consumers that mount immediately after login.
         const newSocket = io(resolveSocketOrigin(), {
             path: '/socket.io',
             transports: ['websocket'],
             auth: { token },
+            autoConnect: false,
         });
 
         newSocket.on('connect', () => {
@@ -55,6 +60,7 @@ export const SocketProvider = ({ children }) => {
         });
 
         setSocket(newSocket);
+        newSocket.connect();
 
         return () => {
             newSocket.removeAllListeners();
