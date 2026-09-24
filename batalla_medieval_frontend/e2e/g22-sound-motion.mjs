@@ -56,7 +56,7 @@ await settingsDetails.locator('summary').click();
 const musicVolume = page.getByTestId('music-volume');
 const sfxVolume = page.getByTestId('sfx-volume');
 await musicVolume.fill('0.25');
-await sfxVolume.fill('0.40');
+await sfxVolume.fill('0.4');
 await page.getByTestId('sound-sfx-toggle').click();
 
 const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem('bm_sound_settings') || '{}'));
