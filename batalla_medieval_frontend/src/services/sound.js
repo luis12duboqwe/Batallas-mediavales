@@ -92,8 +92,12 @@ class SoundManager {
   }
 
   _updateMasterGains() {
-    if (this.musicGain) this.musicGain.gain.value = this.settings.musicVolume;
-    if (this.sfxGain) this.sfxGain.gain.value = this.settings.sfxVolume;
+    if (this.musicGain) {
+      this.musicGain.gain.value = this.settings.musicEnabled ? this.settings.musicVolume : 0;
+    }
+    if (this.sfxGain) {
+      this.sfxGain.gain.value = this.settings.sfxEnabled ? this.settings.sfxVolume : 0;
+    }
   }
 
   subscribe(callback) {
@@ -153,6 +157,10 @@ class SoundManager {
     envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
     oscillator.connect(envelope);
     envelope.connect(destination);
+    oscillator.addEventListener('ended', () => {
+      oscillator.disconnect();
+      envelope.disconnect();
+    }, { once: true });
     oscillator.start(start);
     oscillator.stop(start + duration + 0.03);
   }
@@ -166,6 +174,7 @@ class SoundManager {
     this._stopMusicTimer();
     const pattern = MUSIC_PATTERNS[this.currentMusicKey];
     if (!pattern || !this.unlocked || !this.settings.musicEnabled || !this.musicGain) return;
+    this._updateMasterGains();
 
     const playStep = () => {
       if (!this.settings.musicEnabled || !this.unlocked) return;
@@ -192,6 +201,7 @@ class SoundManager {
 
   stopMusic() {
     this._stopMusicTimer();
+    if (this.musicGain) this.musicGain.gain.value = 0;
     this.currentMusicKey = null;
     this.musicStep = 0;
   }
@@ -201,6 +211,7 @@ class SoundManager {
     const changed = this.currentMusicKey !== type;
     this.currentMusicKey = type;
     if (changed) this.musicStep = 0;
+    this._updateMasterGains();
     if (this.unlocked && this.settings.musicEnabled && (changed || !this.musicTimer)) {
       this._startMusicPattern();
     }
@@ -216,12 +227,14 @@ class SoundManager {
   setMusicEnabled(enabled) {
     this.settings.musicEnabled = Boolean(enabled);
     if (!this.settings.musicEnabled) this._stopMusicTimer();
-    else if (this.unlocked && this.currentMusicKey) this._startMusicPattern();
+    this._updateMasterGains();
+    if (this.settings.musicEnabled && this.unlocked && this.currentMusicKey) this._startMusicPattern();
     this._persistSettings();
   }
 
   setSfxEnabled(enabled) {
     this.settings.sfxEnabled = Boolean(enabled);
+    this._updateMasterGains();
     this._persistSettings();
   }
 
