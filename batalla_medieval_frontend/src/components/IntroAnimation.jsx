@@ -8,26 +8,42 @@ const IntroAnimation = ({ onComplete }) => {
   const canvasRef = useRef(null);
   const frameRef = useRef(null);
   const finishTimerRef = useRef(null);
-  const finishedRef = useRef(false);
+  const animationStoppedRef = useRef(false);
+  const finishingRef = useRef(false);
+  const completionDeliveredRef = useRef(false);
+  const onCompleteRef = useRef(onComplete);
   const [showTitle, setShowTitle] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
   const reducedMotion = useReducedMotion();
 
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  const deliverCompletion = useCallback(() => {
+    if (completionDeliveredRef.current) return;
+    completionDeliveredRef.current = true;
+    onCompleteRef.current?.();
+  }, []);
+
   const finishSequence = useCallback((immediate = false) => {
-    if (finishedRef.current) return;
-    finishedRef.current = true;
+    if (completionDeliveredRef.current) return;
+    animationStoppedRef.current = true;
     cancelAnimationFrame(frameRef.current);
     clearTimeout(finishTimerRef.current);
 
     if (immediate) {
-      onComplete?.();
+      finishingRef.current = true;
+      deliverCompletion();
       return;
     }
+    if (finishingRef.current) return;
 
+    finishingRef.current = true;
     setShowTitle(true);
     setFadeOut(true);
-    finishTimerRef.current = setTimeout(() => onComplete?.(), 450);
-  }, [onComplete]);
+    finishTimerRef.current = setTimeout(deliverCompletion, 450);
+  }, [deliverCompletion]);
 
   useEffect(() => {
     if (!reducedMotion) return undefined;
@@ -41,7 +57,7 @@ const IntroAnimation = ({ onComplete }) => {
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return undefined;
 
-    finishedRef.current = false;
+    animationStoppedRef.current = false;
     const dpr = window.devicePixelRatio || 1;
     const fogLayers = [
       { x: -300, y: 80, speed: 0.05, opacity: 0.08, scale: 1.1 },
@@ -136,7 +152,7 @@ const IntroAnimation = ({ onComplete }) => {
       ctx.fillStyle = vignette;
       ctx.fillRect(0, 0, clientWidth, clientHeight);
 
-      if (progress < 1 && !finishedRef.current) frameRef.current = requestAnimationFrame(render);
+      if (progress < 1 && !animationStoppedRef.current) frameRef.current = requestAnimationFrame(render);
       else finishSequence();
     };
 
