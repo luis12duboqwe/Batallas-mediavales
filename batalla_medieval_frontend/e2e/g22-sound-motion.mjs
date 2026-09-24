@@ -42,6 +42,18 @@ if (!await page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduc
 if (await page.getByTestId('intro-animation').count()) failures.push('intro animation rendered despite reduced motion');
 if (await page.evaluate(() => window.__bmOscillatorCount) !== 0) failures.push('audio synthesis started before user interaction');
 
+await page.evaluate(() => {
+  localStorage.setItem('bm_sound_settings', JSON.stringify({
+    musicEnabled: 'corrupt',
+    sfxEnabled: null,
+    musicVolume: 'not-a-number',
+    sfxVolume: 9,
+  }));
+});
+await page.reload({ waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(150);
+if (await page.evaluate(() => window.__bmOscillatorCount) !== 0) failures.push('corrupted settings caused audio before user interaction');
+
 const inputs = page.locator('form input');
 await inputs.nth(0).fill(USER.username);
 await inputs.nth(1).fill(USER.password);
@@ -55,6 +67,11 @@ const settingsDetails = page.getByTestId('sound-settings');
 await settingsDetails.locator('summary').click();
 const musicVolume = page.getByTestId('music-volume');
 const sfxVolume = page.getByTestId('sfx-volume');
+if (Number(await musicVolume.inputValue()) !== 0.6) failures.push('invalid stored music volume was not normalized to default');
+if (Number(await sfxVolume.inputValue()) !== 1) failures.push('out-of-range stored SFX volume was not clamped to 1');
+if (await page.getByTestId('sound-music-toggle').getAttribute('aria-pressed') !== 'true') failures.push('invalid stored music toggle replaced the boolean default');
+if (await page.getByTestId('sound-sfx-toggle').getAttribute('aria-pressed') !== 'true') failures.push('invalid stored SFX toggle replaced the boolean default');
+
 await musicVolume.fill('0.25');
 await sfxVolume.fill('0.4');
 await page.getByTestId('sound-sfx-toggle').click();
