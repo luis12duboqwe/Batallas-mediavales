@@ -40,7 +40,15 @@ const SFX_PATTERNS = {
   ],
 };
 
-const clamp01 = (value) => Math.max(0, Math.min(1, Number(value)));
+const normalizeVolume = (value, fallback) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(1, numeric));
+};
+
+const normalizeToggle = (value, fallback) => (
+  typeof value === 'boolean' ? value : fallback
+);
 
 class SoundManager {
   constructor() {
@@ -68,9 +76,10 @@ class SoundManager {
       const parsed = JSON.parse(stored);
       this.settings = {
         ...this.settings,
-        ...parsed,
-        musicVolume: clamp01(parsed.musicVolume ?? this.settings.musicVolume),
-        sfxVolume: clamp01(parsed.sfxVolume ?? this.settings.sfxVolume),
+        musicEnabled: normalizeToggle(parsed.musicEnabled, this.settings.musicEnabled),
+        sfxEnabled: normalizeToggle(parsed.sfxEnabled, this.settings.sfxEnabled),
+        musicVolume: normalizeVolume(parsed.musicVolume, this.settings.musicVolume),
+        sfxVolume: normalizeVolume(parsed.sfxVolume, this.settings.sfxVolume),
       };
     } catch (error) {
       console.warn('Failed to load sound settings', error);
@@ -239,13 +248,13 @@ class SoundManager {
   }
 
   setMusicVolume(volume) {
-    this.settings.musicVolume = clamp01(volume);
+    this.settings.musicVolume = normalizeVolume(volume, this.settings.musicVolume);
     this._updateMasterGains();
     this._persistSettings();
   }
 
   setSfxVolume(volume) {
-    this.settings.sfxVolume = clamp01(volume);
+    this.settings.sfxVolume = normalizeVolume(volume, this.settings.sfxVolume);
     this._updateMasterGains();
     this._persistSettings();
   }
