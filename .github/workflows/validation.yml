@@ -125,6 +125,8 @@ jobs:
         run: npm run lint
       - name: Build frontend
         run: npm run build
+      - name: Validate performance budget
+        run: npm run check:performance
 
   browser-e2e:
     name: Browser E2E
@@ -219,7 +221,7 @@ jobs:
           cat /tmp/bm-frontend.log || true
 
   accessibility-e2e:
-    name: Accessibility E2E
+    name: Accessibility and experience E2E
     runs-on: ubuntu-latest
     env:
       APP_ENV: test
@@ -256,7 +258,7 @@ jobs:
           npm ci
           npm install --no-save --package-lock=false @playwright/test@1.55.0
           npx playwright install --with-deps chromium
-      - name: Prepare G21 database
+      - name: Prepare G21/G22 database
         run: |
           alembic -c batalla_medieval_backend/alembic.ini upgrade head
           python -m app.seed
@@ -265,22 +267,25 @@ jobs:
           python scripts/prepare_g14_community_e2e.py
       - name: Start backend and frontend
         run: |
-          python -m uvicorn app.main:socket_app --app-dir batalla_medieval_backend --host 127.0.0.1 --port 8000 >/tmp/bm-g21-backend.log 2>&1 &
-          echo $! >/tmp/bm-g21-backend.pid
-          (cd batalla_medieval_frontend && npm run build && npm run preview -- --host 127.0.0.1 --port 4173 >/tmp/bm-g21-frontend.log 2>&1) &
-          echo $! >/tmp/bm-g21-frontend.pid
+          python -m uvicorn app.main:socket_app --app-dir batalla_medieval_backend --host 127.0.0.1 --port 8000 >/tmp/bm-experience-backend.log 2>&1 &
+          echo $! >/tmp/bm-experience-backend.pid
+          (cd batalla_medieval_frontend && npm run build && npm run preview -- --host 127.0.0.1 --port 4173 >/tmp/bm-experience-frontend.log 2>&1) &
+          echo $! >/tmp/bm-experience-frontend.pid
           curl --fail --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:8000/health
           curl --fail --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:4173/login
       - name: Run G21 accessibility journey
         working-directory: batalla_medieval_frontend
         run: node e2e/g21-accessibility.mjs
+      - name: Run G22 sound and motion journey
+        working-directory: batalla_medieval_frontend
+        run: node e2e/g22-sound-motion.mjs
       - name: Show service logs
         if: always()
         run: |
           echo '--- backend ---'
-          cat /tmp/bm-g21-backend.log || true
+          cat /tmp/bm-experience-backend.log || true
           echo '--- frontend ---'
-          cat /tmp/bm-g21-frontend.log || true
+          cat /tmp/bm-experience-frontend.log || true
 
   dependency-audit:
     name: Dependency and security audit

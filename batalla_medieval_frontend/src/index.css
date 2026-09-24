@@ -103,20 +103,12 @@ a {
   animation: fade-in 0.4s ease-out;
 }
 
-.report-body strong {
-  @apply text-yellow-200;
-}
-
+.report-body strong { @apply text-yellow-200; }
 .report-body .losses,
 .report-body .loss,
-.report-body .perdidas {
-  @apply text-red-300 font-semibold;
-}
-
+.report-body .perdidas { @apply text-red-300 font-semibold; }
 .report-body .survivor,
-.report-body .vivos {
-  @apply text-green-300 font-semibold;
-}
+.report-body .vivos { @apply text-green-300 font-semibold; }
 
 @keyframes metallic-shine {
   0% { background-position: -120% 0; }
@@ -127,4 +119,16 @@ a {
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-fade-in { animation: none !important; }
+  .skeleton { animation: none !important; }
 }

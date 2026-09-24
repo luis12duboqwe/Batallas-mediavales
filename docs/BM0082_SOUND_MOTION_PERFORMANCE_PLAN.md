@@ -10,39 +10,36 @@ Los controles de sonido, la reducción de movimiento, la carga diferida y un pre
 
 ## Hallazgos iniciales
 
-1. Música y SFX existen y sus preferencias ya se persisten, pero la UI solo permite encender/apagar; no expone volumen.
-2. `playMusic()` intenta reproducir al cambiar de ruta. Si el navegador bloquea autoplay, el rechazo se silencia y no existe una reanudación robusta tras el primer gesto del usuario.
-3. Los objetos `Audio` se crean al solicitar reproducción y no existe contrato explícito de `preload=none`, desbloqueo ni caché controlada.
-4. No existe tratamiento de `prefers-reduced-motion`; la intro ejecuta canvas/RAF durante 2.5 s y el CSS mantiene animaciones/transiciones.
-5. No existe gate de presupuesto para JS/CSS/audio ni una prueba E2E dedicada a sonido/reduced-motion.
-6. `docs/ASSET_LICENSES.md` declara correctamente `src/assets/sounds/*.mp3` como no aprobados. El historial solo demuestra que eran activos preexistentes; no demuestra licencia ni procedencia.
+1. Música y SFX existían y sus preferencias se persistían, pero la UI solo permitía encender/apagar y los MP3 no tenían procedencia demostrable.
+2. `playMusic()` intentaba reproducir al cambiar de ruta y silenciaba el rechazo de autoplay.
+3. No existía tratamiento de `prefers-reduced-motion`; intro y loading mantenían animaciones temporizadas.
+4. Todas las páginas entraban en el bundle inicial mediante imports estáticos.
+5. No existía gate de presupuesto para JS/CSS/audio ni prueba E2E dedicada a sonido/reduced-motion.
 
-## Estrategia
+## Estrategia implementada
 
-- sustituir los MP3 sin procedencia por audio original generado específicamente para BM-0082 y registrar su trazabilidad;
-- mantener música y SFX separados, con preferencias persistentes, volúmenes accesibles y estados observables;
-- no crear/reproducir audio hasta que exista intención del usuario; instalar un desbloqueo por gesto y reintentar música pendiente sin esconder errores funcionales;
-- reutilizar/cerrar correctamente instancias de música y crear SFX bajo demanda con `preload=none`;
-- respetar `prefers-reduced-motion` tanto en la intro canvas como en animaciones/transiciones CSS;
-- añadir G22 para reduced-motion, controles persistentes y comportamiento de carga de audio;
-- añadir un gate de rendimiento que falle si los assets o bundles superan límites documentados.
+- retirar los siete MP3 sin procedencia y sustituirlos por música/SFX procedurales Web Audio originales del proyecto;
+- no crear ni iniciar síntesis hasta un gesto real; la ruta solo deja preparada la música pendiente;
+- mantener preferencias persistentes, toggles y controles accesibles de volumen;
+- respetar `prefers-reduced-motion` en intro, loading y CSS global;
+- cargar las páginas con `React.lazy`/`Suspense` para sacar vistas completas del entry chunk;
+- añadir G22 para reduced-motion, persistencia de audio, ausencia de audio binario y detención efectiva de música;
+- añadir un gate post-build de rendimiento.
 
-## Presupuesto inicial
+## Presupuesto de CI
 
-- música individual: <= 256 KiB;
-- SFX individual: <= 64 KiB;
-- audio total: <= 768 KiB;
-- JS inicial minificado (archivo principal mayor): <= 800 KiB;
-- CSS inicial minificado (archivo principal mayor): <= 100 KiB.
+- entry JS minificado: <= 500 KiB;
+- cualquier chunk JS minificado: <= 500 KiB;
+- cada CSS generado: <= 120 KiB;
+- audio binario en `dist`: 0 bytes (la experiencia final usa síntesis procedural).
 
-Los límites son de CI, no objetivos de optimización final. Si el build supera uno, se corrige la causa o se modifica el presupuesto con evidencia, nunca se silencia el gate.
+Los límites son puertas de CI. Si se superan, se corrige la causa o se modifica el presupuesto con evidencia; no se silencia el gate.
 
-## QA
+## QA pendiente
 
 - lint/build + gates visuales/accesibles existentes;
-- gate de rendimiento post-build;
-- G22 en Chromium con `prefers-reduced-motion: reduce` y viewport móvil/escritorio según corresponda;
-- regresión de persistencia de mute/volumen;
-- verificación de que no se solicita audio antes de una interacción del usuario;
-- verificación de que la música pendiente puede iniciar después del gesto y que deshabilitarla la detiene;
-- suite completa y Docker antes de merge.
+- `npm run check:performance` post-build;
+- G22 en Chromium con `prefers-reduced-motion: reduce`;
+- G2–G21 completos;
+- auditoría de dependencias, concurrencia, G5 y Docker;
+- revisión adversarial antes de merge.
