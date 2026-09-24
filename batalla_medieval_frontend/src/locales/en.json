@@ -46,7 +46,10 @@
     "music_on": "Music on",
     "music_off": "Music off",
     "sfx_on": "Sound effects on",
-    "sfx_off": "Sound effects off"
+    "sfx_off": "Sound effects off",
+    "volume_settings": "Adjust volume",
+    "music_volume": "Music volume",
+    "sfx_volume": "Sound effects volume"
   },
   "resources": {
     "summary": "City resources",

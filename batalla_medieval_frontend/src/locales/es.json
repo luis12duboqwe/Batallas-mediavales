@@ -46,7 +46,10 @@
     "music_on": "Música activada",
     "music_off": "Música desactivada",
     "sfx_on": "Efectos activados",
-    "sfx_off": "Efectos desactivados"
+    "sfx_off": "Efectos desactivados",
+    "volume_settings": "Ajustar volumen",
+    "music_volume": "Volumen de música",
+    "sfx_volume": "Volumen de efectos"
   },
   "resources": {
     "summary": "Recursos de la ciudad",

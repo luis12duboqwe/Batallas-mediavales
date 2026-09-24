@@ -15,15 +15,65 @@ const SoundToggle = () => {
   const sfxLabel = settings.sfxEnabled ? t('sound.sfx_on') : t('sound.sfx_off');
 
   return (
-    <div className="flex items-center gap-1 sm:gap-2" aria-label={t('sound.controls')}>
-      <button type="button" onClick={() => soundManager.setMusicEnabled(!settings.musicEnabled)} className={`${buttonBase} ${settings.musicEnabled ? 'bg-yellow-900/40' : 'bg-gray-900/60 text-gray-300'}`} aria-label={musicLabel} aria-pressed={settings.musicEnabled}>
+    <div className="relative flex items-center gap-1 sm:gap-2" aria-label={t('sound.controls')}>
+      <button
+        type="button"
+        onClick={() => soundManager.setMusicEnabled(!settings.musicEnabled)}
+        className={`${buttonBase} ${settings.musicEnabled ? 'bg-yellow-900/40' : 'bg-gray-900/60 text-gray-300'}`}
+        aria-label={musicLabel}
+        aria-pressed={settings.musicEnabled}
+        data-testid="music-toggle"
+      >
         <GameIcon name="music" size={18} />
         <span className="hidden md:inline">{musicLabel}</span>
       </button>
-      <button type="button" onClick={() => soundManager.setSfxEnabled(!settings.sfxEnabled)} className={`${buttonBase} ${settings.sfxEnabled ? 'bg-yellow-900/40' : 'bg-gray-900/60 text-gray-300'}`} aria-label={sfxLabel} aria-pressed={settings.sfxEnabled}>
+      <button
+        type="button"
+        onClick={() => soundManager.setSfxEnabled(!settings.sfxEnabled)}
+        className={`${buttonBase} ${settings.sfxEnabled ? 'bg-yellow-900/40' : 'bg-gray-900/60 text-gray-300'}`}
+        aria-label={sfxLabel}
+        aria-pressed={settings.sfxEnabled}
+        data-testid="sfx-toggle"
+      >
         <GameIcon name="bell" size={18} />
         <span className="hidden md:inline">{sfxLabel}</span>
       </button>
+      <details className="relative" data-testid="sound-settings">
+        <summary className={`${buttonBase} cursor-pointer list-none [&::-webkit-details-marker]:hidden`} aria-label={t('sound.volume_settings')}>
+          <span aria-hidden="true">Vol.</span>
+          <span className="sr-only">{t('sound.volume_settings')}</span>
+        </summary>
+        <div className="absolute right-0 top-full z-50 mt-2 w-64 space-y-4 rounded-lg border border-yellow-800/60 bg-gray-950 p-4 shadow-2xl">
+          <label htmlFor="music-volume" className="block text-xs text-gray-200">
+            <span className="mb-1 flex justify-between gap-3"><span>{t('sound.music_volume')}</span><span>{Math.round(settings.musicVolume * 100)}%</span></span>
+            <input
+              id="music-volume"
+              data-testid="music-volume"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={settings.musicVolume}
+              onChange={(event) => soundManager.setMusicVolume(event.target.value)}
+              className="w-full accent-yellow-500"
+            />
+          </label>
+          <label htmlFor="sfx-volume" className="block text-xs text-gray-200">
+            <span className="mb-1 flex justify-between gap-3"><span>{t('sound.sfx_volume')}</span><span>{Math.round(settings.sfxVolume * 100)}%</span></span>
+            <input
+              id="sfx-volume"
+              data-testid="sfx-volume"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={settings.sfxVolume}
+              onChange={(event) => soundManager.setSfxVolume(event.target.value)}
+              className="w-full accent-yellow-500"
+            />
+          </label>
+        </div>
+      </details>
     </div>
   );
 };

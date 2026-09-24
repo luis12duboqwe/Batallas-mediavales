@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import useReducedMotion from '../hooks/useReducedMotion';
 
 const gradients = [
   'radial-gradient(circle at 20% 20%, rgba(255, 209, 102, 0.08), transparent 35%)',
@@ -10,28 +11,28 @@ const LoadingScreen = ({ onComplete }) => {
   const [progress, setProgress] = useState(0);
   const [visible, setVisible] = useState(true);
   const [ready, setReady] = useState(false);
+  const reducedMotion = useReducedMotion();
 
-  const backgroundStyle = useMemo(
-    () => ({
-      backgroundImage: gradients.join(','),
-    }),
-    [],
-  );
+  const backgroundStyle = useMemo(() => ({ backgroundImage: gradients.join(',') }), []);
 
   useEffect(() => {
-    const showTimer = setTimeout(() => setReady(true), 50);
-    let intervalId;
+    if (!reducedMotion) return undefined;
+    const frame = requestAnimationFrame(() => onComplete?.());
+    return () => cancelAnimationFrame(frame);
+  }, [onComplete, reducedMotion]);
 
-    intervalId = setInterval(() => {
-      setProgress((prev) => {
-        const increment = Math.random() * 12 + 5;
-        const next = Math.min(prev + increment, 100);
+  useEffect(() => {
+    if (reducedMotion) return undefined;
+    const showTimer = setTimeout(() => setReady(true), 50);
+    let fadeTimer;
+    let completeTimer;
+    const intervalId = setInterval(() => {
+      setProgress((previous) => {
+        const next = Math.min(previous + Math.random() * 12 + 5, 100);
         if (next >= 100) {
           clearInterval(intervalId);
-          setTimeout(() => setVisible(false), 350);
-          setTimeout(() => {
-            onComplete?.();
-          }, 800);
+          fadeTimer = setTimeout(() => setVisible(false), 350);
+          completeTimer = setTimeout(() => onComplete?.(), 800);
         }
         return next;
       });
@@ -40,14 +41,16 @@ const LoadingScreen = ({ onComplete }) => {
     return () => {
       clearInterval(intervalId);
       clearTimeout(showTimer);
+      clearTimeout(fadeTimer);
+      clearTimeout(completeTimer);
     };
-  }, [onComplete]);
+  }, [onComplete, reducedMotion]);
+
+  if (reducedMotion) return null;
 
   return (
     <div
-      className={`fixed inset-0 z-30 flex items-center justify-center transition-opacity duration-700 ${
-        ready && visible ? 'opacity-100' : 'opacity-0 pointer-events-none'
-      }`}
+      className={`fixed inset-0 z-30 flex items-center justify-center transition-opacity duration-700 ${ready && visible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
       style={backgroundStyle}
       data-testid="loading-screen"
     >
@@ -55,20 +58,13 @@ const LoadingScreen = ({ onComplete }) => {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div className="relative z-10 max-w-xl px-6 text-center space-y-6">
         <div className="flex flex-col items-center gap-2">
-          <h1 className="text-4xl sm:text-5xl font-display tracking-[0.2em] text-yellow-200 drop-shadow-lg">
-            Batalla Medieval
-          </h1>
+          <h1 className="text-4xl sm:text-5xl font-display tracking-[0.2em] text-yellow-200 drop-shadow-lg">Batalla Medieval</h1>
           <p className="text-sm text-yellow-100/80">Consejo: Mejora tu Hacienda para más tropas</p>
         </div>
         <div className="w-full h-3 rounded-full overflow-hidden bg-gray-900/70 border border-yellow-800/40 shadow-inner">
-          <div
-            className="h-full bg-gradient-to-r from-yellow-600 via-amber-400 to-yellow-200 shadow-glow transition-all duration-200"
-            style={{ width: `${progress}%` }}
-          />
+          <div className="h-full bg-gradient-to-r from-yellow-600 via-amber-400 to-yellow-200 shadow-glow transition-all duration-200" style={{ width: `${progress}%` }} />
         </div>
-        <div className="text-xs uppercase tracking-[0.3em] text-yellow-100/60">
-          Cargando... {Math.round(progress)}%
-        </div>
+        <div className="text-xs uppercase tracking-[0.3em] text-yellow-100/60">Cargando... {Math.round(progress)}%</div>
       </div>
     </div>
   );
