@@ -219,7 +219,7 @@ jobs:
           cat /tmp/bm-frontend.log || true
 
   accessibility-e2e:
-    name: Accessibility E2E
+    name: Accessibility and media E2E
     runs-on: ubuntu-latest
     env:
       APP_ENV: test
@@ -256,7 +256,7 @@ jobs:
           npm ci
           npm install --no-save --package-lock=false @playwright/test@1.55.0
           npx playwright install --with-deps chromium
-      - name: Prepare G21 database
+      - name: Prepare G21/G22 database
         run: |
           alembic -c batalla_medieval_backend/alembic.ini upgrade head
           python -m app.seed
@@ -274,6 +274,9 @@ jobs:
       - name: Run G21 accessibility journey
         working-directory: batalla_medieval_frontend
         run: node e2e/g21-accessibility.mjs
+      - name: Run G22 media and motion journey
+        working-directory: batalla_medieval_frontend
+        run: node e2e/g22-media-motion.mjs
       - name: Show service logs
         if: always()
         run: |
