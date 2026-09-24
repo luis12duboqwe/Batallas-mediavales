@@ -116,7 +116,7 @@ const IntroAnimation = ({ onComplete }) => {
       });
 
       if (progress > 0.35) drawCastle(progress);
-      if (!showTitle && progress > 0.65) setShowTitle(true);
+      if (progress > 0.65) setShowTitle(true);
 
       const vignette = ctx.createRadialGradient(
         clientWidth / 2,
@@ -141,7 +141,7 @@ const IntroAnimation = ({ onComplete }) => {
       cancelAnimationFrame(frameRef.current);
       window.removeEventListener('resize', resize);
     };
-  }, [finishSequence, reducedMotion, showTitle]);
+  }, [finishSequence, reducedMotion]);
 
   useEffect(() => {
     if (reducedMotion) return undefined;
@@ -152,10 +152,7 @@ const IntroAnimation = ({ onComplete }) => {
   if (reducedMotion) return null;
 
   return (
-    <div
-      className={`fixed inset-0 z-40 overflow-hidden transition-opacity duration-500 ${fadeOut ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-      data-testid="intro-animation"
-    >
+    <div className={`fixed inset-0 z-40 overflow-hidden transition-opacity duration-500 ${fadeOut ? 'opacity-0 pointer-events-none' : 'opacity-100'}`} data-testid="intro-animation">
       <canvas ref={canvasRef} className="w-full h-full" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(255,214,153,0.06),transparent_45%)]" />
       <div className="absolute inset-0 flex flex-col items-center justify-end pb-16">
@@ -163,11 +160,7 @@ const IntroAnimation = ({ onComplete }) => {
           <p className="text-sm tracking-[0.4em] text-yellow-200/60 uppercase">Fuego y acero</p>
           <h2 className="intro-title text-4xl sm:text-5xl font-display tracking-[0.35em]">Batalla Medieval</h2>
         </div>
-        <button
-          type="button"
-          className="pointer-events-auto mt-8 rounded-full border border-yellow-700/70 px-4 py-2 text-xs font-semibold tracking-[0.2em] text-yellow-100/90 bg-black/40 hover:bg-black/60 transition"
-          onClick={finishSequence}
-        >
+        <button type="button" className="pointer-events-auto mt-8 rounded-full border border-yellow-700/70 px-4 py-2 text-xs font-semibold tracking-[0.2em] text-yellow-100/90 bg-black/40 hover:bg-black/60 transition" onClick={finishSequence}>
           Saltar intro
         </button>
       </div>

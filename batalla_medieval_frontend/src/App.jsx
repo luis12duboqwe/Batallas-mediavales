@@ -53,7 +53,7 @@ const sidebarLinks = [
 ];
 
 const RouteFallback = () => (
-  <div data-testid="loading-screen" role="status" aria-live="polite" className="min-h-[12rem] flex items-center justify-center text-yellow-100">
+  <div data-testid="route-loading" role="status" aria-live="polite" className="min-h-[12rem] flex items-center justify-center text-yellow-100">
     Cargando contenido…
   </div>
 );
@@ -170,8 +170,12 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    if (!token) {
+      soundManager.stopMusic();
+      return;
+    }
     soundManager.playMusic(location.pathname.startsWith('/map') ? 'war_drums' : 'calm_medieval');
-  }, [location.pathname]);
+  }, [location.pathname, token]);
 
   return (
     <Suspense fallback={<RouteFallback />}>
