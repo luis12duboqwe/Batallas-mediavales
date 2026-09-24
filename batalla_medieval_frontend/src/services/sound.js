@@ -41,7 +41,6 @@ class SoundManager {
     this.musicNodes = new Set();
     this.subscribers = new Set();
     this.unlockInFlight = null;
-    this.activationCleanup = null;
 
     this._loadSettings();
     this._installActivationGate();
@@ -73,27 +72,22 @@ class SoundManager {
 
   _installActivationGate() {
     if (typeof document === 'undefined') return;
-
-    const activate = () => {
-      this.unlock().then((unlocked) => {
-        if (unlocked) this._removeActivationGate();
-      });
-    };
-
+    const activate = () => { void this.unlock(); };
+    // Keep these listeners for the life of the singleton. Browsers may suspend
+    // an AudioContext after backgrounding; the next real gesture must be able
+    // to resume it without creating a second context.
     document.addEventListener('pointerdown', activate, true);
     document.addEventListener('keydown', activate, true);
-    this.activationCleanup = () => {
-      document.removeEventListener('pointerdown', activate, true);
-      document.removeEventListener('keydown', activate, true);
-    };
-  }
-
-  _removeActivationGate() {
-    this.activationCleanup?.();
-    this.activationCleanup = null;
   }
 
   _ensureContext() {
+    if (this.context?.state === 'closed') {
+      this.context = null;
+      this.musicBus = null;
+      this.sfxBus = null;
+      this.playingMusicKey = null;
+      this.musicNodes.clear();
+    }
     if (this.context) return true;
     if (typeof window === 'undefined') return false;
 
