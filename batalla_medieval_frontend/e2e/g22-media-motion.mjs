@@ -15,19 +15,28 @@ const recordErrors = (page, label) => {
 const installAudioContextCounter = async (context) => {
   await context.addInitScript(() => {
     window.__bmAudioContextCount = 0;
+    window.__bmAudioContexts = [];
     for (const name of ['AudioContext', 'webkitAudioContext']) {
       const Original = window[name];
       if (typeof Original !== 'function') continue;
       const Wrapped = new Proxy(Original, {
         construct(target, args, newTarget) {
+          const instance = Reflect.construct(target, args, newTarget);
           window.__bmAudioContextCount += 1;
-          return Reflect.construct(target, args, newTarget);
+          window.__bmAudioContexts.push(instance);
+          return instance;
         },
       });
       Object.defineProperty(window, name, { configurable: true, writable: true, value: Wrapped });
     }
   });
 };
+
+const durationPartsToMs = (value) => value.split(',').map((part) => {
+  const normalized = part.trim();
+  const numeric = parseFloat(normalized) || 0;
+  return normalized.endsWith('ms') ? numeric : numeric * 1000;
+});
 
 async function waitForExperienceReady(page) {
   const intro = page.getByTestId('intro-animation');
@@ -62,11 +71,10 @@ try {
     probe.remove();
     return result;
   });
-  const seconds = (value) => value.split(',').map((part) => parseFloat(part) || 0);
-  if (seconds(motionStyles.animationDuration).some((value) => value > 0.01)) {
+  if (durationPartsToMs(motionStyles.animationDuration).some((value) => value > 10)) {
     failures.push(`Reduced-motion animation duration not suppressed: ${motionStyles.animationDuration}`);
   }
-  if (seconds(motionStyles.transitionDuration).some((value) => value > 0.01)) {
+  if (durationPartsToMs(motionStyles.transitionDuration).some((value) => value > 10)) {
     failures.push(`Reduced-motion transition duration not suppressed: ${motionStyles.transitionDuration}`);
   }
   const reducedAudioContexts = await reducedPage.evaluate(() => window.__bmAudioContextCount);
@@ -126,6 +134,17 @@ try {
   if (stored.musicVolume !== 0.35) failures.push(`Music volume did not persist: ${JSON.stringify(stored)}`);
   if (stored.sfxVolume !== 0.25) failures.push(`SFX volume did not persist: ${JSON.stringify(stored)}`);
   if (stored.sfxEnabled !== false) failures.push(`SFX toggle did not persist: ${JSON.stringify(stored)}`);
+
+  // Browsers may suspend Web Audio after backgrounding. A later user gesture
+  // must resume the same context instead of silently losing music or leaking a
+  // second context.
+  await page.evaluate(async () => window.__bmAudioContexts[0].suspend());
+  const suspendedState = await page.evaluate(() => window.__bmAudioContexts[0].state);
+  if (suspendedState !== 'suspended') failures.push(`Could not suspend AudioContext for recovery regression: ${suspendedState}`);
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => window.__bmAudioContexts[0]?.state === 'running', null, { timeout: 3000 });
+  const contextsAfterResume = await page.evaluate(() => window.__bmAudioContextCount);
+  if (contextsAfterResume !== 1) failures.push(`Suspended audio recovery created duplicate contexts: ${contextsAfterResume}`);
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await waitForExperienceReady(page);
