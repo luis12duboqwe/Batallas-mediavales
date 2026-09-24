@@ -63,6 +63,8 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
 
   if (!cityId) return null;
 
+  const dialogTitle = city?.name || 'Detalles de ciudad';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div
@@ -73,13 +75,14 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
         tabIndex={-1}
         className="w-full max-w-md rounded-xl border border-amber-700/50 bg-gray-900 p-6 shadow-2xl"
       >
+        <h2 id="city-popup-title" className="sr-only">{dialogTitle}</h2>
         {loading ? (
           <div className="flex justify-center py-8" role="status" aria-label="Cargando detalles de ciudad"><span className="loading loading-spinner text-amber-500" /></div>
         ) : city ? (
           <div className="space-y-4">
             <div className="flex items-start justify-between">
               <div>
-                <h2 id="city-popup-title" className="text-2xl font-bold text-amber-100">{city.name}</h2>
+                <div className="text-2xl font-bold text-amber-100" aria-hidden="true">{city.name}</div>
                 <p className="text-amber-200/60">Jugador: <span className="text-amber-100">{city.owner?.username || 'Bárbaro'}</span></p>
                 <p className="text-sm text-gray-400">Coordenadas: ({city.x ?? coordinate?.x}, {city.y ?? coordinate?.y})</p>
               </div>
@@ -116,7 +119,7 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
             )}
           </div>
         ) : (
-          <div id="city-popup-title" className="text-center py-8 text-gray-400">No se pudo cargar la información de la ciudad.</div>
+          <div className="text-center py-8 text-gray-400">No se pudo cargar la información de la ciudad.</div>
         )}
       </div>
     </div>
