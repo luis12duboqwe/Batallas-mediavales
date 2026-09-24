@@ -142,7 +142,6 @@ const IntroAnimation = ({ onComplete }) => {
 
     frameRef.current = requestAnimationFrame(render);
     return () => {
-      finishedRef.current = true;
       cancelAnimationFrame(frameRef.current);
       clearTimeout(finishTimerRef.current);
       window.removeEventListener('resize', resize);
