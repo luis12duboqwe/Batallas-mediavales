@@ -81,8 +81,6 @@ try {
   if (reducedAudioContexts !== 0) failures.push(`AudioContext created without user gesture: ${reducedAudioContexts}`);
   await reducedContext.close();
 
-  // Changing the OS preference while the canvas intro is already running must
-  // cancel the animation and finish the shell instead of leaving it stuck.
   const liveContext = await browser.newContext({ reducedMotion: 'no-preference' });
   await installAudioContextCounter(liveContext);
   const livePage = await liveContext.newPage();
@@ -101,6 +99,23 @@ try {
   const liveAudioContexts = await livePage.evaluate(() => window.__bmAudioContextCount);
   if (liveAudioContexts !== 0) failures.push(`Live motion preference switch created AudioContext without gesture: ${liveAudioContexts}`);
   await liveContext.close();
+
+  // Regression: the user may click Skip and the OS preference can change while
+  // the 450ms exit fade is pending. Completion must still be delivered once.
+  const skipContext = await browser.newContext({ reducedMotion: 'no-preference' });
+  const skipPage = await skipContext.newPage();
+  recordErrors(skipPage, 'skip-reduced-motion-race');
+  await skipPage.goto(`${BASE_URL}/login`, { waitUntil: 'domcontentloaded' });
+  const skipButton = skipPage.getByRole('button', { name: 'Saltar intro' });
+  await skipButton.waitFor({ state: 'visible', timeout: 1000 });
+  await skipButton.click();
+  await skipPage.emulateMedia({ reducedMotion: 'reduce' });
+  await skipPage.locator('form').waitFor({ state: 'visible', timeout: 1500 });
+  await skipPage.waitForFunction(() => (
+    !document.querySelector('[data-testid="intro-animation"]')
+    && !document.querySelector('[data-testid="loading-screen"]')
+  ), null, { timeout: 1500 });
+  await skipContext.close();
 
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   await installAudioContextCounter(context);
@@ -135,9 +150,6 @@ try {
   if (stored.sfxVolume !== 0.25) failures.push(`SFX volume did not persist: ${JSON.stringify(stored)}`);
   if (stored.sfxEnabled !== false) failures.push(`SFX toggle did not persist: ${JSON.stringify(stored)}`);
 
-  // Browsers may suspend Web Audio after backgrounding. A later user gesture
-  // must resume the same context instead of silently losing music or leaking a
-  // second context.
   await page.evaluate(async () => window.__bmAudioContexts[0].suspend());
   const suspendedState = await page.evaluate(() => window.__bmAudioContexts[0].state);
   if (suspendedState !== 'suspended') failures.push(`Could not suspend AudioContext for recovery regression: ${suspendedState}`);
