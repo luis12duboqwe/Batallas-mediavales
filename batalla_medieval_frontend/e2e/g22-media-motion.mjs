@@ -73,6 +73,27 @@ try {
   if (reducedAudioContexts !== 0) failures.push(`AudioContext created without user gesture: ${reducedAudioContexts}`);
   await reducedContext.close();
 
+  // Changing the OS preference while the canvas intro is already running must
+  // cancel the animation and finish the shell instead of leaving it stuck.
+  const liveContext = await browser.newContext({ reducedMotion: 'no-preference' });
+  await installAudioContextCounter(liveContext);
+  const livePage = await liveContext.newPage();
+  recordErrors(livePage, 'live-reduced-motion');
+  await livePage.goto(`${BASE_URL}/login`, { waitUntil: 'domcontentloaded' });
+  await livePage.getByTestId('intro-animation').waitFor({ state: 'visible', timeout: 1000 });
+  const liveStarted = Date.now();
+  await livePage.emulateMedia({ reducedMotion: 'reduce' });
+  await livePage.locator('form').waitFor({ state: 'visible', timeout: 1500 });
+  await livePage.waitForFunction(() => (
+    !document.querySelector('[data-testid="intro-animation"]')
+    && !document.querySelector('[data-testid="loading-screen"]')
+  ), null, { timeout: 1500 });
+  const liveElapsed = Date.now() - liveStarted;
+  if (liveElapsed > 1200) failures.push(`Live reduced-motion switch took ${liveElapsed}ms; expected <=1200ms`);
+  const liveAudioContexts = await livePage.evaluate(() => window.__bmAudioContextCount);
+  if (liveAudioContexts !== 0) failures.push(`Live motion preference switch created AudioContext without gesture: ${liveAudioContexts}`);
+  await liveContext.close();
+
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   await installAudioContextCounter(context);
   const page = await context.newPage();
