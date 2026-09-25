@@ -8,7 +8,6 @@ const IntroAnimation = ({ onComplete }) => {
   const canvasRef = useRef(null);
   const frameRef = useRef(null);
   const finishedRef = useRef(false);
-  const reducedCompletionRef = useRef(false);
   const [showTitle, setShowTitle] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
   const reducedMotion = usePrefersReducedMotion();
@@ -23,8 +22,7 @@ const IntroAnimation = ({ onComplete }) => {
   }, [onComplete]);
 
   useEffect(() => {
-    if (!reducedMotion || reducedCompletionRef.current) return undefined;
-    reducedCompletionRef.current = true;
+    if (!reducedMotion) return undefined;
     const frameId = requestAnimationFrame(() => onComplete?.());
     return () => cancelAnimationFrame(frameId);
   }, [reducedMotion, onComplete]);

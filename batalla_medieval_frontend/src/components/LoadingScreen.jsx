@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import usePrefersReducedMotion from '../hooks/usePrefersReducedMotion';
 
 const gradients = [
@@ -11,7 +11,6 @@ const LoadingScreen = ({ onComplete }) => {
   const [progress, setProgress] = useState(0);
   const [visible, setVisible] = useState(true);
   const [ready, setReady] = useState(false);
-  const reducedCompletionRef = useRef(false);
   const reducedMotion = usePrefersReducedMotion();
 
   const backgroundStyle = useMemo(
@@ -20,8 +19,7 @@ const LoadingScreen = ({ onComplete }) => {
   );
 
   useEffect(() => {
-    if (!reducedMotion || reducedCompletionRef.current) return undefined;
-    reducedCompletionRef.current = true;
+    if (!reducedMotion) return undefined;
     const frameId = requestAnimationFrame(() => onComplete?.());
     return () => cancelAnimationFrame(frameId);
   }, [reducedMotion, onComplete]);

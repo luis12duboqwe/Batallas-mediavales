@@ -42,8 +42,6 @@ const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
 class SoundManager {
   constructor() {
     this.settings = {
-      // Audio is opt-in for new players. Existing persisted preferences remain
-      // authoritative, but no AudioContext is created until user interaction.
       musicEnabled: false,
       sfxEnabled: true,
       musicVolume: 0.45,
@@ -114,7 +112,12 @@ class SoundManager {
     try {
       if (context.state === 'suspended') await context.resume();
       this.unlocked = context.state === 'running';
-      if (this.unlocked && this.settings.musicEnabled && this.currentMusicKey) {
+      if (
+        this.unlocked
+        && this.settings.musicEnabled
+        && this.currentMusicKey
+        && !this.musicTimer
+      ) {
         this._startMusicLoop();
       }
       return this.unlocked;
@@ -210,13 +213,8 @@ class SoundManager {
 
   setMusicEnabled(enabled) {
     this.settings.musicEnabled = Boolean(enabled);
-    if (!this.settings.musicEnabled) {
-      this._stopMusicLoop();
-    } else {
-      this.unlock().then((ready) => {
-        if (ready && this.currentMusicKey) this._startMusicLoop();
-      });
-    }
+    if (!this.settings.musicEnabled) this._stopMusicLoop();
+    else this.unlock();
     this._persistSettings();
   }
 

@@ -70,3 +70,5 @@ try {
 } finally {
   await browser.close();
 }
+
+await import('./g22-media-performance.mjs');
