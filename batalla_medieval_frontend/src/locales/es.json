@@ -39,7 +39,9 @@
     "error": "Error",
     "save": "Guardar",
     "cancel": "Cancelar",
-    "confirm": "Confirmar"
+    "confirm": "Confirmar",
+    "reload": "Recargar",
+    "route_load_error": "No se pudo cargar esta pantalla. Recarga para obtener la versión más reciente."
   },
   "sound": {
     "controls": "Controles de sonido",

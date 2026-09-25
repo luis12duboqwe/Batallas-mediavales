@@ -37,9 +37,17 @@ const SFX_PATTERNS = {
   ],
 };
 
-const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
+const normalizeVolume = (value, fallback) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(1, numeric));
+};
 
-class SoundManager {
+const normalizeToggle = (value, fallback) => (
+  typeof value === 'boolean' ? value : fallback
+);
+
+export class SoundManager {
   constructor() {
     this.settings = {
       musicEnabled: false,
@@ -54,6 +62,8 @@ class SoundManager {
     this.currentMusicKey = null;
     this.musicStep = 0;
     this.unlocked = false;
+    this.activeMusicVoices = new Set();
+    this.activeSfxVoices = new Set();
     this.subscribers = new Set();
 
     this._loadSettings();
@@ -61,16 +71,17 @@ class SoundManager {
 
   _loadSettings() {
     try {
+      if (typeof localStorage === 'undefined') return;
       const stored = localStorage.getItem(SOUND_STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        this.settings = {
-          ...this.settings,
-          ...parsed,
-          musicVolume: clamp01(parsed.musicVolume ?? this.settings.musicVolume),
-          sfxVolume: clamp01(parsed.sfxVolume ?? this.settings.sfxVolume),
-        };
-      }
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
+      this.settings = {
+        ...this.settings,
+        musicEnabled: normalizeToggle(parsed.musicEnabled, this.settings.musicEnabled),
+        sfxEnabled: normalizeToggle(parsed.sfxEnabled, this.settings.sfxEnabled),
+        musicVolume: normalizeVolume(parsed.musicVolume, this.settings.musicVolume),
+        sfxVolume: normalizeVolume(parsed.sfxVolume, this.settings.sfxVolume),
+      };
     } catch (error) {
       console.warn('Failed to load sound settings', error);
     }
@@ -78,7 +89,9 @@ class SoundManager {
 
   _persistSettings() {
     try {
-      localStorage.setItem(SOUND_STORAGE_KEY, JSON.stringify(this.settings));
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(SOUND_STORAGE_KEY, JSON.stringify(this.settings));
+      }
     } catch (error) {
       console.warn('Failed to save sound settings', error);
     }
@@ -90,6 +103,25 @@ class SoundManager {
     this.subscribers.forEach((callback) => callback(snapshot));
   }
 
+  _setGain(node, value) {
+    if (!node?.gain) return;
+    const now = this.audioContext?.currentTime || 0;
+    try { node.gain.cancelScheduledValues?.(now); } catch { /* noop */ }
+    if (typeof node.gain.setValueAtTime === 'function') node.gain.setValueAtTime(value, now);
+    else node.gain.value = value;
+  }
+
+  _syncMasterGains() {
+    this._setGain(
+      this.musicGain,
+      this.unlocked && this.settings.musicEnabled ? this.settings.musicVolume : 0,
+    );
+    this._setGain(
+      this.sfxGain,
+      this.unlocked && this.settings.sfxEnabled ? this.settings.sfxVolume : 0,
+    );
+  }
+
   _ensureContext() {
     if (this.audioContext || typeof window === 'undefined') return this.audioContext;
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -99,10 +131,9 @@ class SoundManager {
     this.audioContext = context;
     this.musicGain = context.createGain();
     this.sfxGain = context.createGain();
-    this.musicGain.gain.value = this.settings.musicVolume;
-    this.sfxGain.gain.value = this.settings.sfxVolume;
     this.musicGain.connect(context.destination);
     this.sfxGain.connect(context.destination);
+    this._syncMasterGains();
     return context;
   }
 
@@ -112,6 +143,7 @@ class SoundManager {
     try {
       if (context.state === 'suspended') await context.resume();
       this.unlocked = context.state === 'running';
+      this._syncMasterGains();
       if (
         this.unlocked
         && this.settings.musicEnabled
@@ -126,7 +158,7 @@ class SoundManager {
     }
   }
 
-  _playTone({ frequency, duration, gain, wave = 'sine', delay = 0 }, destination) {
+  _playTone({ frequency, duration, gain, wave = 'sine', delay = 0 }, destination, voices) {
     const context = this.audioContext;
     if (!context || !destination || context.state !== 'running') return;
 
@@ -134,7 +166,18 @@ class SoundManager {
     const envelope = context.createGain();
     const start = context.currentTime + delay;
     const end = start + duration;
+    const voice = { oscillator, envelope };
+    let cleaned = false;
 
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      voices?.delete(voice);
+      try { oscillator.disconnect(); } catch { /* noop */ }
+      try { envelope.disconnect(); } catch { /* noop */ }
+    };
+
+    voices?.add(voice);
     oscillator.type = wave;
     oscillator.frequency.setValueAtTime(frequency, start);
     envelope.gain.setValueAtTime(0.0001, start);
@@ -142,14 +185,30 @@ class SoundManager {
     envelope.gain.exponentialRampToValueAtTime(0.0001, end);
     oscillator.connect(envelope);
     envelope.connect(destination);
-    oscillator.start(start);
-    oscillator.stop(end + 0.02);
+    oscillator.addEventListener('ended', cleanup, { once: true });
+
+    try {
+      oscillator.start(start);
+      oscillator.stop(end + 0.02);
+    } catch {
+      cleanup();
+    }
+  }
+
+  _stopVoices(voices) {
+    const now = this.audioContext?.currentTime || 0;
+    for (const voice of [...voices]) {
+      try { voice.oscillator.stop(now); } catch { /* already stopped */ }
+      try { voice.oscillator.disconnect(); } catch { /* noop */ }
+      try { voice.envelope.disconnect(); } catch { /* noop */ }
+    }
+    voices.clear();
   }
 
   _stopMusicLoop() {
     if (this.musicTimer) clearInterval(this.musicTimer);
     this.musicTimer = null;
-    this.musicStep = 0;
+    this._stopVoices(this.activeMusicVoices);
   }
 
   _startMusicLoop() {
@@ -158,8 +217,10 @@ class SoundManager {
     const pattern = MUSIC_PATTERNS[this.currentMusicKey];
     if (!pattern) return;
 
+    this.musicStep = 0;
+    this._syncMasterGains();
     const playStep = () => {
-      if (!this.settings.musicEnabled || !this.currentMusicKey) return;
+      if (!this.settings.musicEnabled || !this.currentMusicKey || !this.unlocked) return;
       const frequency = pattern.notes[this.musicStep % pattern.notes.length];
       this.musicStep += 1;
       this._playTone(
@@ -170,6 +231,7 @@ class SoundManager {
           wave: pattern.wave,
         },
         this.musicGain,
+        this.activeMusicVoices,
       );
     };
 
@@ -188,13 +250,27 @@ class SoundManager {
   }
 
   stopMusic() {
+    this._setGain(this.musicGain, 0);
     this._stopMusicLoop();
     this.currentMusicKey = null;
+    this.musicStep = 0;
+  }
+
+  async deactivate() {
+    this.stopMusic();
+    this._setGain(this.sfxGain, 0);
+    this._stopVoices(this.activeSfxVoices);
+    this.unlocked = false;
+    if (this.audioContext?.state === 'running') {
+      try { await this.audioContext.suspend(); } catch { /* best-effort resource release */ }
+    }
+    this._syncMasterGains();
   }
 
   playMusic(type) {
     if (!MUSIC_PATTERNS[type]) return;
     const changed = this.currentMusicKey !== type;
+    if (changed) this._stopMusicLoop();
     this.currentMusicKey = type;
     if (!this.settings.musicEnabled || !this.unlocked) return;
     if (changed || !this.musicTimer) this._startMusicLoop();
@@ -205,33 +281,40 @@ class SoundManager {
     const pattern = SFX_PATTERNS[effect];
     if (!pattern) return;
 
-    this.unlock().then((ready) => {
+    void this.unlock().then((ready) => {
       if (!ready || !this.settings.sfxEnabled) return;
-      pattern.forEach((tone) => this._playTone(tone, this.sfxGain));
+      pattern.forEach((tone) => this._playTone(tone, this.sfxGain, this.activeSfxVoices));
     });
   }
 
   setMusicEnabled(enabled) {
     this.settings.musicEnabled = Boolean(enabled);
-    if (!this.settings.musicEnabled) this._stopMusicLoop();
-    else this.unlock();
+    if (!this.settings.musicEnabled) {
+      this._setGain(this.musicGain, 0);
+      this._stopMusicLoop();
+    } else {
+      void this.unlock();
+    }
+    this._syncMasterGains();
     this._persistSettings();
   }
 
   setSfxEnabled(enabled) {
     this.settings.sfxEnabled = Boolean(enabled);
+    if (!this.settings.sfxEnabled) this._stopVoices(this.activeSfxVoices);
+    this._syncMasterGains();
     this._persistSettings();
   }
 
   setMusicVolume(volume) {
-    this.settings.musicVolume = clamp01(volume);
-    if (this.musicGain) this.musicGain.gain.value = this.settings.musicVolume;
+    this.settings.musicVolume = normalizeVolume(volume, this.settings.musicVolume);
+    this._syncMasterGains();
     this._persistSettings();
   }
 
   setSfxVolume(volume) {
-    this.settings.sfxVolume = clamp01(volume);
-    if (this.sfxGain) this.sfxGain.gain.value = this.settings.sfxVolume;
+    this.settings.sfxVolume = normalizeVolume(volume, this.settings.sfxVolume);
+    this._syncMasterGains();
     this._persistSettings();
   }
 }

@@ -15,4 +15,4 @@ Este archivo es la fuente de trazabilidad para recursos visuales y de audio apro
 - No se aceptan imágenes, fuentes, texturas o audio descargados en runtime desde dominios externos como parte de la experiencia final.
 - Si no puede demostrarse procedencia/licencia de un activo preexistente, debe reemplazarse antes de marcar su hito como terminado.
 - Los iconos SVG inline de `GameIcon.jsx` son decorativos; el texto accesible pertenece al control o etiqueta que los acompaña.
-- `npm run lint:visual-assets` impide reintroducir iconografía emoji provisional o dependencias visuales remotas conocidas.
+- `npm run lint:visual-assets` impide reintroducir iconografía emoji, dependencias visuales remotas y audio binario/referenciado en entradas desplegables (`src`, `public`, `index.html`).

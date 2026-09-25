@@ -4,35 +4,36 @@ import { useTranslation } from 'react-i18next';
 import Navbar from './components/Navbar';
 import ResourceBar from './components/ResourceBar';
 import GameIcon from './components/GameIcon';
+import TutorialOverlay from './components/TutorialOverlay';
+import RouteLoadBoundary, { recoverableImport } from './components/RouteLoadBoundary';
 import { useUserStore } from './store/userStore';
 import { useCityStore } from './store/cityStore';
 import soundManager from './services/sound';
 
-const Login = lazy(() => import('./pages/Login'));
-const Register = lazy(() => import('./pages/Register'));
-const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
-const ResetPassword = lazy(() => import('./pages/ResetPassword'));
-const VerifyEmail = lazy(() => import('./pages/VerifyEmail'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const BuildingsView = lazy(() => import('./pages/BuildingsView'));
-const TroopsView = lazy(() => import('./pages/TroopsView'));
-const MovementsView = lazy(() => import('./pages/MovementsView'));
-const MapView = lazy(() => import('./pages/MapView'));
-const ReportsView = lazy(() => import('./pages/ReportsView'));
-const AllianceView = lazy(() => import('./pages/AllianceView'));
-const MessagesView = lazy(() => import('./pages/MessagesView'));
-const RankingView = lazy(() => import('./pages/RankingView'));
-const ProfileView = lazy(() => import('./pages/ProfileView'));
-const AdminPanel = lazy(() => import('./pages/AdminPanel'));
-const AdminCityCreateCard = lazy(() => import('./pages/AdminCityCreateCard'));
-const MarketView = lazy(() => import('./pages/MarketView'));
-const AcademyView = lazy(() => import('./pages/AcademyView'));
-const ExpansionView = lazy(() => import('./pages/ExpansionView'));
-const SendMovementView = lazy(() => import('./pages/SendMovementView'));
-const HeroView = lazy(() => import('./pages/HeroView'));
-const AdventuresView = lazy(() => import('./pages/AdventuresView'));
-const WikiView = lazy(() => import('./pages/WikiView'));
-const TutorialOverlay = lazy(() => import('./components/TutorialOverlay'));
+const Login = lazy(recoverableImport(() => import('./pages/Login'), 'login'));
+const Register = lazy(recoverableImport(() => import('./pages/Register'), 'register'));
+const ForgotPassword = lazy(recoverableImport(() => import('./pages/ForgotPassword'), 'forgot-password'));
+const ResetPassword = lazy(recoverableImport(() => import('./pages/ResetPassword'), 'reset-password'));
+const VerifyEmail = lazy(recoverableImport(() => import('./pages/VerifyEmail'), 'verify-email'));
+const Dashboard = lazy(recoverableImport(() => import('./pages/Dashboard'), 'dashboard'));
+const BuildingsView = lazy(recoverableImport(() => import('./pages/BuildingsView'), 'buildings'));
+const TroopsView = lazy(recoverableImport(() => import('./pages/TroopsView'), 'troops'));
+const MovementsView = lazy(recoverableImport(() => import('./pages/MovementsView'), 'movements'));
+const MapView = lazy(recoverableImport(() => import('./pages/MapView'), 'map'));
+const ReportsView = lazy(recoverableImport(() => import('./pages/ReportsView'), 'reports'));
+const AllianceView = lazy(recoverableImport(() => import('./pages/AllianceView'), 'alliance'));
+const MessagesView = lazy(recoverableImport(() => import('./pages/MessagesView'), 'messages'));
+const RankingView = lazy(recoverableImport(() => import('./pages/RankingView'), 'ranking'));
+const ProfileView = lazy(recoverableImport(() => import('./pages/ProfileView'), 'profile'));
+const AdminPanel = lazy(recoverableImport(() => import('./pages/AdminPanel'), 'admin-panel'));
+const AdminCityCreateCard = lazy(recoverableImport(() => import('./pages/AdminCityCreateCard'), 'admin-city-create'));
+const MarketView = lazy(recoverableImport(() => import('./pages/MarketView'), 'market'));
+const AcademyView = lazy(recoverableImport(() => import('./pages/AcademyView'), 'academy'));
+const ExpansionView = lazy(recoverableImport(() => import('./pages/ExpansionView'), 'expansion'));
+const SendMovementView = lazy(recoverableImport(() => import('./pages/SendMovementView'), 'send-movement'));
+const HeroView = lazy(recoverableImport(() => import('./pages/HeroView'), 'hero'));
+const AdventuresView = lazy(recoverableImport(() => import('./pages/AdventuresView'), 'adventures'));
+const WikiView = lazy(recoverableImport(() => import('./pages/WikiView'), 'wiki'));
 
 const sidebarLinks = [
   { to: '/', key: 'nav.city', icon: 'castle' },
@@ -69,9 +70,11 @@ const RouteFallback = ({ fullPage = false }) => {
 };
 
 const PageBoundary = ({ children, fullPage = false }) => (
-  <Suspense fallback={<RouteFallback fullPage={fullPage} />}>
-    {children}
-  </Suspense>
+  <RouteLoadBoundary fullPage={fullPage}>
+    <Suspense fallback={<RouteFallback fullPage={fullPage} />}>
+      {children}
+    </Suspense>
+  </RouteLoadBoundary>
 );
 
 const NavLink = ({ link, active, mobile = false, t }) => (
@@ -119,7 +122,7 @@ const Layout = ({ children }) => {
       >
         {t('accessibility.skip_to_content')}
       </a>
-      <Suspense fallback={null}><TutorialOverlay /></Suspense>
+      <TutorialOverlay />
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(252,211,77,0.12),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(248,180,0,0.08),transparent_30%)]" />
       <Navbar />
       <ResourceBar />
@@ -198,9 +201,9 @@ const App = () => {
   }, [user?.language, i18n]);
 
   useEffect(() => {
-    const unlockAudio = () => { soundManager.unlock(); };
-    window.addEventListener('pointerdown', unlockAudio, { capture: true, once: true });
-    window.addEventListener('keydown', unlockAudio, { capture: true, once: true });
+    const unlockAudio = () => { void soundManager.unlock(); };
+    window.addEventListener('pointerdown', unlockAudio, { capture: true });
+    window.addEventListener('keydown', unlockAudio, { capture: true });
     return () => {
       window.removeEventListener('pointerdown', unlockAudio, true);
       window.removeEventListener('keydown', unlockAudio, true);
@@ -219,9 +222,13 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    if (!token) {
+      void soundManager.deactivate();
+      return;
+    }
     const isMapView = location.pathname.startsWith('/map');
     soundManager.playMusic(isMapView ? 'war_drums' : 'calm_medieval');
-  }, [location.pathname]);
+  }, [token, location.pathname]);
 
   return (
     <Routes>

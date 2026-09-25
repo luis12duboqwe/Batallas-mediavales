@@ -39,7 +39,9 @@
     "error": "Error",
     "save": "Save",
     "cancel": "Cancel",
-    "confirm": "Confirm"
+    "confirm": "Confirm",
+    "reload": "Reload",
+    "route_load_error": "This screen could not be loaded. Reload to get the latest version."
   },
   "sound": {
     "controls": "Sound controls",
