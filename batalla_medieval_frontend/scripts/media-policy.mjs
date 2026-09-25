@@ -4,7 +4,10 @@ export const BINARY_AUDIO_EXTENSIONS = Object.freeze([
 ]);
 
 const extensionPattern = BINARY_AUDIO_EXTENSIONS.join('|');
-const referencePattern = new RegExp(`\\.(?:${extensionPattern})(?:[?#'\"\\)\\s]|$)`, 'i');
+const referencePattern = new RegExp(
+  String.raw`\.(?:${extensionPattern})(?:[?#'"\x60)\s]|$)`,
+  'i',
+);
 
 export const hasBinaryAudioExtension = (value) => {
   const clean = String(value || '').split(/[?#]/, 1)[0].toLowerCase();
