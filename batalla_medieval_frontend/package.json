@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/check-build-budget.mjs",
     "preview": "vite preview",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
-    "lint:visual-assets": "node scripts/check-visual-assets.mjs",
-    "lint:accessible-interactions": "node scripts/check-accessible-interactions.mjs"
+    "lint:visual-assets": "node scripts/check-visual-assets.mjs && node scripts/check-media-assets.mjs",
+    "lint:accessible-interactions": "node scripts/check-accessible-interactions.mjs",
+    "test:sound": "node scripts/check-sound-lifecycle.mjs"
   },
   "dependencies": {
     "axios": "^1.18.1",

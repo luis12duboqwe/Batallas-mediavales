@@ -1,37 +1,39 @@
-import { useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import Navbar from './components/Navbar';
 import ResourceBar from './components/ResourceBar';
 import GameIcon from './components/GameIcon';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import ForgotPassword from './pages/ForgotPassword';
-import ResetPassword from './pages/ResetPassword';
-import VerifyEmail from './pages/VerifyEmail';
-import Dashboard from './pages/Dashboard';
-import BuildingsView from './pages/BuildingsView';
-import TroopsView from './pages/TroopsView';
-import MovementsView from './pages/MovementsView';
-import MapView from './pages/MapView';
-import ReportsView from './pages/ReportsView';
-import AllianceView from './pages/AllianceView';
-import MessagesView from './pages/MessagesView';
-import RankingView from './pages/RankingView';
-import ProfileView from './pages/ProfileView';
-import AdminPanel from './pages/AdminPanel';
-import AdminCityCreateCard from './pages/AdminCityCreateCard';
-import MarketView from './pages/MarketView';
-import AcademyView from './pages/AcademyView';
-import ExpansionView from './pages/ExpansionView';
-import SendMovementView from './pages/SendMovementView';
-import HeroView from './pages/HeroView';
-import AdventuresView from './pages/AdventuresView';
-import WikiView from './pages/WikiView';
 import TutorialOverlay from './components/TutorialOverlay';
+import RouteLoadBoundary, { recoverableImport } from './components/RouteLoadBoundary';
 import { useUserStore } from './store/userStore';
 import { useCityStore } from './store/cityStore';
 import soundManager from './services/sound';
-import { useTranslation } from 'react-i18next';
+
+const Login = lazy(recoverableImport(() => import('./pages/Login'), 'login'));
+const Register = lazy(recoverableImport(() => import('./pages/Register'), 'register'));
+const ForgotPassword = lazy(recoverableImport(() => import('./pages/ForgotPassword'), 'forgot-password'));
+const ResetPassword = lazy(recoverableImport(() => import('./pages/ResetPassword'), 'reset-password'));
+const VerifyEmail = lazy(recoverableImport(() => import('./pages/VerifyEmail'), 'verify-email'));
+const Dashboard = lazy(recoverableImport(() => import('./pages/Dashboard'), 'dashboard'));
+const BuildingsView = lazy(recoverableImport(() => import('./pages/BuildingsView'), 'buildings'));
+const TroopsView = lazy(recoverableImport(() => import('./pages/TroopsView'), 'troops'));
+const MovementsView = lazy(recoverableImport(() => import('./pages/MovementsView'), 'movements'));
+const MapView = lazy(recoverableImport(() => import('./pages/MapView'), 'map'));
+const ReportsView = lazy(recoverableImport(() => import('./pages/ReportsView'), 'reports'));
+const AllianceView = lazy(recoverableImport(() => import('./pages/AllianceView'), 'alliance'));
+const MessagesView = lazy(recoverableImport(() => import('./pages/MessagesView'), 'messages'));
+const RankingView = lazy(recoverableImport(() => import('./pages/RankingView'), 'ranking'));
+const ProfileView = lazy(recoverableImport(() => import('./pages/ProfileView'), 'profile'));
+const AdminPanel = lazy(recoverableImport(() => import('./pages/AdminPanel'), 'admin-panel'));
+const AdminCityCreateCard = lazy(recoverableImport(() => import('./pages/AdminCityCreateCard'), 'admin-city-create'));
+const MarketView = lazy(recoverableImport(() => import('./pages/MarketView'), 'market'));
+const AcademyView = lazy(recoverableImport(() => import('./pages/AcademyView'), 'academy'));
+const ExpansionView = lazy(recoverableImport(() => import('./pages/ExpansionView'), 'expansion'));
+const SendMovementView = lazy(recoverableImport(() => import('./pages/SendMovementView'), 'send-movement'));
+const HeroView = lazy(recoverableImport(() => import('./pages/HeroView'), 'hero'));
+const AdventuresView = lazy(recoverableImport(() => import('./pages/AdventuresView'), 'adventures'));
+const WikiView = lazy(recoverableImport(() => import('./pages/WikiView'), 'wiki'));
 
 const sidebarLinks = [
   { to: '/', key: 'nav.city', icon: 'castle' },
@@ -50,6 +52,30 @@ const sidebarLinks = [
   { to: '/messages', key: 'nav.messages', icon: 'mail' },
   { to: '/wiki', key: 'nav.wiki', icon: 'book' },
 ];
+
+const RouteFallback = ({ fullPage = false }) => {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="route-loading"
+      className={fullPage
+        ? 'min-h-screen flex items-center justify-center bg-midnight text-yellow-100'
+        : 'card p-6 text-center text-yellow-100'}
+    >
+      {t('common.loading')}
+    </div>
+  );
+};
+
+const PageBoundary = ({ children, fullPage = false }) => (
+  <RouteLoadBoundary fullPage={fullPage}>
+    <Suspense fallback={<RouteFallback fullPage={fullPage} />}>
+      {children}
+    </Suspense>
+  </RouteLoadBoundary>
+);
 
 const NavLink = ({ link, active, mobile = false, t }) => (
   <Link
@@ -81,10 +107,6 @@ const Layout = ({ children }) => {
   const hasHandledInitialLocationRef = useRef(false);
 
   useEffect(() => {
-    // Leave only the first rendered document position untouched so the skip
-    // link remains the first keyboard stop after a hard load. Every later SPA
-    // or history navigation, including Back to React Router's `default` key,
-    // moves focus to the new main content.
     if (!hasHandledInitialLocationRef.current) {
       hasHandledInitialLocationRef.current = true;
       return;
@@ -155,7 +177,7 @@ const AdminRoute = ({ children }) => {
 
 const GameRoute = ({ children }) => (
   <ProtectedRoute>
-    <Layout>{children}</Layout>
+    <Layout><PageBoundary>{children}</PageBoundary></Layout>
   </ProtectedRoute>
 );
 
@@ -179,6 +201,16 @@ const App = () => {
   }, [user?.language, i18n]);
 
   useEffect(() => {
+    const unlockAudio = () => { void soundManager.unlock(); };
+    window.addEventListener('pointerdown', unlockAudio, { capture: true });
+    window.addEventListener('keydown', unlockAudio, { capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio, true);
+      window.removeEventListener('keydown', unlockAudio, true);
+    };
+  }, []);
+
+  useEffect(() => {
     const handleClick = (event) => {
       const target = event.target;
       if (target instanceof Element && target.closest('button')) {
@@ -190,17 +222,21 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    if (!token) {
+      void soundManager.deactivate();
+      return;
+    }
     const isMapView = location.pathname.startsWith('/map');
     soundManager.playMusic(isMapView ? 'war_drums' : 'calm_medieval');
-  }, [location.pathname]);
+  }, [token, location.pathname]);
 
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
-      <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/login" element={<PageBoundary fullPage><Login /></PageBoundary>} />
+      <Route path="/register" element={<PageBoundary fullPage><Register /></PageBoundary>} />
+      <Route path="/forgot-password" element={<PageBoundary fullPage><ForgotPassword /></PageBoundary>} />
+      <Route path="/reset-password" element={<PageBoundary fullPage><ResetPassword /></PageBoundary>} />
+      <Route path="/verify-email" element={<PageBoundary fullPage><VerifyEmail /></PageBoundary>} />
 
       <Route path="/" element={<GameRoute><Dashboard /></GameRoute>} />
       <Route path="/profile" element={<GameRoute><ProfileView /></GameRoute>} />
@@ -225,8 +261,10 @@ const App = () => {
         element={
           <AdminRoute>
             <Layout>
-              <AdminPanel />
-              <AdminCityCreateCard />
+              <PageBoundary>
+                <AdminPanel />
+                <AdminCityCreateCard />
+              </PageBoundary>
             </Layout>
           </AdminRoute>
         }
