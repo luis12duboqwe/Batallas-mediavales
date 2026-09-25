@@ -40,6 +40,15 @@ class FakeOscillator {
 }
 
 class FakeAudioContext {
+  static deferResume = false;
+  static resumeResolvers = [];
+
+  static releasePendingResumes() {
+    const resolvers = [...FakeAudioContext.resumeResolvers];
+    FakeAudioContext.resumeResolvers.length = 0;
+    for (const resolve of resolvers) resolve();
+  }
+
   constructor() {
     this.state = 'suspended';
     this.currentTime = 10;
@@ -53,7 +62,12 @@ class FakeAudioContext {
     this.oscillators.push(oscillator);
     return oscillator;
   }
-  async resume() { this.state = 'running'; }
+  async resume() {
+    if (FakeAudioContext.deferResume) {
+      await new Promise((resolve) => FakeAudioContext.resumeResolvers.push(resolve));
+    }
+    this.state = 'running';
+  }
   async suspend() { this.state = 'suspended'; this.suspendCalls += 1; }
 }
 
@@ -117,4 +131,23 @@ assert.equal(context.state, 'suspended', 'deactivating a session must suspend th
 assert.equal(manager.unlocked, false, 'deactivating a session must clear unlocked state');
 assert.ok(context.suspendCalls >= 1, 'deactivation must release running audio resources');
 
-console.log('BM-0082 sound lifecycle passed: preferences normalized, voices stop cleanly, unlock is idempotent, and session audio suspends');
+FakeAudioContext.deferResume = true;
+const raceManager = new SoundManager();
+const pendingUnlock = raceManager.unlock();
+await new Promise((resolve) => setTimeout(resolve, 0));
+const raceContext = raceManager.audioContext;
+assert.equal(raceContext.state, 'suspended', 'deferred unlock must still be pending before logout');
+
+await raceManager.deactivate();
+assert.equal(raceManager.unlocked, false, 'logout must invalidate an in-flight unlock immediately');
+FakeAudioContext.releasePendingResumes();
+const staleUnlockResult = await pendingUnlock;
+FakeAudioContext.deferResume = false;
+
+assert.equal(staleUnlockResult, false, 'an unlock started before logout must not become valid afterward');
+assert.equal(raceManager.unlocked, false, 'stale unlock completion must not reactivate the session');
+assert.equal(raceContext.state, 'suspended', 'stale resume completion must be suspended again');
+assert.ok(raceContext.suspendCalls >= 1, 'stale resume must release the AudioContext after logout');
+assert.equal(raceContext.oscillators.length, 0, 'stale unlock must not emit post-logout audio');
+
+console.log('BM-0082 sound lifecycle passed: preferences normalized, voices stop cleanly, unlock is idempotent, stale unlocks are invalidated, and session audio suspends');
