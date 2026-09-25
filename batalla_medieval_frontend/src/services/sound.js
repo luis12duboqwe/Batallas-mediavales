@@ -63,6 +63,7 @@ export class SoundManager {
     this.musicStep = 0;
     this.unlocked = false;
     this.lifecycleGeneration = 0;
+    this.audioTransition = Promise.resolve();
     this.activeMusicVoices = new Set();
     this.activeSfxVoices = new Set();
     this.subscribers = new Set();
@@ -104,6 +105,12 @@ export class SoundManager {
     this.subscribers.forEach((callback) => callback(snapshot));
   }
 
+  _queueAudioTransition(task) {
+    const run = this.audioTransition.catch(() => {}).then(task);
+    this.audioTransition = run.catch(() => {});
+    return run;
+  }
+
   _setGain(node, value) {
     if (!node?.gain) return;
     const now = this.audioContext?.currentTime || 0;
@@ -138,35 +145,35 @@ export class SoundManager {
     return context;
   }
 
-  async unlock() {
+  unlock() {
     const generation = this.lifecycleGeneration;
     const context = this._ensureContext();
-    if (!context) return false;
-    try {
-      if (context.state === 'suspended') await context.resume();
+    if (!context) return Promise.resolve(false);
 
-      if (generation !== this.lifecycleGeneration) {
-        if (!this.unlocked && context.state === 'running') {
-          try { await context.suspend(); } catch { /* stale unlock stays muted */ }
+    return this._queueAudioTransition(async () => {
+      if (generation !== this.lifecycleGeneration) return false;
+      try {
+        if (context.state === 'suspended') await context.resume();
+        if (generation !== this.lifecycleGeneration) {
+          this._syncMasterGains();
+          return false;
         }
+
+        this.unlocked = context.state === 'running';
         this._syncMasterGains();
+        if (
+          this.unlocked
+          && this.settings.musicEnabled
+          && this.currentMusicKey
+          && !this.musicTimer
+        ) {
+          this._startMusicLoop();
+        }
+        return this.unlocked;
+      } catch {
         return false;
       }
-
-      this.unlocked = context.state === 'running';
-      this._syncMasterGains();
-      if (
-        this.unlocked
-        && this.settings.musicEnabled
-        && this.currentMusicKey
-        && !this.musicTimer
-      ) {
-        this._startMusicLoop();
-      }
-      return this.unlocked;
-    } catch {
-      return false;
-    }
+    });
   }
 
   _playTone({ frequency, duration, gain, wave = 'sine', delay = 0 }, destination, voices) {
@@ -267,17 +274,23 @@ export class SoundManager {
     this.musicStep = 0;
   }
 
-  async deactivate() {
+  deactivate() {
+    // Invalidate pending unlocks synchronously so callbacks scheduled before
+    // logout cannot emit audio while the serialized suspension is waiting.
     this.lifecycleGeneration += 1;
     this.unlocked = false;
     this._syncMasterGains();
     this.stopMusic();
     this._setGain(this.sfxGain, 0);
     this._stopVoices(this.activeSfxVoices);
-    if (this.audioContext?.state === 'running') {
-      try { await this.audioContext.suspend(); } catch { /* best-effort resource release */ }
-    }
-    this._syncMasterGains();
+
+    const context = this.audioContext;
+    return this._queueAudioTransition(async () => {
+      if (context?.state === 'running') {
+        try { await context.suspend(); } catch { /* best-effort resource release */ }
+      }
+      this._syncMasterGains();
+    });
   }
 
   playMusic(type) {
