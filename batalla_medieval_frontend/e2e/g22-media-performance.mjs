@@ -120,6 +120,13 @@ try {
   if (await musicToggle.getAttribute('aria-pressed') !== 'false') failures.push('audio: invalid music toggle did not fall back to opt-in false');
   if (await sfxToggle.getAttribute('aria-pressed') !== 'true') failures.push('audio: invalid SFX toggle did not fall back to true');
 
+  // Disable SFX before measuring music synthesis. The global button-click SFX
+  // handler would otherwise create its own oscillator and could make this
+  // assertion pass even if the music opt-in were broken.
+  await sfxToggle.click();
+  await page.waitForTimeout(80);
+  if (await sfxToggle.getAttribute('aria-pressed') !== 'false') failures.push('audio: SFX could not be disabled before music isolation probe');
+
   const oscillatorsBeforeMusic = await page.evaluate(() => window.__bmOscillatorCount);
   await musicToggle.click();
   await page.waitForTimeout(80);
@@ -128,7 +135,6 @@ try {
 
   await musicVolume.fill('0.25');
   await sfxVolume.fill('0.4');
-  await sfxToggle.click();
   const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem('bm_sound_settings') || '{}'));
   if (Number(persisted.musicVolume) !== 0.25) failures.push(`audio: music volume did not persist at 0.25 (${persisted.musicVolume})`);
   if (Number(persisted.sfxVolume) !== 0.4) failures.push(`audio: SFX volume did not persist at 0.4 (${persisted.sfxVolume})`);
@@ -160,7 +166,7 @@ try {
   }
 
   if (failures.length) throw new Error(failures.join('\n'));
-  console.log(`G22 BM-0082 passed: reduced motion, normalized/persisted audio controls, one-time lazy chunk recovery, deferred JS and zero binary audio (${lazyScripts.length} new chunk(s))`);
+  console.log(`G22 BM-0082 passed: reduced motion, isolated music opt-in, normalized/persisted audio controls, one-time lazy chunk recovery, deferred JS and zero binary audio (${lazyScripts.length} new chunk(s))`);
 } finally {
   await browser.close();
 }
