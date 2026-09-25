@@ -13,6 +13,13 @@ const ROOT_TEXT_FILES = [join(ROOT, 'index.html')];
 const TEXT_EXTENSIONS = new Set(['.js', '.jsx', '.css', '.html', '.json', '.svg']);
 const failures = [];
 
+// Keep the detector itself under regression coverage. Template literals are a
+// common way to construct Audio/fetch URLs and must not bypass the policy.
+const templateLiteralProbe = 'new Audio(`https://example.invalid/probe.opus`)';
+if (!containsBinaryAudioReference(templateLiteralProbe)) {
+  failures.push('media-policy self-check: template-literal binary audio reference was not detected');
+}
+
 async function exists(path) {
   try {
     await access(path);
