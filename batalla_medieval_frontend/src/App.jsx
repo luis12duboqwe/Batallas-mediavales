@@ -1,37 +1,38 @@
-import { useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import Navbar from './components/Navbar';
 import ResourceBar from './components/ResourceBar';
 import GameIcon from './components/GameIcon';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import ForgotPassword from './pages/ForgotPassword';
-import ResetPassword from './pages/ResetPassword';
-import VerifyEmail from './pages/VerifyEmail';
-import Dashboard from './pages/Dashboard';
-import BuildingsView from './pages/BuildingsView';
-import TroopsView from './pages/TroopsView';
-import MovementsView from './pages/MovementsView';
-import MapView from './pages/MapView';
-import ReportsView from './pages/ReportsView';
-import AllianceView from './pages/AllianceView';
-import MessagesView from './pages/MessagesView';
-import RankingView from './pages/RankingView';
-import ProfileView from './pages/ProfileView';
-import AdminPanel from './pages/AdminPanel';
-import AdminCityCreateCard from './pages/AdminCityCreateCard';
-import MarketView from './pages/MarketView';
-import AcademyView from './pages/AcademyView';
-import ExpansionView from './pages/ExpansionView';
-import SendMovementView from './pages/SendMovementView';
-import HeroView from './pages/HeroView';
-import AdventuresView from './pages/AdventuresView';
-import WikiView from './pages/WikiView';
-import TutorialOverlay from './components/TutorialOverlay';
 import { useUserStore } from './store/userStore';
 import { useCityStore } from './store/cityStore';
 import soundManager from './services/sound';
-import { useTranslation } from 'react-i18next';
+
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const VerifyEmail = lazy(() => import('./pages/VerifyEmail'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const BuildingsView = lazy(() => import('./pages/BuildingsView'));
+const TroopsView = lazy(() => import('./pages/TroopsView'));
+const MovementsView = lazy(() => import('./pages/MovementsView'));
+const MapView = lazy(() => import('./pages/MapView'));
+const ReportsView = lazy(() => import('./pages/ReportsView'));
+const AllianceView = lazy(() => import('./pages/AllianceView'));
+const MessagesView = lazy(() => import('./pages/MessagesView'));
+const RankingView = lazy(() => import('./pages/RankingView'));
+const ProfileView = lazy(() => import('./pages/ProfileView'));
+const AdminPanel = lazy(() => import('./pages/AdminPanel'));
+const AdminCityCreateCard = lazy(() => import('./pages/AdminCityCreateCard'));
+const MarketView = lazy(() => import('./pages/MarketView'));
+const AcademyView = lazy(() => import('./pages/AcademyView'));
+const ExpansionView = lazy(() => import('./pages/ExpansionView'));
+const SendMovementView = lazy(() => import('./pages/SendMovementView'));
+const HeroView = lazy(() => import('./pages/HeroView'));
+const AdventuresView = lazy(() => import('./pages/AdventuresView'));
+const WikiView = lazy(() => import('./pages/WikiView'));
+const TutorialOverlay = lazy(() => import('./components/TutorialOverlay'));
 
 const sidebarLinks = [
   { to: '/', key: 'nav.city', icon: 'castle' },
@@ -50,6 +51,28 @@ const sidebarLinks = [
   { to: '/messages', key: 'nav.messages', icon: 'mail' },
   { to: '/wiki', key: 'nav.wiki', icon: 'book' },
 ];
+
+const RouteFallback = ({ fullPage = false }) => {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="route-loading"
+      className={fullPage
+        ? 'min-h-screen flex items-center justify-center bg-midnight text-yellow-100'
+        : 'card p-6 text-center text-yellow-100'}
+    >
+      {t('common.loading')}
+    </div>
+  );
+};
+
+const PageBoundary = ({ children, fullPage = false }) => (
+  <Suspense fallback={<RouteFallback fullPage={fullPage} />}>
+    {children}
+  </Suspense>
+);
 
 const NavLink = ({ link, active, mobile = false, t }) => (
   <Link
@@ -81,10 +104,6 @@ const Layout = ({ children }) => {
   const hasHandledInitialLocationRef = useRef(false);
 
   useEffect(() => {
-    // Leave only the first rendered document position untouched so the skip
-    // link remains the first keyboard stop after a hard load. Every later SPA
-    // or history navigation, including Back to React Router's `default` key,
-    // moves focus to the new main content.
     if (!hasHandledInitialLocationRef.current) {
       hasHandledInitialLocationRef.current = true;
       return;
@@ -100,7 +119,7 @@ const Layout = ({ children }) => {
       >
         {t('accessibility.skip_to_content')}
       </a>
-      <TutorialOverlay />
+      <Suspense fallback={null}><TutorialOverlay /></Suspense>
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(252,211,77,0.12),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(248,180,0,0.08),transparent_30%)]" />
       <Navbar />
       <ResourceBar />
@@ -155,7 +174,7 @@ const AdminRoute = ({ children }) => {
 
 const GameRoute = ({ children }) => (
   <ProtectedRoute>
-    <Layout>{children}</Layout>
+    <Layout><PageBoundary>{children}</PageBoundary></Layout>
   </ProtectedRoute>
 );
 
@@ -179,6 +198,16 @@ const App = () => {
   }, [user?.language, i18n]);
 
   useEffect(() => {
+    const unlockAudio = () => { soundManager.unlock(); };
+    window.addEventListener('pointerdown', unlockAudio, { capture: true, once: true });
+    window.addEventListener('keydown', unlockAudio, { capture: true, once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio, true);
+      window.removeEventListener('keydown', unlockAudio, true);
+    };
+  }, []);
+
+  useEffect(() => {
     const handleClick = (event) => {
       const target = event.target;
       if (target instanceof Element && target.closest('button')) {
@@ -196,11 +225,11 @@ const App = () => {
 
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
-      <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/login" element={<PageBoundary fullPage><Login /></PageBoundary>} />
+      <Route path="/register" element={<PageBoundary fullPage><Register /></PageBoundary>} />
+      <Route path="/forgot-password" element={<PageBoundary fullPage><ForgotPassword /></PageBoundary>} />
+      <Route path="/reset-password" element={<PageBoundary fullPage><ResetPassword /></PageBoundary>} />
+      <Route path="/verify-email" element={<PageBoundary fullPage><VerifyEmail /></PageBoundary>} />
 
       <Route path="/" element={<GameRoute><Dashboard /></GameRoute>} />
       <Route path="/profile" element={<GameRoute><ProfileView /></GameRoute>} />
@@ -225,8 +254,10 @@ const App = () => {
         element={
           <AdminRoute>
             <Layout>
-              <AdminPanel />
-              <AdminCityCreateCard />
+              <PageBoundary>
+                <AdminPanel />
+                <AdminCityCreateCard />
+              </PageBoundary>
             </Layout>
           </AdminRoute>
         }

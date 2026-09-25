@@ -19,11 +19,7 @@ const IntroAnimation = ({ onComplete }) => {
     cancelAnimationFrame(frameRef.current);
     setShowTitle(true);
     setFadeOut(true);
-    setTimeout(() => {
-      // The intro is presentation only. Authentication and route guards own
-      // navigation, so reloads never force an authenticated player to /login.
-      onComplete?.();
-    }, 450);
+    setTimeout(() => onComplete?.(), 450);
   }, [onComplete]);
 
   useEffect(() => {
@@ -37,7 +33,6 @@ const IntroAnimation = ({ onComplete }) => {
     if (reducedMotion) return undefined;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
-
     if (!canvas || !ctx) return undefined;
 
     finishedRef.current = false;
@@ -60,7 +55,6 @@ const IntroAnimation = ({ onComplete }) => {
 
     resize();
     window.addEventListener('resize', resize);
-
     let start;
 
     const drawTorch = (x, y, intensity) => {
@@ -102,9 +96,7 @@ const IntroAnimation = ({ onComplete }) => {
 
     const render = (timestamp) => {
       if (!start) start = timestamp;
-      const elapsed = timestamp - start;
-      const progress = Math.min(elapsed / DURATION, 1);
-
+      const progress = Math.min((timestamp - start) / DURATION, 1);
       const { clientWidth, clientHeight } = canvas;
       ctx.clearRect(0, 0, clientWidth, clientHeight);
 
@@ -117,15 +109,13 @@ const IntroAnimation = ({ onComplete }) => {
       const torchIntensity = 0.8 + Math.sin(timestamp * 0.02) * 0.1 + Math.random() * 0.08;
       drawTorch(clientWidth * 0.25, clientHeight * 0.78, torchIntensity);
       drawTorch(clientWidth * 0.75, clientHeight * 0.78, torchIntensity * 0.92);
-
       fogLayers.forEach((layer) => {
         layer.x += layer.speed * 12;
         if (layer.x > clientWidth) layer.x = -clientWidth * 0.6;
         drawFog(layer);
       });
-
       if (progress > 0.35) drawCastle(progress);
-      if (!showTitle && progress > 0.65) setShowTitle(true);
+      if (progress > 0.65) setShowTitle(true);
 
       const vignette = ctx.createRadialGradient(
         clientWidth / 2,
@@ -140,21 +130,17 @@ const IntroAnimation = ({ onComplete }) => {
       ctx.fillStyle = vignette;
       ctx.fillRect(0, 0, clientWidth, clientHeight);
 
-      if (progress < 1 && !finishedRef.current) {
-        frameRef.current = requestAnimationFrame(render);
-      } else {
-        finishSequence();
-      }
+      if (progress < 1 && !finishedRef.current) frameRef.current = requestAnimationFrame(render);
+      else finishSequence();
     };
 
     frameRef.current = requestAnimationFrame(render);
-
     return () => {
       finishedRef.current = true;
       cancelAnimationFrame(frameRef.current);
       window.removeEventListener('resize', resize);
     };
-  }, [finishSequence, reducedMotion, showTitle]);
+  }, [finishSequence, reducedMotion]);
 
   useEffect(() => {
     if (reducedMotion) return undefined;
@@ -166,19 +152,13 @@ const IntroAnimation = ({ onComplete }) => {
 
   return (
     <div
-      className={`fixed inset-0 z-40 overflow-hidden transition-opacity duration-500 ${
-        fadeOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
-      }`}
+      className={`fixed inset-0 z-40 overflow-hidden transition-opacity duration-500 ${fadeOut ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
       data-testid="intro-animation"
     >
       <canvas ref={canvasRef} className="w-full h-full" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(255,214,153,0.06),transparent_45%)]" />
       <div className="absolute inset-0 flex flex-col items-center justify-end pb-16">
-        <div
-          className={`transition-all duration-700 text-center space-y-3 ${
-            showTitle ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'
-          }`}
-        >
+        <div className={`transition-all duration-700 text-center space-y-3 ${showTitle ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
           <p className="text-sm tracking-[0.4em] text-yellow-200/60 uppercase">Fuego y acero</p>
           <h2 className="intro-title text-4xl sm:text-5xl font-display tracking-[0.35em]">Batalla Medieval</h2>
         </div>
