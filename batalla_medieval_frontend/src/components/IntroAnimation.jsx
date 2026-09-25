@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import castleSilhouette from '../assets/intro/castle-silhouette.svg';
+import usePrefersReducedMotion from '../hooks/usePrefersReducedMotion';
 
 const DURATION = 2500;
 
@@ -7,8 +8,10 @@ const IntroAnimation = ({ onComplete }) => {
   const canvasRef = useRef(null);
   const frameRef = useRef(null);
   const finishedRef = useRef(false);
+  const reducedCompletionRef = useRef(false);
   const [showTitle, setShowTitle] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
+  const reducedMotion = usePrefersReducedMotion();
 
   const finishSequence = useCallback(() => {
     if (finishedRef.current) return;
@@ -24,6 +27,14 @@ const IntroAnimation = ({ onComplete }) => {
   }, [onComplete]);
 
   useEffect(() => {
+    if (!reducedMotion || reducedCompletionRef.current) return undefined;
+    reducedCompletionRef.current = true;
+    const frameId = requestAnimationFrame(() => onComplete?.());
+    return () => cancelAnimationFrame(frameId);
+  }, [reducedMotion, onComplete]);
+
+  useEffect(() => {
+    if (reducedMotion) return undefined;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
 
@@ -113,13 +124,8 @@ const IntroAnimation = ({ onComplete }) => {
         drawFog(layer);
       });
 
-      if (progress > 0.35) {
-        drawCastle(progress);
-      }
-
-      if (!showTitle && progress > 0.65) {
-        setShowTitle(true);
-      }
+      if (progress > 0.35) drawCastle(progress);
+      if (!showTitle && progress > 0.65) setShowTitle(true);
 
       const vignette = ctx.createRadialGradient(
         clientWidth / 2,
@@ -148,14 +154,15 @@ const IntroAnimation = ({ onComplete }) => {
       cancelAnimationFrame(frameRef.current);
       window.removeEventListener('resize', resize);
     };
-  }, [finishSequence]);
+  }, [finishSequence, reducedMotion, showTitle]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      finishSequence();
-    }, DURATION);
+    if (reducedMotion) return undefined;
+    const timer = setTimeout(() => finishSequence(), DURATION);
     return () => clearTimeout(timer);
-  }, [finishSequence]);
+  }, [finishSequence, reducedMotion]);
+
+  if (reducedMotion) return null;
 
   return (
     <div

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import usePrefersReducedMotion from '../hooks/usePrefersReducedMotion';
 
 const gradients = [
   'radial-gradient(circle at 20% 20%, rgba(255, 209, 102, 0.08), transparent 35%)',
@@ -10,28 +11,35 @@ const LoadingScreen = ({ onComplete }) => {
   const [progress, setProgress] = useState(0);
   const [visible, setVisible] = useState(true);
   const [ready, setReady] = useState(false);
+  const reducedCompletionRef = useRef(false);
+  const reducedMotion = usePrefersReducedMotion();
 
   const backgroundStyle = useMemo(
-    () => ({
-      backgroundImage: gradients.join(','),
-    }),
+    () => ({ backgroundImage: gradients.join(',') }),
     [],
   );
 
   useEffect(() => {
-    const showTimer = setTimeout(() => setReady(true), 50);
-    let intervalId;
+    if (!reducedMotion || reducedCompletionRef.current) return undefined;
+    reducedCompletionRef.current = true;
+    const frameId = requestAnimationFrame(() => onComplete?.());
+    return () => cancelAnimationFrame(frameId);
+  }, [reducedMotion, onComplete]);
 
-    intervalId = setInterval(() => {
+  useEffect(() => {
+    if (reducedMotion) return undefined;
+    const showTimer = setTimeout(() => setReady(true), 50);
+    let finishHideTimer;
+    let finishCompleteTimer;
+
+    const intervalId = setInterval(() => {
       setProgress((prev) => {
         const increment = Math.random() * 12 + 5;
         const next = Math.min(prev + increment, 100);
         if (next >= 100) {
           clearInterval(intervalId);
-          setTimeout(() => setVisible(false), 350);
-          setTimeout(() => {
-            onComplete?.();
-          }, 800);
+          finishHideTimer = setTimeout(() => setVisible(false), 350);
+          finishCompleteTimer = setTimeout(() => onComplete?.(), 800);
         }
         return next;
       });
@@ -40,8 +48,12 @@ const LoadingScreen = ({ onComplete }) => {
     return () => {
       clearInterval(intervalId);
       clearTimeout(showTimer);
+      clearTimeout(finishHideTimer);
+      clearTimeout(finishCompleteTimer);
     };
-  }, [onComplete]);
+  }, [onComplete, reducedMotion]);
+
+  if (reducedMotion) return null;
 
   return (
     <div
@@ -55,9 +67,7 @@ const LoadingScreen = ({ onComplete }) => {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div className="relative z-10 max-w-xl px-6 text-center space-y-6">
         <div className="flex flex-col items-center gap-2">
-          <h1 className="text-4xl sm:text-5xl font-display tracking-[0.2em] text-yellow-200 drop-shadow-lg">
-            Batalla Medieval
-          </h1>
+          <h1 className="text-4xl sm:text-5xl font-display tracking-[0.2em] text-yellow-200 drop-shadow-lg">Batalla Medieval</h1>
           <p className="text-sm text-yellow-100/80">Consejo: Mejora tu Hacienda para más tropas</p>
         </div>
         <div className="w-full h-3 rounded-full overflow-hidden bg-gray-900/70 border border-yellow-800/40 shadow-inner">
@@ -66,9 +76,7 @@ const LoadingScreen = ({ onComplete }) => {
             style={{ width: `${progress}%` }}
           />
         </div>
-        <div className="text-xs uppercase tracking-[0.3em] text-yellow-100/60">
-          Cargando... {Math.round(progress)}%
-        </div>
+        <div className="text-xs uppercase tracking-[0.3em] text-yellow-100/60">Cargando... {Math.round(progress)}%</div>
       </div>
     </div>
   );
