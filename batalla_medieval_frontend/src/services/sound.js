@@ -62,6 +62,7 @@ export class SoundManager {
     this.currentMusicKey = null;
     this.musicStep = 0;
     this.unlocked = false;
+    this.lifecycleGeneration = 0;
     this.activeMusicVoices = new Set();
     this.activeSfxVoices = new Set();
     this.subscribers = new Set();
@@ -138,10 +139,20 @@ export class SoundManager {
   }
 
   async unlock() {
+    const generation = this.lifecycleGeneration;
     const context = this._ensureContext();
     if (!context) return false;
     try {
       if (context.state === 'suspended') await context.resume();
+
+      if (generation !== this.lifecycleGeneration) {
+        if (!this.unlocked && context.state === 'running') {
+          try { await context.suspend(); } catch { /* stale unlock stays muted */ }
+        }
+        this._syncMasterGains();
+        return false;
+      }
+
       this.unlocked = context.state === 'running';
       this._syncMasterGains();
       if (
@@ -257,10 +268,12 @@ export class SoundManager {
   }
 
   async deactivate() {
+    this.lifecycleGeneration += 1;
+    this.unlocked = false;
+    this._syncMasterGains();
     this.stopMusic();
     this._setGain(this.sfxGain, 0);
     this._stopVoices(this.activeSfxVoices);
-    this.unlocked = false;
     if (this.audioContext?.state === 'running') {
       try { await this.audioContext.suspend(); } catch { /* best-effort resource release */ }
     }
