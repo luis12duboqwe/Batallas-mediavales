@@ -10,6 +10,7 @@
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "lint:visual-assets": "node scripts/check-visual-assets.mjs && node scripts/check-media-assets.mjs",
     "lint:accessible-interactions": "node scripts/check-accessible-interactions.mjs",
+    "lint:localization": "node scripts/check-localization.mjs",
     "test:sound": "node scripts/check-sound-lifecycle.mjs"
   },
   "dependencies": {
