@@ -170,3 +170,7 @@ try {
 } finally {
   await browser.close();
 }
+
+// BM-0083 reuses this already-isolated Playwright runner so localization is a
+// blocking browser gate without adding another heavyweight CI job.
+await import('./g23-localization.mjs');

@@ -8,6 +8,7 @@ import NotificationListener from './components/NotificationListener.jsx';
 import { SocketProvider } from './context/SocketContext.jsx';
 import './index.css';
 import './i18n';
+import './utils/installApiErrorLocalization';
 
 const ExperienceShell = () => {
   const [introFinished, setIntroFinished] = useState(false);

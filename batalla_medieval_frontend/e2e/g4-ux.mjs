@@ -87,19 +87,19 @@ try {
   const mobileNavigation = await waitForMobileNavigation('/');
   await assertViewport('/');
 
-  // The user profile defaults to English in the E2E fixture; App must apply it
-  // after the authenticated profile is loaded instead of leaving detector text.
-  await page.waitForFunction(() => document.body.innerText.includes('City'));
-  if (!(await mobileNavigation.getByRole('link', { name: 'Buildings' }).isVisible())) {
-    failures.push('Translated Buildings link is not reachable in mobile navigation');
+  // BM-0083 ships v1.0 in Spanish only. Historical user/browser language
+  // preferences must not switch the authenticated runtime back to English.
+  await page.waitForFunction(() => document.body.innerText.includes('Ciudad'));
+  if (!(await mobileNavigation.getByRole('link', { name: 'Edificios' }).isVisible())) {
+    failures.push('El enlace Edificios no es accesible en la navegación móvil');
   }
-  if (!(await mobileNavigation.getByRole('link', { name: 'Market' }).isVisible())) {
-    failures.push('Market is not reachable in mobile navigation');
+  if (!(await mobileNavigation.getByRole('link', { name: 'Mercado' }).isVisible())) {
+    failures.push('El enlace Mercado no es accesible en la navegación móvil');
   }
 
   // Keyboard focus and activation must work even though this browser context
   // also advertises touch support.
-  const mapLink = mobileNavigation.getByRole('link', { name: 'Map' });
+  const mapLink = mobileNavigation.getByRole('link', { name: 'Mapa' });
   await mapLink.focus();
   const focused = await mapLink.evaluate((element) => element === document.activeElement);
   if (!focused) failures.push('Mobile navigation link could not receive keyboard focus');
@@ -128,35 +128,39 @@ try {
   }
 
   await page.goto(`${BASE_URL}/profile`, { waitUntil: 'networkidle' });
-  await page.getByRole('heading', { name: 'User Profile' }).waitFor();
+  await page.getByRole('heading', { name: 'Perfil de Usuario' }).waitFor();
   await assertViewport('/profile');
 
-  const languageSelect = page.getByLabel('Language');
-  await languageSelect.selectOption('es');
-  await page.getByRole('button', { name: 'Save Changes' }).click();
-  await page.getByRole('heading', { name: 'Perfil de Usuario' }).waitFor();
-  if (!(await page.getByTestId('mobile-navigation').getByRole('link', { name: 'Ciudad' }).isVisible())) {
-    failures.push('Spanish language change did not update visible navigation');
+  const runtimeLanguage = page.getByTestId('runtime-language');
+  await runtimeLanguage.waitFor({ state: 'visible' });
+  if (!(await runtimeLanguage.innerText()).includes('Español')) {
+    failures.push('El perfil no informa que el idioma de v1.0 es Español');
+  }
+  if (await page.locator('#profile-language, select[name="language"]').count()) {
+    failures.push('El selector de idioma retirado sigue visible en el perfil');
   }
 
+  // A stale preference from the old detector must not reactivate the retired
+  // English catalog after a hard reload.
+  await page.evaluate(() => localStorage.setItem('i18nextLng', 'en'));
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'Perfil de Usuario' }).waitFor();
-  if (!(await page.getByLabel('Idioma').isVisible())) {
-    failures.push('Saved Spanish language did not persist after reload');
+  if (await page.locator('#profile-language, select[name="language"]').count()) {
+    failures.push('Una preferencia antigua reactivó el selector de idioma');
   }
-  await assertViewport('/profile?language=es');
-
-  // Restore the deterministic fixture preference while also proving reverse
-  // switching works without a new login.
-  await page.getByLabel('Idioma').selectOption('en');
-  await page.getByRole('button', { name: 'Guardar Cambios' }).click();
-  await page.getByRole('heading', { name: 'User Profile' }).waitFor();
+  if (!(await page.getByTestId('mobile-navigation').getByRole('link', { name: 'Ciudad' }).isVisible())) {
+    failures.push('Una preferencia antigua de inglés cambió la navegación fuera de español');
+  }
+  if (await page.getByText('English', { exact: true }).count()) {
+    failures.push('La opción English reapareció tras recargar el perfil');
+  }
+  await assertViewport('/profile?runtime=es');
 
   if (failures.length > 0) {
     throw new Error(failures.join('\n'));
   }
 
-  console.log(`G4 UX smoke passed: all visible routes at 390x844, keyboard focus, ${API_DELAY_MS}ms API delay and persisted es/en switching`);
+  console.log(`G4 UX smoke passed: all visible routes at 390x844, keyboard focus, ${API_DELAY_MS}ms API delay and Spanish-only locale persistence`);
 } finally {
   await browser.close();
 }
