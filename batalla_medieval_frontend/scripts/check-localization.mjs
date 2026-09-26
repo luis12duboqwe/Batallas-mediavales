@@ -8,6 +8,9 @@ const ES_CATALOG = join(SRC, 'locales', 'es.json');
 const EN_CATALOG = join(SRC, 'locales', 'en.json');
 const I18N_SOURCE = join(SRC, 'i18n.js');
 const PROFILE_SOURCE = join(SRC, 'pages', 'ProfileView.jsx');
+const MAIN_SOURCE = join(SRC, 'main.jsx');
+const API_ERROR_SOURCE = join(SRC, 'utils', 'apiError.js');
+const API_ERROR_INSTALLER = join(SRC, 'utils', 'installApiErrorLocalization.js');
 const INDEX_HTML = join(ROOT, 'index.html');
 const SOURCE_EXTENSIONS = new Set(['.js', '.jsx']);
 const failures = [];
@@ -77,6 +80,28 @@ if (/name\s*=\s*['"]language['"]|value\s*=\s*['"]en['"]|changeLanguage\s*\(/.tes
 const indexSource = await readFile(INDEX_HTML, 'utf8');
 if (!/<html\s+lang=['"]es['"]/.test(indexSource)) failures.push('index.html: document language must remain es');
 
+if (!(await exists(API_ERROR_SOURCE)) || !(await exists(API_ERROR_INSTALLER))) {
+  failures.push('src/utils: centralized API error localization must remain installed for Spanish-only v1.0');
+} else {
+  const [apiErrorSource, installerSource, mainSource] = await Promise.all([
+    readFile(API_ERROR_SOURCE, 'utf8'),
+    readFile(API_ERROR_INSTALLER, 'utf8'),
+    readFile(MAIN_SOURCE, 'utf8'),
+  ]);
+  if (!apiErrorSource.includes('Incorrect username or password') || !apiErrorSource.includes('Usuario o contraseña incorrectos.')) {
+    failures.push('src/utils/apiError.js: known authentication error translation is missing');
+  }
+  if (!apiErrorSource.includes('No se pudo completar la operación.')) {
+    failures.push('src/utils/apiError.js: unknown/non-textual API errors must have a Spanish fallback');
+  }
+  if (!installerSource.includes('interceptors.response.use') || !installerSource.includes('localizeAxiosError')) {
+    failures.push('src/utils/installApiErrorLocalization.js: global Axios error normalization is not installed');
+  }
+  if (!mainSource.includes("./utils/installApiErrorLocalization")) {
+    failures.push('src/main.jsx: API error localization must load before the UI mounts');
+  }
+}
+
 async function walk(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
@@ -112,4 +137,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`BM-0083 localization policy passed: Spanish-only runtime, ${catalogKeys.size} catalog leaves, no retired English UI markers, and all static t() keys resolve`);
+console.log(`BM-0083 localization policy passed: Spanish-only runtime, ${catalogKeys.size} catalog leaves, centralized API error localization, no retired English UI markers, and all static t() keys resolve`);
