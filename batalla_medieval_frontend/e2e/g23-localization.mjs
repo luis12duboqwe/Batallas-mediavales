@@ -36,6 +36,8 @@ async function expectSpanishDocument(stage) {
     'Music off',
     'Sound effects on',
     'Sound effects off',
+    'Incorrect username or password',
+    'Could not validate credentials',
   ];
   for (const marker of retiredEnglish) {
     if (body.includes(marker)) failures.push(`${stage}: retired English UI marker remained: ${marker}`);
@@ -61,6 +63,15 @@ try {
 
   const inputs = page.locator('form input');
   await inputs.nth(0).fill(USERNAME);
+  await inputs.nth(1).fill('contraseña-incorrecta-g23');
+  await page.getByRole('button', { name: 'Entrar' }).click();
+  const localizedLoginError = page.getByText('Usuario o contraseña incorrectos.', { exact: true });
+  await localizedLoginError.waitFor({ state: 'visible', timeout: 10000 });
+  if (await page.getByText('Incorrect username or password', { exact: true }).count()) {
+    failures.push('invalid-login: raw English backend detail leaked into the UI');
+  }
+  await expectSpanishDocument('invalid-login');
+
   await inputs.nth(1).fill(PASSWORD);
   await page.getByRole('button', { name: 'Entrar' }).click();
   await page.waitForURL(`${BASE_URL}/`, { timeout: 15000 });
@@ -98,7 +109,7 @@ try {
   await expectSpanishDocument('messages');
 
   if (failures.length) throw new Error(failures.join('\n'));
-  console.log('G23 BM-0083 passed: Spanish-only runtime survives stale locale preferences, profile exposes no English selector, and critical routes remain Spanish');
+  console.log('G23 BM-0083 passed: Spanish-only runtime survives stale locale preferences, localizes backend auth errors, profile exposes no English selector, and critical routes remain Spanish');
 } finally {
   await browser.close();
 }
