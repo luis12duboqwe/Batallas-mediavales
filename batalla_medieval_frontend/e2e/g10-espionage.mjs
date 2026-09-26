@@ -144,9 +144,10 @@ try {
   await reportHeading.waitFor({ state: 'visible', timeout: 10000 });
   await reportHeading.click();
 
-  await page.getByText('¡Espionaje Exitoso!', { exact: true }).waitFor({ state: 'visible', timeout: 5000 });
+  const reportCard = reportHeading.locator('xpath=ancestor::*[contains(@class,"card")][1]');
+  await reportCard.getByText('¡Espionaje Exitoso!', { exact: true }).waitFor({ state: 'visible', timeout: 5000 });
   for (const label of ['Recursos', 'Tropas', 'Edificios']) {
-    await page.getByText(label, { exact: true }).waitFor({ state: 'visible', timeout: 5000 });
+    await reportCard.getByRole('heading', { name: label, exact: true }).waitFor({ state: 'visible', timeout: 5000 });
   }
 
   const auditPanel = page.getByTestId('spy-audit');
@@ -158,7 +159,6 @@ try {
   const intelText = ((await page.getByTestId('spy-intel-level').textContent()) || '').trim();
   if (!intelText.includes('nivel 3')) failures.push(`UI intelligence level mismatch: ${intelText}`);
 
-  const reportCard = reportHeading.locator('xpath=ancestor::*[contains(@class,"card")][1]');
   const reportText = (await reportCard.textContent()) || '';
   for (const expected of [
     'Arquero Real',
