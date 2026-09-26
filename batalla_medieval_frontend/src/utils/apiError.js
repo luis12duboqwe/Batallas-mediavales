@@ -18,7 +18,7 @@ const KNOWN_ERROR_TRANSLATIONS = new Map([
 ]);
 
 const SPANISH_SIGNAL = /[áéíóúüñ¿¡]|\b(?:no|se|puede|pudo|debes|debe|tienes|usuario|contraseña|cuenta|correo|ciudad|mundo|alianza|recursos|permiso|sesión|acción|solicitad[oa]|encontró|válid[oa]|expirado)\b/i;
-const ENGLISH_SIGNAL = /\b(?:a|an|the|is|are|was|were|not|invalid|incorrect|could|cannot|can't|must|user|username|password|email|account|world|city|alliance|resource|resources|forbidden|found|expired|token|credentials|already|registered|enough|permission|required|failed|error)\b/i;
+const STRONG_ENGLISH_SIGNAL = /\b(?:the|is|are|was|were|not|invalid|incorrect|could|cannot|can't|must|user|username|password|account|world|city|alliance|resource|resources|forbidden|credentials|already|registered|enough|permission|required|failed)\b/i;
 
 const extractDetailText = (detail) => {
   if (typeof detail === 'string') return detail.trim();
@@ -35,8 +35,11 @@ export const localizeApiErrorDetail = (detail) => {
   const translated = KNOWN_ERROR_TRANSLATIONS.get(text.toLowerCase());
   if (translated) return translated;
 
+  // Strong English vocabulary wins over ambiguous words shared by both
+  // languages (for example, "No active world" must never be treated as
+  // Spanish simply because it begins with "No").
+  if (STRONG_ENGLISH_SIGNAL.test(text)) return 'No se pudo completar la operación.';
   if (SPANISH_SIGNAL.test(text)) return text;
-  if (ENGLISH_SIGNAL.test(text)) return 'No se pudo completar la operación.';
 
   // Neutral identifiers/codes are not useful as player-facing copy. Keep the
   // v1.0 UI deterministic and Spanish instead of leaking an unknown contract.
