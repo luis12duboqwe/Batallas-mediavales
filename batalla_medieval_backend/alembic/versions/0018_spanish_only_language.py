@@ -13,9 +13,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # BM-0083 removes incomplete English from production. Existing preferences
-    # are normalized so authenticated responses and middleware remain stable.
-    op.execute("UPDATE users SET language = 'es' WHERE language IS NULL OR lower(language) <> 'es'")
+    # BM-0083 removes incomplete English from production. Normalize every
+    # non-canonical persisted value, including legacy case variants such as
+    # `ES`/`Es`, so auth responses expose the single supported code.
+    op.execute("UPDATE users SET language = 'es' WHERE language IS NULL OR language <> 'es'")
 
 
 def downgrade() -> None:
