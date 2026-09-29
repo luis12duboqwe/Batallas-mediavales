@@ -14,6 +14,7 @@ COMMON_PASSWORDS = {
     "qwerty12345",
     "letmein123",
 }
+PRODUCTION_LANGUAGE = "es"
 
 
 def _validate_password(value: str) -> str:
@@ -30,11 +31,24 @@ def _validate_password(value: str) -> str:
     return value
 
 
+def _normalize_language(value: object) -> str:
+    """Preserve old clients while retiring non-Spanish locales from v1.0."""
+
+    if value is not None and not isinstance(value, str):
+        raise ValueError("Language must be a string")
+    return PRODUCTION_LANGUAGE
+
+
 class UserBase(BaseModel):
     username: str
     email: EmailStr
     email_notifications: bool = False
-    language: str = "en"
+    language: str = PRODUCTION_LANGUAGE
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def normalize_language(cls, value: object) -> str:
+        return _normalize_language(value)
 
 
 class UserCreate(UserBase):
@@ -56,6 +70,11 @@ class UserUpdate(BaseModel):
     @classmethod
     def validate_password(cls, value: Optional[str]) -> Optional[str]:
         return _validate_password(value) if value is not None else value
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def normalize_language(cls, value: object) -> Optional[str]:
+        return None if value is None else _normalize_language(value)
 
 
 class UserRead(UserBase):
