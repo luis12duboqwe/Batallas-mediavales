@@ -1,6 +1,10 @@
-import httpx
+import runpy
+from pathlib import Path
 
-from app import schemas
+import httpx
+from sqlalchemy import text
+
+from app import models, schemas
 from app.services.i18n import DEFAULT_LANGUAGE, available_languages, get_translator, normalize_language
 
 
@@ -22,6 +26,27 @@ def test_legacy_client_language_values_are_normalized():
 
     assert created.language == "es"
     assert updated.language == "es"
+
+
+def test_spanish_only_migration_canonicalizes_case_variants(db_session):
+    user = models.User(
+        username="legacy-uppercase-language",
+        email="legacy-uppercase-language@example.com",
+        hashed_password="unused",
+        language="ES",
+        is_verified=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    migration_path = Path("batalla_medieval_backend/alembic/versions/0018_spanish_only_language.py")
+    migration_globals = runpy.run_path(str(migration_path))
+    normalization_sql = migration_globals["LANGUAGE_NORMALIZATION_SQL"]
+    db_session.execute(text(normalization_sql))
+    db_session.commit()
+    db_session.refresh(user)
+
+    assert user.language == "es"
 
 
 def test_unsupported_translator_uses_spanish_catalog():
