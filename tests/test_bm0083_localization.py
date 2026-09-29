@@ -28,7 +28,10 @@ def test_unsupported_translator_uses_spanish_catalog():
     spanish = get_translator("es")
     legacy_english = get_translator("en")
 
-    assert legacy_english("wood", "resources") == spanish("wood", "resources")
+    assert legacy_english("building_upgraded", "messages") == spanish(
+        "building_upgraded", "messages"
+    )
+    assert legacy_english("building_upgraded", "messages") == "Edificio mejorado"
 
 
 def test_accept_language_english_falls_back_to_spanish(client: httpx.Client):
