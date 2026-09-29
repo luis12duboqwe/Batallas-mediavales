@@ -23,7 +23,7 @@ class User(Base):
     rubies_balance: Mapped[int] = mapped_column(default=0)
     is_frozen: Mapped[bool] = mapped_column(default=False)
     email_notifications: Mapped[bool] = mapped_column(default=False)
-    language: Mapped[str] = mapped_column(String, default="en")
+    language: Mapped[str] = mapped_column(String, default="es")
     freeze_reason: Mapped[Optional[str]]
     last_login_ip: Mapped[Optional[str]]
     last_login_at: Mapped[Optional[datetime]]
