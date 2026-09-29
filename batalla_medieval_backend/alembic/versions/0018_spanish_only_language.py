@@ -11,12 +11,16 @@ down_revision = "0017_anticheat_review_metadata"
 branch_labels = None
 depends_on = None
 
+LANGUAGE_NORMALIZATION_SQL = (
+    "UPDATE users SET language = 'es' WHERE language IS NULL OR language <> 'es'"
+)
+
 
 def upgrade() -> None:
     # BM-0083 removes incomplete English from production. Normalize every
     # non-canonical persisted value, including legacy case variants such as
     # `ES`/`Es`, so auth responses expose the single supported code.
-    op.execute("UPDATE users SET language = 'es' WHERE language IS NULL OR language <> 'es'")
+    op.execute(LANGUAGE_NORMALIZATION_SQL)
 
 
 def downgrade() -> None:
