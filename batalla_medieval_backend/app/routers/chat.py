@@ -194,6 +194,27 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
                 "timestamp": chat_message.timestamp.isoformat(),
             }
 
+            authorized_user_ids = None
+            if channel == "alliance":
+                # A receiver may have left or been kicked since opening a
+                # socket. Re-read durable membership after the message commit
+                # instead of trusting the connection-time alliance_id.
+                authorized_user_ids = {
+                    user_id
+                    for (user_id,) in (
+                        db.query(models.AllianceMember.user_id)
+                        .join(
+                            models.Alliance,
+                            models.Alliance.id == models.AllianceMember.alliance_id,
+                        )
+                        .filter(
+                            models.AllianceMember.alliance_id == alliance_id,
+                            models.Alliance.world_id == world_id,
+                        )
+                        .all()
+                    )
+                }
+
             await chat_manager.broadcast(
                 channel=channel,
                 message=payload,
@@ -201,6 +222,7 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
                 world_id=world_id,
                 alliance_id=chat_message.alliance_id,
                 receiver_id=receiver_id,
+                authorized_user_ids=authorized_user_ids,
             )
     except WebSocketDisconnect:
         chat_manager.disconnect(websocket)
