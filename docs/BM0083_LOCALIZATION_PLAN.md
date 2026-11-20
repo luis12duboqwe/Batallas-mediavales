@@ -15,7 +15,7 @@ Para v1.0 se adopta **español como único idioma de producción**. El archivo i
 - Perfil muestra español como estado informativo y no ofrece selector de idioma;
 - G4 prueba que una preferencia legacy de navegador en inglés no cambia la UI y que el estado español sobrevive a recarga;
 - `check-localization-policy.mjs` evita reintroducir inglés accidentalmente en el runtime;
-- los errores HTTP históricos del backend se traducen en el cliente sin cambiar los contratos JSON, con fallback español;
+- los errores HTTP históricos del backend se traducen en el cliente sin cambiar los contratos JSON, con motivos de autenticación específicos en español y fallback seguro;
 - la mensajería no presenta alertas ni confirmaciones en inglés;
 - G23 verifica la UI, preferencia legacy, error de autenticación y navegación en español.
 

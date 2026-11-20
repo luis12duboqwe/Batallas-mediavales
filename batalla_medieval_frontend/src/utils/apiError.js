@@ -5,6 +5,11 @@ const KNOWN_ERROR_TRANSLATIONS = new Map([
   ['inactive user', 'La cuenta está inactiva.'],
   ['user not found', 'No se encontró el usuario.'],
   ['email already registered', 'El correo electrónico ya está registrado.'],
+  ['user already exists', 'Ya existe una cuenta con esos datos.'],
+  ['email not verified', 'Debes verificar tu correo electrónico antes de iniciar sesión.'],
+  ['account frozen', 'Cuenta suspendida. Contacta con soporte.'],
+  ['verification email could not be delivered', 'No se pudo enviar el correo de verificación. Inténtalo de nuevo más tarde.'],
+  ['invalid or expired verification token', 'El enlace de verificación no es válido o ha expirado.'],
   ['username already registered', 'El nombre de usuario ya está registrado.'],
   ['invalid or expired token', 'El enlace no es válido o ha expirado.'],
   ['invalid token', 'El enlace no es válido o ha expirado.'],
@@ -34,6 +39,17 @@ export const localizeApiErrorDetail = (detail) => {
 
   const translated = KNOWN_ERROR_TRANSLATIONS.get(text.toLowerCase());
   if (translated) return translated;
+
+  // Account suspension reasons can be entered by administrators. Preserve an
+  // already-Spanish reason; otherwise show an actionable, Spanish-only message.
+  const frozen = /^account frozen:\s*(.+)$/i.exec(text);
+  if (frozen) {
+    const reason = frozen[1].trim();
+    if (SPANISH_SIGNAL.test(reason) && !STRONG_ENGLISH_SIGNAL.test(reason)) {
+      return `Cuenta suspendida. Motivo: ${reason}`;
+    }
+    return 'Cuenta suspendida. Contacta con soporte para conocer el motivo.';
+  }
 
   // Strong English vocabulary wins over ambiguous words shared by both
   // languages (for example, "No active world" must never be treated as

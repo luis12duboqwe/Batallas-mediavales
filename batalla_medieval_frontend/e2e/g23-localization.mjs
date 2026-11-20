@@ -52,6 +52,9 @@ try {
     localStorage.setItem('i18nextLng', 'en');
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
+  // The login screen is a lazy-loaded route: DOMContentLoaded does not imply
+  // the login chunk has rendered yet.
+  await page.getByRole('button', { name: 'Entrar', exact: true }).waitFor({ state: 'visible', timeout: 15000 });
 
   await expectSpanishDocument('login-hard-reload');
   if (!(await page.getByRole('button', { name: 'Entrar' }).count())) {
