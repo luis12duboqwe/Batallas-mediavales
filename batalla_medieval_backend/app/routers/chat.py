@@ -46,6 +46,23 @@ def _get_alliance_id(db: Session, user_id: int, world_id: int) -> Optional[int]:
     return membership.alliance_id if membership else None
 
 
+def _current_alliance_recipient_ids(db: Session, alliance_id: int, world_id: int) -> set[int]:
+    """Query durable membership on each send; socket subscriptions can be stale."""
+
+    return {
+        user_id
+        for (user_id,) in (
+            db.query(models.AllianceMember.user_id)
+            .join(models.Alliance, models.Alliance.id == models.AllianceMember.alliance_id)
+            .filter(
+                models.AllianceMember.alliance_id == alliance_id,
+                models.Alliance.world_id == world_id,
+            )
+            .all()
+        )
+    }
+
+
 def _user_in_world(db: Session, user_id: int, world_id: int) -> bool:
     return (
         db.query(models.PlayerWorld.id)
@@ -194,26 +211,12 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
                 "timestamp": chat_message.timestamp.isoformat(),
             }
 
-            authorized_user_ids = None
-            if channel == "alliance":
-                # A receiver may have left or been kicked since opening a
-                # socket. Re-read durable membership after the message commit
-                # instead of trusting the connection-time alliance_id.
-                authorized_user_ids = {
-                    user_id
-                    for (user_id,) in (
-                        db.query(models.AllianceMember.user_id)
-                        .join(
-                            models.Alliance,
-                            models.Alliance.id == models.AllianceMember.alliance_id,
-                        )
-                        .filter(
-                            models.AllianceMember.alliance_id == alliance_id,
-                            models.Alliance.world_id == world_id,
-                        )
-                        .all()
-                    )
-                }
+            # A receiver may have left or been kicked since socket opening.
+            authorized_user_ids = (
+                _current_alliance_recipient_ids(db, alliance_id, world_id)
+                if channel == "alliance" and alliance_id is not None
+                else None
+            )
 
             await chat_manager.broadcast(
                 channel=channel,
