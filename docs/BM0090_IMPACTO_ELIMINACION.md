@@ -40,8 +40,9 @@ incluye una lista explícita de cascadas ORM del grafo
 cascadas nuevas no revisadas. La prueba solo inventaría el peligro conocido;
 NO afirma que las cascadas existentes sean seguras.
 
-Las referencias indirectas críticas a `cities.id` y `heroes.id`
-(movimientos, informes, aventuras y objetos) también están identificadas
+Todas las referencias directas a `cities.id` y `heroes.id` —incluidos
+informes de combate y espionaje (`spy_reports`), movimientos, colas,
+mercado, oasis, aventuras, objetos y ciudades iniciales— están inventariadas
 y se comprueban frente a cascadas SQL no autorizadas. Para FKs directas a
 `users.id`, las comprobaciones de `ondelete` son insensibles a mayúsculas,
 tanto en referencias compartidas obligatorias como anulables.
