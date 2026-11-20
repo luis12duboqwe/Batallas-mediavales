@@ -109,6 +109,12 @@ async function runJourney(browser, label, viewport, touch) {
     }));
     assert.ok(sizing.documentWidth <= sizing.viewportWidth + 1, label + ': no document-level horizontal overflow');
     assert.equal(await page.locator('[aria-label="Cuadrícula del mapa"] button[tabindex="0"]').count(), 1, 'One tab stop inside the tile group');
+    const arrows = page.locator('[data-testid="map-grid-content"] > button[aria-label^="Mover mapa"]');
+    assert.equal(await arrows.count(), 4, 'Four accessible directional controls');
+    for (const arrow of await arrows.all()) {
+      const bounds = await arrow.boundingBox();
+      assert.ok(bounds && bounds.width >= 40 && bounds.height >= 40, 'Pan controls have touch-sized targets');
+    }
 
     if (touch) {
       const scroll = await panel.evaluate((element) => ({ width: element.scrollWidth, viewport: element.clientWidth }));
@@ -121,6 +127,7 @@ async function runJourney(browser, label, viewport, touch) {
       await panel.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
       const [end, lastBox] = await Promise.all([panel.boundingBox(), last.boundingBox()]);
       assert.ok(lastBox.x + lastBox.width <= end.x + end.width + 1, 'Eastern columns are reachable');
+      await panel.evaluate((element) => { element.scrollLeft = (element.scrollWidth - element.clientWidth) / 2; });
     }
 
     if (process.env.MAP_E2E_SCREENSHOT_DIR) {
