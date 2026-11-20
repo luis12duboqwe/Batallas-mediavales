@@ -68,7 +68,6 @@ const ProfileView = () => {
     }
     return () => { privacyEpoch.current += 1; };
     // A session change invalidates any outstanding privacy list response.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   const handlePrivacySubmit = async (event) => {
