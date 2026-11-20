@@ -69,6 +69,8 @@ printf 'fixture database dump' > "$backup"
 printf 'fixture checksum' > "$backup.sha256"
 if [[ "$BM_RECEIPT_MODE" == "empty" ]]; then exit 0; fi
 if [[ "$BM_RECEIPT_MODE" == "foreign" ]]; then
+  printf 'unrelated existing archive' > "$BM_TEST_BACKUP_DIR/other.dump"
+  printf 'unrelated checksum' > "$BM_TEST_BACKUP_DIR/other.dump.sha256"
   printf '%s\n' "$BM_TEST_BACKUP_DIR/other.dump" > "$BACKUP_RECEIPT_FILE"
 else
   printf '%s\n' "$backup" > "$BACKUP_RECEIPT_FILE"
