@@ -99,6 +99,7 @@ jobs:
           tests/test_world_lifecycle_concurrency.py
           tests/test_bm0073_admin_concurrency.py
           tests/test_bm0074_anticheat_concurrency.py
+          tests/test_bm0090_privacy_concurrency.py
 
   frontend:
     name: Frontend
