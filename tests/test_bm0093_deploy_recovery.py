@@ -286,7 +286,20 @@ def test_unrecognized_schema_probe_value_is_refused(deploy_lab):
     assert not any("pull migrate seed" in line for line in _trace(deploy_lab))
 
 
+def test_existing_release_with_missing_schema_is_refused(deploy_lab):
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0",
+        "BM_SCHEMA_PROBE_VALUE": "f",
+    })
+    assert result.returncode != 0
+    assert "Existing release has no users schema" in result.stderr
+    assert "backup" not in _trace(deploy_lab)
+    assert not any("pull migrate seed" in line for line in _trace(deploy_lab))
+
+
 def test_confirmed_empty_database_can_take_first_install_path(deploy_lab):
+    (deploy_lab["root"] / ".release.env").unlink()
+    (deploy_lab["root"] / ".release-sha").unlink()
     result = _run(deploy_lab, {
         "BM_DATABASE_START_EXIT": "0",
         "BM_SCHEMA_PROBE_VALUE": "f",
@@ -295,7 +308,8 @@ def test_confirmed_empty_database_can_take_first_install_path(deploy_lab):
     assert result.returncode == 52
     assert "No existing application schema" in result.stdout
     assert "backup" not in _trace(deploy_lab)
-    assert not _marker(deploy_lab).exists()
+    # A failed first deploy has no previous release to roll back to.
+    assert _marker(deploy_lab).exists()
 
 
 def test_deploy_restores_exact_new_backup_not_newest_directory_file(deploy_lab):
@@ -311,7 +325,7 @@ def test_deploy_restores_exact_new_backup_not_newest_directory_file(deploy_lab):
     restored = [line for line in _trace(deploy_lab) if line.startswith("restore:")]
     assert len(restored) == 1
     assert restored[0].endswith(
-        ":batalla_ci-20261120T123456Z-A1b2C3d4.dump"
+        "/batalla_ci-20261120T123456Z-A1b2C3d4.dump"
     )
     assert decoy.exists()
     assert not list((deploy_lab["root"] / ".ops-state").glob("backup-receipt.*"))
