@@ -3,6 +3,7 @@
 Only temporary fixture scripts are run. No real Docker, network, or database.
 """
 
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -45,7 +46,7 @@ BACKUP_RETENTION_DAYS=14
 def deploy_lab(tmp_path):
     ops = tmp_path / "ops"
     ops.mkdir()
-    for file in ("deploy_remote.sh", "preflight.py"):
+    for file in ("deploy_remote.sh", "preflight.py", "operation_lock.sh"):
         shutil.copy2(PROJECT / "ops" / file, ops / file)
     (ops / "restore_postgres.sh").write_text(
         "#!/usr/bin/env bash\n"
@@ -228,3 +229,15 @@ def test_recovery_internal_failure_preserves_incident_marker_and_original_error(
     again = _run(deploy_lab)
     assert again.returncode == 2
     assert "unresolved recovery incident" in again.stderr
+
+
+def test_deploy_rejects_concurrent_rollback_lock_before_docker(deploy_lab):
+    lock_file = deploy_lab["root"] / ".ops-state" / "operation.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    with lock_file.open("a+", encoding="utf-8") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = _run(deploy_lab)
+        assert result.returncode == 2
+        assert "already running" in result.stderr
+        assert _trace(deploy_lab) == []
+        assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
