@@ -55,7 +55,7 @@ def deploy_lab(tmp_path):
     (ops / "smoke_http.py").write_text(
         "import os, sys\n"
         "with open(os.environ['BM_TRACE'], 'a', encoding='utf-8') as f:\n"
-        "    f.write('smoke\\n')\n"
+        "    f.write('smoke:' + sys.argv[sys.argv.index('--base-url') + 1] + '\\n')\n"
         "sys.exit(int(os.environ.get('BM_SMOKE_EXIT', '0')))\n",
         encoding="utf-8"
     )
@@ -113,7 +113,7 @@ def test_failed_deploy_with_verified_rollback_restores_previous_metadata(deploy_
     assert not _marker(deploy_lab).exists()
     assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
     assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
-    assert _trace(deploy_lab)[-1] == "smoke"
+    assert _trace(deploy_lab)[-1] == "smoke:https://staging.example.invalid"
     assert not list(deploy_lab["root"].glob(".release.env.recovery.*"))
 
 
@@ -153,5 +153,32 @@ def test_existing_recovery_incident_refuses_deployment_early(deploy_lab):
     result = _run(deploy_lab)
     assert result.returncode == 2
     assert "unresolved recovery incident" in result.stderr
+    assert _trace(deploy_lab) == []
+    assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+
+
+def test_recovery_smoke_targets_previous_origin_not_new_origin(deploy_lab):
+    # Changing the public URL must not make rollback verify the new release.
+    old_base = "https://staging.example.invalid"
+    new_base = "https://new.example.invalid"
+    base = deploy_lab["base"]
+    base.write_text(base.read_text(encoding="utf-8").replace(old_base, new_base), encoding="utf-8")
+    result = _run(deploy_lab)
+    assert result.returncode == 41, result.stderr
+    assert _trace(deploy_lab)[-1] == "smoke:" + old_base
+    assert not _marker(deploy_lab).exists()
+
+
+def test_database_identity_change_requires_separate_migration(deploy_lab):
+    base = deploy_lab["base"]
+    base.write_text(
+        base.read_text(encoding="utf-8").replace(
+            "POSTGRES_DB=batalla_ci", "POSTGRES_DB=unrehearsed_db"
+        ),
+        encoding="utf-8",
+    )
+    result = _run(deploy_lab)
+    assert result.returncode == 2
+    assert "PostgreSQL connection changed" in result.stderr
     assert _trace(deploy_lab) == []
     assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
