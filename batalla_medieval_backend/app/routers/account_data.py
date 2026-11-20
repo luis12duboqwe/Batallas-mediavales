@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -134,6 +135,25 @@ def create_privacy_request(
         priority="normal",
     )
     db.add(case)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # The partial unique index is the final guard on SQLite/concurrent
+        # transactions. Once rolled back, return the winning active request
+        # if it exists. Other integrity violations are never suppressed.
+        db.rollback()
+        existing = (
+            db.query(models.SupportCase)
+            .filter(
+                models.SupportCase.requester_id == current_user.id,
+                models.SupportCase.subject == subject,
+                models.SupportCase.status.in_(ACTIVE_STATUSES),
+            )
+            .order_by(models.SupportCase.id.desc())
+            .first()
+        )
+        if existing is None:
+            raise
+        return _to_privacy_request(existing)
     db.refresh(case)
     return _to_privacy_request(case)
