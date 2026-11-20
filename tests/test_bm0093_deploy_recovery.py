@@ -261,3 +261,72 @@ def test_recovery_internal_failure_preserves_incident_marker_and_original_error(
     again = _run(deploy_lab)
     assert again.returncode == 2
     assert "unresolved recovery incident" in again.stderr
+
+
+def test_failed_schema_probe_never_assumes_first_install(deploy_lab):
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0", "BM_SCHEMA_PROBE_EXIT": "47"
+    })
+    assert result.returncode != 0
+    assert "Database schema probe failed" in result.stderr
+    assert "first deployment" not in result.stdout
+    trace = _trace(deploy_lab)
+    assert "backup" not in trace
+    assert not any("pull migrate seed" in line for line in trace)
+    assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+
+
+def test_unrecognized_schema_probe_value_is_refused(deploy_lab):
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0", "BM_SCHEMA_PROBE_VALUE": "unknown"
+    })
+    assert result.returncode != 0
+    assert "Unexpected schema probe result" in result.stderr
+    assert "backup" not in _trace(deploy_lab)
+    assert not any("pull migrate seed" in line for line in _trace(deploy_lab))
+
+
+def test_confirmed_empty_database_can_take_first_install_path(deploy_lab):
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0",
+        "BM_SCHEMA_PROBE_VALUE": "f",
+        "BM_RELEASE_PULL_EXIT": "52",
+    })
+    assert result.returncode == 52
+    assert "No existing application schema" in result.stdout
+    assert "backup" not in _trace(deploy_lab)
+    assert not _marker(deploy_lab).exists()
+
+
+def test_deploy_restores_exact_new_backup_not_newest_directory_file(deploy_lab):
+    backup_dir = deploy_lab["root"] / "backups"
+    decoy = backup_dir / "batalla_ci-20991231T235959Z-Z9Z9Z9Z9.dump"
+    decoy.write_bytes(b"unrelated backup with a newer filename")
+    (backup_dir / (decoy.name + ".sha256")).write_text("decoy", encoding="utf-8")
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0",
+        "BM_RELEASE_PULL_EXIT": "53",
+    })
+    assert result.returncode == 53, result.stderr
+    restored = [line for line in _trace(deploy_lab) if line.startswith("restore:")]
+    assert len(restored) == 1
+    assert restored[0].endswith(
+        ":batalla_ci-20261120T123456Z-A1b2C3d4.dump"
+    )
+    assert decoy.exists()
+    assert not list((deploy_lab["root"] / ".ops-state").glob("backup-receipt.*"))
+    assert not _marker(deploy_lab).exists()
+
+
+@pytest.mark.parametrize("receipt_mode", ["empty", "foreign"])
+def test_invalid_backup_receipt_blocks_release_pull(deploy_lab, receipt_mode):
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0",
+        "BM_RECEIPT_MODE": receipt_mode,
+    })
+    assert result.returncode != 0
+    trace = _trace(deploy_lab)
+    assert "backup" in trace
+    assert not any("pull migrate seed" in line for line in trace)
+    assert not any(line.startswith("restore:") for line in trace)
+    assert not list((deploy_lab["root"] / ".ops-state").glob("backup-receipt.*"))
