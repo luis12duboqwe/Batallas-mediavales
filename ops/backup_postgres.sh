@@ -61,10 +61,21 @@ backup_published=1
 ln -- "$checksum_tmp" "$checksum"
 checksum_published=1
 sha256sum --check "$checksum"
-verified=1
 
 find "$BACKUP_DIR" -type f \
   \( -name "${POSTGRES_DB}-*.dump" -o -name "${POSTGRES_DB}-*.dump.sha256" \) \
   -mtime "+$BACKUP_RETENTION_DAYS" -delete
 
+# Deployment callers need the exact archive produced by THIS invocation.
+# Never infer a rollback snapshot from the latest file in BACKUP_DIR:
+# another backup run may finish concurrently.
+if [[ -n "${BACKUP_RECEIPT_FILE:-}" ]]; then
+  if [[ ! -f "$BACKUP_RECEIPT_FILE" || -L "$BACKUP_RECEIPT_FILE" ]]; then
+    echo "Backup receipt must be an existing regular file" >&2
+    exit 2
+  fi
+  printf '%s\n' "$backup" > "$BACKUP_RECEIPT_FILE"
+  chmod 600 "$BACKUP_RECEIPT_FILE"
+fi
+verified=1
 echo "Backup verified: $backup"
