@@ -20,7 +20,15 @@ WEAK_SECRETS = {
     "supersecretkey",
     "development-only-secret-key-do-not-use",
 }
-IMMUTABLE_IMAGE_RE = re.compile(r"^.+:[A-Za-z0-9][A-Za-z0-9_.-]{6,}$")
+# Protected deployments only accept tags tied to a full Git SHA, or a
+# content-addressed SHA-256 digest. Arbitrary tags can be overwritten.
+IMAGE_REPO_RE = re.compile(
+    r"^[a-z0-9][a-z0-9._-]*(?::[0-9]{1,5})?(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)+$"
+)
+IMAGE_SHA_TAG_RE = re.compile(r"^[0-9a-f]{40}$")
+IMAGE_SHA_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+# This value is interpolated into a psql statement during restore.
+POSTGRES_DB_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$")
 
 
@@ -51,11 +59,19 @@ def require(values: dict[str, str], key: str, errors: list[str]) -> str:
 
 
 def validate_https_url(name: str, value: str, errors: list[str]) -> None:
-    parsed = urlparse(value)
-    if parsed.scheme != "https" or not parsed.netloc:
+    try:
+        parsed = urlparse(value)
+        port = parsed.port  # Access raises ValueError for malformed/out-of-range ports.
+        hostname = parsed.hostname
+    except ValueError:
+        errors.append(f"{name} must be an absolute https:// URL with a valid port")
+        return
+    if parsed.scheme != "https" or not parsed.netloc or not hostname or port == 0:
         errors.append(f"{name} must be an absolute https:// URL")
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         errors.append(f"{name} must not contain credentials, query parameters or fragments")
+    if parsed.path not in ("", "/") or parsed.params:
+        errors.append(f"{name} must be an origin URL without a path")
 
 
 def validate_email(name: str, value: str, errors: list[str]) -> None:
@@ -66,14 +82,19 @@ def validate_email(name: str, value: str, errors: list[str]) -> None:
 def validate_image(name: str, value: str, errors: list[str]) -> None:
     if not value:
         return
-    lowered = value.lower()
-    if lowered.endswith(":latest") or ":latest@" in lowered:
+    if value.lower().endswith(":latest") or ":latest@" in value.lower():
         errors.append(f"{name} must use an immutable release tag, never :latest")
         return
-    if "@sha256:" in value:
-        return
-    if not IMMUTABLE_IMAGE_RE.match(value):
-        errors.append(f"{name} must include an explicit immutable tag or digest")
+
+    if "@" in value:
+        repository, separator, digest = value.partition("@")
+        valid = separator and IMAGE_SHA_DIGEST_RE.fullmatch(digest)
+    else:
+        repository, separator, tag = value.rpartition(":")
+        valid = separator and IMAGE_SHA_TAG_RE.fullmatch(tag)
+
+    if not valid or not IMAGE_REPO_RE.fullmatch(repository):
+        errors.append(f"{name} must use a full 40-character Git SHA tag or a 64-hex SHA-256 digest")
 
 
 def validate_positive_number(
@@ -112,8 +133,12 @@ def validate(values: dict[str, str]) -> list[str]:
         errors.append("APP_ENV must be staging or production for deployment")
 
     secret = require(values, "SECRET_KEY", errors)
-    if secret and (len(secret) < 32 or secret in WEAK_SECRETS):
-        errors.append("SECRET_KEY must be unique and at least 32 characters")
+    if secret and (
+        len(secret) < 32
+        or secret.lower() in WEAK_SECRETS
+        or secret.lower().startswith(("replace-", "change-me", "example-"))
+    ):
+        errors.append("SECRET_KEY must not be a placeholder and must have at least 32 characters")
 
     db_url = require(values, "DB_URL", errors)
     if db_url and not db_url.startswith(("postgresql://", "postgresql+psycopg://")):
@@ -121,7 +146,9 @@ def validate(values: dict[str, str]) -> list[str]:
 
     require(values, "POSTGRES_USER", errors)
     require(values, "POSTGRES_PASSWORD", errors)
-    require(values, "POSTGRES_DB", errors)
+    db_name = require(values, "POSTGRES_DB", errors)
+    if db_name and not POSTGRES_DB_RE.fullmatch(db_name):
+        errors.append("POSTGRES_DB must be a simple PostgreSQL identifier (letters, digits, underscore)")
 
     frontend_url = require(values, "FRONTEND_URL", errors)
     if frontend_url:
