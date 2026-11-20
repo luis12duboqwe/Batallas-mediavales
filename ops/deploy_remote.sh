@@ -197,18 +197,19 @@ case "$has_schema" in
       echo "Backup completed without an exact archive receipt" >&2
       false
     fi
-    IFS= read -r rollback_backup < "$backup_receipt"
+    IFS= read -r candidate_backup < "$backup_receipt"
     rm -f -- "$backup_receipt"
     backup_receipt=""
 
-    backup_basename="${rollback_backup##*/}"
-    if [[ "${rollback_backup%/*}" != "${BACKUP_DIR%/}" ||
+    backup_basename="${candidate_backup##*/}"
+    if [[ "${candidate_backup%/*}" != "${BACKUP_DIR%/}" ||
           ! "$backup_basename" =~ ^${POSTGRES_DB}-[0-9]{8}T[0-9]{6}Z-[[:alnum:]]{8}\.dump$ ||
-          ! -s "$rollback_backup" || ! -s "${rollback_backup}.sha256" ||
-          -L "$rollback_backup" ]]; then
+          ! -s "$candidate_backup" || ! -s "${candidate_backup}.sha256" ||
+          -L "$candidate_backup" ]]; then
       echo "Backup receipt did not identify a valid new archive in BACKUP_DIR" >&2
       false
     fi
+    rollback_backup="$candidate_backup"
     ;;
   f)
     if [[ "$had_previous" -eq 1 ]]; then
