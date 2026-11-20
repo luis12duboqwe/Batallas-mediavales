@@ -249,6 +249,52 @@ def _stable_troop_payload(troops: Mapping[str, int]) -> Dict[str, int]:
     }
 
 
+def _validate_army_payload(troops: Mapping[str, int], *, role: str) -> None:
+    """Reject untrusted or corrupt armies rather than silently normalizing them."""
+
+    if not isinstance(troops, Mapping):
+        raise ValueError(f"{role} troop payload must be a mapping")
+    for unit, amount in troops.items():
+        if unit not in UNIT_STATS:
+            raise ValueError(f"Unknown {role} troop unit: {unit}")
+        if type(amount) is not int or amount < 0:
+            raise ValueError(f"{role} troop amount must be a nonnegative integer")
+
+
+def _validate_attacker_hero(
+    attacker_city: models.City, attacker_hero: models.Hero | None
+) -> None:
+    if attacker_hero is None:
+        return
+    if (
+        attacker_hero.world_id != attacker_city.world_id
+        or attacker_hero.user_id != attacker_city.owner_id
+        or (
+            attacker_hero.city_id is not None
+            and attacker_hero.city_id != attacker_city.id
+        )
+    ):
+        raise ValueError("Attacking hero does not belong to the origin city/world")
+
+
+def _validate_city_battle(
+    attacker_city: models.City,
+    defender_city: models.City,
+    attacking_troops: Mapping[str, int],
+    defender_troops: Mapping[str, int],
+    attacker_hero: models.Hero | None,
+) -> None:
+    if attacker_city.world_id != defender_city.world_id:
+        raise ValueError("Combat target is in a different world")
+    if attacker_city.id == defender_city.id:
+        raise ValueError("A city cannot attack itself")
+    if attacker_city.owner_id is None:
+        raise ValueError("Attacker city must belong to a player")
+    _validate_army_payload(attacking_troops, role="attacking")
+    _validate_army_payload(defender_troops, role="defending")
+    _validate_attacker_hero(attacker_city, attacker_hero)
+
+
 def _derive_seed(
     *,
     battle_kind: str,
@@ -443,7 +489,15 @@ def resolve_battle(
     defender_troops = {
         troop.unit_type: troop.quantity for troop in defender_city.troops
     }
+    _validate_city_battle(
+        attacker_city, defender_city, attacking_troops, defender_troops, attacker_hero
+    )
     defender_hero = defender_city.owner.hero if defender_city.owner else None
+    if defender_hero and (
+        defender_hero.world_id != defender_city.world_id
+        or defender_hero.user_id != defender_city.owner_id
+    ):
+        defender_hero = None
     if defender_hero and defender_hero.city_id != defender_city.id:
         defender_hero = None
 
@@ -688,7 +742,14 @@ def resolve_oasis_battle(
     """Resolve deterministic round combat against an oasis."""
 
     _ = modifiers or event_service.DEFAULT_MODIFIERS
+    if attacker_city.world_id != oasis.world_id:
+        raise ValueError("Oasis target is in a different world")
+    if attacker_city.owner_id is None:
+        raise ValueError("Attacker city must belong to a player")
     defender_troops = oasis.troops or {}
+    _validate_army_payload(attacking_troops, role="attacking")
+    _validate_army_payload(defender_troops, role="defending")
+    _validate_attacker_hero(attacker_city, attacker_hero)
     attacker_progress = (
         int(attacker_city.owner.attacker_points)
         if attacker_city.owner

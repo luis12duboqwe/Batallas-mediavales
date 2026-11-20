@@ -97,14 +97,33 @@ try {
     const fresh = (await playerSnapshot(token, worldId)).cities[0];
     assert.ok(fresh.troops.some((item) => item.unit_type === 'basic_infantry' && item.quantity >= 2));
   });
-  await run.check('find a neutral enemy through world-scoped map and dispatch real first attack', async () => {
-    const tiles = await call(`/map/tiles?world_id=${worldId}&x=20&y=15&radius=0`, { token });
-    targetId = tiles.tiles.find((item) => item.city_id && item.owner_id === null)?.city_id;
+  await run.check('find a neutral enemy and dispatch the first attack from the real map and troop form', async () => {
+    const tiles = await call('/map/tiles?world_id=' + worldId + '&x=20&y=15&radius=0', { token });
+    const target = tiles.tiles.find((item) => item.city_id && item.owner_id === null);
+    targetId = target?.city_id;
     assert.ok(targetId && targetId !== city.id);
-    mission = await call('/movement/', { method: 'POST', token,
-      body: { origin_city_id: city.id, target_city_id: targetId, world_id: worldId,
-        movement_type: 'attack', troops: { basic_infantry: 2 } } });
-    assert.ok(mission.id && mission.status === 'ongoing');
+    await page.goto(UI + '/map', { waitUntil: 'domcontentloaded' });
+    await page.getByTestId('map-tile-' + city.x + '-' + city.y)
+      .waitFor({ state: 'visible', timeout: 16000 });
+    await page.getByRole('spinbutton', { name: 'Coordenada X' }).fill(String(target.x));
+    await page.getByRole('spinbutton', { name: 'Coordenada Y' }).fill(String(target.y));
+    await page.getByRole('button', { name: 'Ir', exact: true }).click();
+    const targetTile = page.getByTestId('map-tile-' + target.x + '-' + target.y);
+    await targetTile.waitFor({ state: 'visible', timeout: 16000 });
+    await targetTile.click();
+    const detail = page.getByTestId('map-details-panel');
+    await detail.getByRole('button', { name: 'Atacar', exact: true }).click();
+    await page.waitForURL((url) => url.pathname === '/send-movement/' + targetId, { timeout: 15000 });
+    await page.getByRole('heading', { name: 'Objetivo: ' + target.city_name })
+      .waitFor({ state: 'visible', timeout: 15000 });
+    const count = page.locator('#movement-troop-basic_infantry');
+    await count.waitFor({ state: 'visible', timeout: 15000 });
+    await count.fill('2');
+    await page.getByRole('button', { name: 'Enviar Tropas' }).click();
+    await page.waitForURL((url) => url.pathname === '/movements', { timeout: 20000 });
+    const fresh = await playerSnapshot(token, worldId);
+    mission = fresh.movements.find((item) => item.target_city_id === targetId && item.movement_type === 'attack');
+    assert.ok(mission?.id && mission.status === 'ongoing');
   });
   await run.check('real worker resolves first attack, writing an auditable report exactly once', async () => {
     completeDue('Movement', mission.id, city.id, 'Movement');

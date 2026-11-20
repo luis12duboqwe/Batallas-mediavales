@@ -2,6 +2,33 @@
 
 Fecha: 2026-11-20. Rama: `parallel/medievol-e2e-20261120`. Base inicial: `main@281de839102894ae1d3766156e17fc771ba0a9b9`. Revalidación independiente: `main@9419ecde34dee13af7b25badc90c3559107f1a5b` (incluye cambios de combate y espionaje ya fusionados).
 
+## Revalidación actualizada tras PR #152 y #153 — 20-11-2026
+
+**Corte validado:** combinación de main cf0fa5e5d56a62e586f3181a5ab5d366c00eacf2 con el mapa del PR #153, después fusionado en main c58f376ba355e5e1978c7c46ae04457b71773c89. Tests con SQLite desechable y servidores locales; nunca se usaron cuentas, bases ni servicios productivos.
+
+**Los seis fallos históricos de esta auditoría están corregidos.** Las cifras antiguas de 52/58 y seis fallos se conservan abajo únicamente como evidencia del estado ANTERIOR. La nueva prueba adversarial comprueba que espionaje funciona contra bárbaros y que comercio/mensajería solo aparecen para ciudades de jugadores, incluyendo controles de mundo y ausencia de operaciones accidentales.
+
+| Verificación reejecutada | Resultado |
+|---|---|
+| Alta, verificación, sesión, mundo y capital | 5/5 PASS |
+| Economía, edificio, investigación, tropas y mapa | 6/6 PASS |
+| Finalización de colas reales por worker aislado | 5/5 PASS |
+| Vista de movimientos: propias, bárbaras, ajenas, privacidad y reintentos | 7/7 PASS (antes 4/7) |
+| Combate, espionaje, informes y recuperación | 7/7 PASS |
+| Acceso y mutaciones prohibidas entre mundos | 5/5 PASS |
+| Mapa: Espiar contra bárbaros; Comercio/Mensajes hacia jugadores; mundo inválido rechazado | PASS |
+| Misiones reales con reservas, worker e informes auditables | 9/9 PASS |
+| **Cuenta nueva: alta, capital, cuartel, entrenar, atacar desde mapa y formulario, worker, informe React** | **9/9 PASS** |
+| Mapa móvil y escritorio, recuperación G25 | PASS; G25 repetido cuatro veces |
+
+El recorrido de una sola cuenta no inyecta tropas ni recursos. Únicamente adelanta fechas de finalización dentro del SQLite de prueba para evitar esperar horas. Los tests preservan los casos negativos y el endpoint privado de estado de ciudad sigue inaccesible para terceros.
+
+**Pendientes:** envío SMTP real controlado, producción económica de larga duración, incorporación de las nuevas suites al CI automático (issue #151), y bloqueo de victoria de Maravilla por almacenamiento/costos (issue #149). Ni estos resultados ni el CI del PR equivalen a certificación G10 o despliegue a producción.
+
+---
+
+## Evidencia histórica anterior a las correcciones
+
 ## Alcance, seguridad y método
 
 Se utilizó una copia aislada del repositorio, SQLite desechable bajo `/tmp/medievol-journey-*`, backend y frontend locales **únicamente en loopback** (`127.0.0.1:8108/4273` y `127.0.0.1:8118/4283`), `APP_ENV=test` y un secreto explícitamente de pruebas. No se usaron cuentas, contraseñas, SMTP, bases de datos ni servicios productivos. Los scripts nuevos se niegan a mutar datos sin `PARALLEL_JOURNEY_ALLOW_MUTATIONS=isolated`, base SQLite de pruebas y ambos servicios en localhost.

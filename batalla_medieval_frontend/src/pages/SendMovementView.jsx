@@ -10,14 +10,18 @@ const SendMovementView = () => {
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const isOasis = queryParams.get('type') === 'oasis';
+  const preferredMovement = !isOasis && queryParams.get('mission') === 'spy' ? 'spy' : 'attack';
 
   const currentCity = useCityStore((state) => state.currentCity);
   const sendMovement = useCityStore((state) => state.sendMovement);
   const loadCity = useCityStore((state) => state.loadCity);
 
   const [targetCity, setTargetCity] = useState(null);
+  const [targetLoading, setTargetLoading] = useState(false);
+  const [targetError, setTargetError] = useState('');
+  const [targetRetryKey, setTargetRetryKey] = useState(0);
   const [troops, setTroops] = useState({});
-  const [movementType, setMovementType] = useState('attack');
+  const [movementType, setMovementType] = useState(preferredMovement);
   const [targetBuilding, setTargetBuilding] = useState('');
   const [buildingOptions, setBuildingOptions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -29,10 +33,8 @@ const SendMovementView = () => {
   }, [currentCity, loadCity]);
 
   useEffect(() => {
-    if (isOasis && movementType !== 'attack') {
-      setMovementType('attack');
-    }
-  }, [isOasis, movementType]);
+    setMovementType(preferredMovement);
+  }, [preferredMovement]);
 
   useEffect(() => {
     let active = true;
@@ -55,37 +57,44 @@ const SendMovementView = () => {
     };
   }, []);
 
+  const worldId = currentCity?.world_id;
   useEffect(() => {
     let active = true;
-    const fetchTarget = async () => {
-      if (!currentCity) return;
-      try {
-        if (isOasis) {
-          const res = await api.getOasis(targetCityId);
-          if (active) {
-            setTargetCity({
-              name: `Oasis ${res.data.resource_type} (+${res.data.bonus_percent}%)`,
-              x: res.data.x,
-              y: res.data.y,
-              isOasis: true,
-            });
+    setTargetCity(null);
+    setTargetError('');
+    if (!worldId) {
+      setTargetLoading(false);
+      return () => { active = false; };
+    }
+    const id = Number(targetCityId);
+    if (!Number.isSafeInteger(id) || id < 1) {
+      setTargetError('El objetivo seleccionado no es válido.');
+      setTargetLoading(false);
+      return () => { active = false; };
+    }
+    setTargetLoading(true);
+    const request = isOasis
+      ? api.getOasis(id)
+      : api.getMapCityTarget(id, worldId);
+    request.then(({ data }) => {
+      if (!active) return;
+      setTargetCity(isOasis
+        ? {
+            name: `Oasis ${data.resource_type} (+${data.bonus_percent}%)`,
+            x: data.x, y: data.y, world_id: data.world_id, isOasis: true,
           }
-        } else {
-          const res = await api.getCityStatus({
-            cityId: targetCityId,
-            worldId: currentCity.world_id,
-          });
-          if (active) setTargetCity(res.data);
-        }
-      } catch {
-        if (active) setFormError('No se pudo cargar el objetivo seleccionado.');
+        : data);
+    }).catch((error) => {
+      if (active) {
+        setTargetError(error?.response?.status === 404
+          ? 'No se encontró ese objetivo en el mundo actual.'
+          : 'No se pudo cargar el objetivo seleccionado.');
       }
-    };
-    fetchTarget();
-    return () => {
-      active = false;
-    };
-  }, [targetCityId, currentCity, isOasis]);
+    }).finally(() => {
+      if (active) setTargetLoading(false);
+    });
+    return () => { active = false; };
+  }, [targetCityId, worldId, isOasis, targetRetryKey]);
 
   const handleTroopChange = (unit, value) => {
     setTroops(prev => ({
@@ -94,8 +103,10 @@ const SendMovementView = () => {
     }));
   };
 
+  const hasValidTarget = Boolean(targetCity && targetCity.world_id === worldId);
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading || targetLoading || !hasValidTarget) return;
     setLoading(true);
     setFormError('');
     setFormStatus('');
@@ -155,6 +166,15 @@ const SendMovementView = () => {
     <div className="p-3 sm:p-6 max-w-4xl mx-auto">
       <h1 className="text-2xl sm:text-3xl font-bold mb-6 text-amber-500">Enviar Tropas</h1>
 
+      {targetLoading && <p role="status" className="mb-4 text-gray-300">Cargando objetivo...</p>}
+      {targetError && (
+        <div role="alert" className="mb-4 rounded border border-red-700 p-3 text-red-200">
+          <p>{targetError}</p>
+          <button type="button" className="btn btn-sm btn-outline mt-2" onClick={() => setTargetRetryKey((key) => key + 1)}>
+            Reintentar objetivo
+          </button>
+        </div>
+      )}
       {targetCity && (
         <div className="mb-6 p-4 bg-gray-800 rounded border border-gray-700">
           <h2 className="text-xl font-bold text-white break-words">Objetivo: {targetCity.name}</h2>
@@ -297,7 +317,7 @@ const SendMovementView = () => {
           <button
             type="submit"
             className="btn btn-primary px-8 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-200"
-            disabled={loading || !targetCity}
+            disabled={loading || targetLoading || !hasValidTarget}
           >
             {loading ? 'Enviando...' : 'Enviar Tropas'}
           </button>

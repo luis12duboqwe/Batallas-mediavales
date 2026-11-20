@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../api/axiosClient';
 import { useCityStore } from '../store/cityStore';
 
@@ -18,6 +19,7 @@ const resourceLabel = (value) => (
 const MarketView = () => {
   const currentCity = useCityStore((state) => state.currentCity);
   const loadCity = useCityStore((state) => state.loadCity);
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState('send');
   const [offers, setOffers] = useState([]);
   const [commerceRules, setCommerceRules] = useState(null);
@@ -27,6 +29,8 @@ const MarketView = () => {
   const [filterAlliance, setFilterAlliance] = useState(false);
 
   const [transport, setTransport] = useState({ ...EMPTY_TRANSPORT });
+  const [selectedTargetName, setSelectedTargetName] = useState('');
+  const [selectedTargetError, setSelectedTargetError] = useState('');
   const [newOffer, setNewOffer] = useState({
     offer_type: 'wood',
     offer_amount: 100,
@@ -75,6 +79,41 @@ const MarketView = () => {
     };
   }, [currentCity, loadCity]);
 
+  // Deep links from the map carry only IDs. Resolve the city again in the
+  // active world so a stale or manipulated URL never preselects another world.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has('targetCityId')) return undefined;
+    let active = true;
+    setActiveTab('send');
+    setTransport({ ...EMPTY_TRANSPORT });
+    setSelectedTargetName('');
+    setSelectedTargetError('');
+    if (!currentCity?.world_id) return undefined;
+
+    const id = Number(params.get('targetCityId'));
+    const requestedWorld = Number(params.get('worldId'));
+    if (!Number.isSafeInteger(id) || id < 1 || requestedWorld !== currentCity.world_id) {
+      setSelectedTargetError('El destino no corresponde al mundo activo.');
+      return undefined;
+    }
+
+    api.getMapCityTarget(id, requestedWorld)
+      .then(({ data }) => {
+        if (!active) return;
+        if (!data.owner_id) {
+          setSelectedTargetError('No se pueden enviar comerciantes a un asentamiento bárbaro.');
+          return;
+        }
+        setTransport({ ...EMPTY_TRANSPORT, target_city_id: data.id });
+        setSelectedTargetName(data.name);
+      })
+      .catch(() => {
+        if (active) setSelectedTargetError('No se pudo confirmar la ciudad de destino.');
+      });
+    return () => { active = false; };
+  }, [location.search, currentCity?.world_id]);
+
   const fetchOffers = useCallback(async () => {
     if (!currentCity) return;
     try {
@@ -104,6 +143,7 @@ const MarketView = () => {
     try {
       await api.sendResources(currentCity.id, currentCity.world_id, transport);
       setTransport({ ...EMPTY_TRANSPORT });
+      setSelectedTargetName('');
       await refreshAfterMutation();
       showSuccess('Recursos enviados. La capacidad del comerciante se libera cuando regrese.');
     } catch (error) {
@@ -255,6 +295,8 @@ const MarketView = () => {
             El envío es todo-o-devuelto: si el almacén destino no tiene espacio para el cargamento completo cuando llega, los recursos regresan contigo.
           </p>
           <form onSubmit={handleSendResources} className="space-y-4">
+            {selectedTargetName && <p role="status" className="text-sm text-green-200">Destino seleccionado: {selectedTargetName}</p>}
+            {selectedTargetError && <p role="alert" className="text-sm text-red-200">{selectedTargetError}</p>}
             <div>
               <label htmlFor="market-target-city" className="label">ID Ciudad Destino</label>
               <input
@@ -264,7 +306,11 @@ const MarketView = () => {
                 inputMode="numeric"
                 className="input input-bordered w-full bg-black/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
                 value={transport.target_city_id}
-                onChange={(event) => setTransport({ ...transport, target_city_id: parseInt(event.target.value, 10) || '' })}
+                onChange={(event) => {
+                  setSelectedTargetName('');
+                  setSelectedTargetError('');
+                  setTransport({ ...transport, target_city_id: parseInt(event.target.value, 10) || '' });
+                }}
                 required
               />
             </div>

@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { assertIsolated, call, loginUi, playerSnapshot, suite, tokenFor, UI } from './parallel-journey-helpers.mjs';
 
-// End-to-end positive control for military server operations. The web form's
-// own target lookup currently fails: we deliberately dispatch through the
-// real, authenticated HTTP API to distinguish a UI defect from game logic.
+// Independent API-to-worker-to-report regression for authoritative combat and
+// espionage. The browser military flow is covered separately by
+// parallel-journey-single-player.mjs and movement-target.mjs.
 // Requires a fresh isolated database, G9 and G10 fixtures and a local API/UI.
 assertIsolated();
 const python = process.env.PARALLEL_JOURNEY_PYTHON || 'python3';
