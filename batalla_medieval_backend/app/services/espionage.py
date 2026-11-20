@@ -237,6 +237,12 @@ def build_report_content(
         "defender": {"name": defender_city.name},
     }
 
+    if report_role == "defender" and not identified:
+        # The seed encodes small, guessable movement/city identifiers. Sharing
+        # it would allow an anonymous attacker to be deanonymized by guessing
+        # possible origins and movements against the target's known snapshot.
+        payload.pop("seed")
+
     if report_role == "attacker":
         # The attacker sees the auditable chances/rolls for its own mission but
         # never receives defender spy counts unless troop intel was actually
@@ -284,6 +290,9 @@ def resolve_spy(
     spies are lost; a successful mission returns all dispatched spies.
     """
 
+    if movement.movement_type != "spy" or movement.target_oasis_id is not None:
+        raise ValueError("Only city-targeted spy movements can resolve espionage")
+
     attacker_city = movement.origin_city or (
         db.query(models.City).filter(models.City.id == movement.origin_city_id).first()
     )
@@ -294,6 +303,8 @@ def resolve_spy(
         raise ValueError("Spy movement references a missing city")
     if attacker_city.world_id != movement.world_id or defender_city.world_id != movement.world_id:
         raise ValueError("Spy movement crosses world boundary")
+    if attacker_city.owner_id is None:
+        raise ValueError("Spy mission origin must belong to a player")
     if attacker_city.id == defender_city.id:
         raise ValueError("A city cannot spy on itself")
 
@@ -309,7 +320,7 @@ def resolve_spy(
         )
         .first()
     )
-    defender_spies = int(defender_spy_troop.quantity) if defender_spy_troop else 0
+    defender_spies = max(int(defender_spy_troop.quantity), 0) if defender_spy_troop else 0
 
     modifiers = event_service.get_active_modifiers(db, world_id=movement.world_id)
     spy_modifier = max(float(modifiers.get("spy_modifier", 1.0)), 0.0)
@@ -383,7 +394,9 @@ def resolve_spy(
                 attacker_spies=attacker_spies,
                 defender_spies=defender_spies,
             ),
-            attacker_city_id=attacker_city.id,
+            # ReportRead exposes this foreign key; do not identify a hidden
+            # attacker through metadata while the body says "Desconocido".
+            attacker_city_id=attacker_city.id if outcome["attacker_identified"] else None,
             defender_city_id=defender_city.id,
         )
         db.add(defender_report)

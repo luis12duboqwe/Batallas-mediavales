@@ -13,6 +13,7 @@ owned exclusively by :mod:`hero_rules`.
 """
 
 import json
+import math
 
 from . import combat_rounds as _impl
 from . import hero_rules
@@ -120,6 +121,13 @@ def resolve_battle(*args, **kwargs):
     defender_hero = kwargs.pop("defender_hero", None)
     defender_city = args[1] if len(args) > 1 else kwargs.get("defender_city")
     defender_owner = getattr(defender_city, "owner", None)
+    if defender_hero is not None and (
+        defender_city is None
+        or defender_hero.world_id != defender_city.world_id
+        or defender_hero.user_id != defender_city.owner_id
+        or defender_hero.city_id != defender_city.id
+    ):
+        raise ValueError("Defender hero does not belong to the target city/world")
     had_override = False
     previous_override = None
     if defender_owner is not None and defender_hero is not None:
@@ -164,10 +172,13 @@ def _credit_oasis_reward(attacker_city, oasis, result, *, was_wild: bool):
         storage_limit = float(production.get_storage_limit(attacker_city))
         for resource, amount in theoretical.items():
             current = float(getattr(attacker_city, resource))
-            actual = max(min(float(amount), storage_limit - current), 0.0)
+            # Credits are integral: never add a fractional resource amount
+            # while reporting a rounded-down (or zero) integer reward.
+            capacity = max(math.floor(storage_limit - current), 0)
+            actual = min(max(int(amount), 0), capacity)
             if actual > 0:
                 setattr(attacker_city, resource, current + actual)
-                credited[resource] = int(actual)
+                credited[resource] = actual
 
     result["loot"] = credited
     result["pve"] = {
