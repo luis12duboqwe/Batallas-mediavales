@@ -103,9 +103,11 @@ try {
   assert.equal(claims.get(99102), 1, 'Lost POST response must not trigger a second claim');
   assert.equal(await page.getByTestId('adventure-claim-99102').count(), 0);
   await page.getByTestId('adventure-result').getByRole('button', { name: 'Continuar' }).click();
+  await page.waitForFunction(() => document.activeElement?.id === 'main-content');
   await page.getByTestId('adventure-result-99102').click();
   await page.getByTestId('adventure-result').waitFor({ state: 'visible' });
   await page.getByTestId('adventure-result').getByRole('button', { name: 'Continuar' }).click();
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-testid') === 'adventure-result-99102');
 
   await page.getByTestId('adventure-claim-99104').evaluate((button) => {
     button.click();
