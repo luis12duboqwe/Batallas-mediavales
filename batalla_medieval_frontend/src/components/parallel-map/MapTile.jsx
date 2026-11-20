@@ -61,7 +61,7 @@ const MapTile = memo(function MapTile({
       onClick={() => onSelect(tile)}
       onFocus={() => onFocusTile(tile)}
       onKeyDown={(event) => onNavigate(event, tile)}
-      title={accessibleLabel}
+      title={`(${tile.x}, ${tile.y}) ${tile.type}`}
       aria-label={accessibleLabel}
       aria-pressed={isSelected}
       tabIndex={isTabStop ? 0 : -1}
