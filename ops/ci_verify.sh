@@ -115,11 +115,24 @@ else
 fi
 SH
 chmod 700 "$FAKE_DATE_DIR/date"
-for _ in 1 2; do
+# Start both backups before waiting: this covers real overlap, not just
+# sequential runs that happen to share a timestamp.
+BACKUP_PIDS=()
+for run in 1 2; do
   BM_REAL_DATE="$REAL_DATE" PATH="$FAKE_DATE_DIR:$PATH" \
     COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" \
-    bash ops/backup_postgres.sh "$ENV_FILE"
+    bash ops/backup_postgres.sh "$ENV_FILE" > "$BACKUP_DIR/concurrent-$run.log" 2>&1 &
+  BACKUP_PIDS+=("$!")
 done
+backup_failed=0
+for pid in "${BACKUP_PIDS[@]}"; do
+  if ! wait "$pid"; then backup_failed=1; fi
+done
+if [[ "$backup_failed" != "0" ]]; then
+  cat "$BACKUP_DIR"/concurrent-*.log >&2
+  echo "Overlapping PostgreSQL backups failed" >&2
+  exit 1
+fi
 mapfile -t SAME_SECOND_BACKUPS < <(find "$BACKUP_DIR" -maxdepth 1 -type f \
   -name 'batalla_ci-20991231T235959Z-*.dump' | sort)
 if [[ "${#SAME_SECOND_BACKUPS[@]}" -ne 2 ]]; then
@@ -130,6 +143,41 @@ for archive in "${SAME_SECOND_BACKUPS[@]}"; do
   test -s "$archive"
   sha256sum --check "${archive}.sha256"
 done
+
+# A failed pg_dump must leave no half-written backup, no orphan checksum,
+# and no leaked staging directory; the successful backups must remain usable.
+DUMP_COUNT_BEFORE="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'batalla_ci-*.dump' | wc -l)"
+FAKE_DOCKER_DIR="$(mktemp -d /tmp/bm-g5-fail-dump.XXXXXX)"
+REAL_DOCKER="$(command -v docker)"
+cat > "$FAKE_DOCKER_DIR/docker" <<'SH'
+#!/usr/bin/env bash
+if [[ " $* " == *" pg_dump "* ]]; then
+  printf 'partial PostgreSQL dump'
+  exit 73
+fi
+exec "$BM_REAL_DOCKER" "$@"
+SH
+chmod 700 "$FAKE_DOCKER_DIR/docker"
+if BM_REAL_DOCKER="$REAL_DOCKER" PATH="$FAKE_DOCKER_DIR:$PATH" \
+  COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" \
+  bash ops/backup_postgres.sh "$ENV_FILE"; then
+  echo "Backup unexpectedly succeeded after an injected pg_dump failure" >&2
+  exit 1
+fi
+DUMP_COUNT_AFTER="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'batalla_ci-*.dump' | wc -l)"
+if [[ "$DUMP_COUNT_AFTER" != "$DUMP_COUNT_BEFORE" ]]; then
+  echo "Failed pg_dump left a published archive or deleted a valid one" >&2
+  exit 1
+fi
+if find "$BACKUP_DIR" -maxdepth 1 -type d -name '.batalla_ci-*' | grep -q .; then
+  echo "Failed pg_dump leaked a staging directory" >&2
+  exit 1
+fi
+for archive in "${SAME_SECOND_BACKUPS[@]}"; do
+  sha256sum --check "${archive}.sha256"
+done
+rm -rf "$FAKE_DOCKER_DIR"
+FAKE_DOCKER_DIR=""
 
 BACKUP_FILE="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'batalla_ci-*.dump' | sort | tail -n1)"
 test -n "$BACKUP_FILE"
