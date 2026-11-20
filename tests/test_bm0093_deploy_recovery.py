@@ -90,6 +90,7 @@ fi
         "  if [[ \"$BM_SCHEMA_PROBE_EXIT\" != 0 ]]; then exit \"$BM_SCHEMA_PROBE_EXIT\"; fi\n"
         "  printf '%s\\n' \"$BM_SCHEMA_PROBE_VALUE\"; exit 0\n"
         "fi\n"
+        "if [[ \"$*\" == *'up -d --remove-orphans'* ]]; then exit \"$BM_RELEASE_START_EXIT\"; fi\n"
         "if [[ \"$*\" == *'pull migrate seed backend worker frontend nginx caddy'* ]]; then\n"
         "  exit \"$BM_RELEASE_PULL_EXIT\"\n"
         "fi\n"
@@ -140,6 +141,7 @@ exec /usr/bin/mv "$@"
         "BM_SCHEMA_PROBE_EXIT": "0",
         "BM_SCHEMA_PROBE_VALUE": "t",
         "BM_RELEASE_PULL_EXIT": "0",
+        "BM_RELEASE_START_EXIT": "0",
         "BM_RECOVERY_PULL_EXIT": "0",
         "BM_RECEIPT_MODE": "valid",
     })
@@ -164,22 +166,23 @@ def _marker(lab):
     return lab["root"] / ".ops-state" / "recovery-required"
 
 
-def test_failed_deploy_with_verified_rollback_restores_previous_metadata(deploy_lab):
+def test_database_start_failure_does_not_start_migration_dependencies(deploy_lab):
     result = _run(deploy_lab)
     assert result.returncode == 41, result.stderr
     assert not _marker(deploy_lab).exists()
     assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
     assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
-    assert _trace(deploy_lab)[-1] == "smoke:https://staging.example.invalid"
+    assert not any("up -d --remove-orphans" in line for line in _trace(deploy_lab))
+    assert not any(line.startswith("restore:") for line in _trace(deploy_lab))
     assert not list(deploy_lab["root"].glob(".release.env.recovery.*"))
 
 
 @pytest.mark.parametrize("extra_env", [
-    {"BM_RECOVERY_PULL_EXIT": "42"},
+    {"BM_RESTORE_EXIT": "42"},
     {"BM_SMOKE_EXIT": "43"},
 ])
 def test_failed_automatic_rollback_flags_incident_and_blocks_redeploy(deploy_lab, extra_env):
-    first = _run(deploy_lab, extra_env)
+    first = _run(deploy_lab, {**extra_env, "BM_DATABASE_START_EXIT": "0", "BM_RELEASE_START_EXIT": "41"})
     assert first.returncode == 41, first.stderr
     assert "manual recovery required" in first.stderr
     assert _marker(deploy_lab).is_file()
@@ -225,7 +228,7 @@ def test_recovery_smoke_targets_previous_origin_not_new_origin(deploy_lab):
         ),
         encoding="utf-8",
     )
-    result = _run(deploy_lab)
+    result = _run(deploy_lab, {"BM_DATABASE_START_EXIT": "0", "BM_RELEASE_START_EXIT": "41"})
     assert result.returncode == 41, result.stderr
     assert _trace(deploy_lab)[-1] == "smoke:" + old_base
     assert not _marker(deploy_lab).exists()
@@ -253,7 +256,7 @@ def test_database_identity_change_requires_separate_migration(deploy_lab):
 def test_recovery_internal_failure_preserves_incident_marker_and_original_error(
     deploy_lab, failed_recovery_step
 ):
-    result = _run(deploy_lab, extra_env=failed_recovery_step)
+    result = _run(deploy_lab, extra_env={**failed_recovery_step, "BM_DATABASE_START_EXIT": "0", "BM_RELEASE_START_EXIT": "41"})
     assert result.returncode == 41, result.stderr
     assert _marker(deploy_lab).is_file()
     assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
@@ -321,7 +324,7 @@ def test_deploy_restores_exact_new_backup_not_newest_directory_file(deploy_lab):
     (backup_dir / (decoy.name + ".sha256")).write_text("decoy", encoding="utf-8")
     result = _run(deploy_lab, {
         "BM_DATABASE_START_EXIT": "0",
-        "BM_RELEASE_PULL_EXIT": "53",
+        "BM_RELEASE_START_EXIT": "53",
     })
     assert result.returncode == 53, result.stderr
     restored = [line for line in _trace(deploy_lab) if line.startswith("restore:")]
@@ -359,7 +362,7 @@ def test_backup_receipt_accepts_trailing_directory_separator(deploy_lab):
         )
     result = _run(deploy_lab, {
         "BM_DATABASE_START_EXIT": "0",
-        "BM_RELEASE_PULL_EXIT": "54",
+        "BM_RELEASE_START_EXIT": "54",
         "BM_TEST_BACKUP_DIR": str(backup_dir) + "/",
     })
     assert result.returncode == 54, result.stderr
