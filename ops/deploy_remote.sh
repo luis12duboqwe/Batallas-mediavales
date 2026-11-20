@@ -112,59 +112,64 @@ print(previous["PUBLIC_BASE_URL"])
 PY
 )"
 fi
+
+# Persist the in-progress recovery guard BEFORE mutating the active release.
+# A process crash, disk exhaustion or failure inside the ERR trap must not
+# silently permit another deployment against an uncertain state.
+printf 'failed_release=%s\nprevious_release=%s\nreason=deployment_in_progress\n' \
+  "$RELEASE_SHA" "$previous_release_sha" > "$RECOVERY_REQUIRED"
+chmod 600 "$RECOVERY_REQUIRED"
 mv "$NEXT_ENV" "$CURRENT_ENV"
 
 rollback_backup=""
 rollback() {
   local exit_code=$?
   trap - ERR
+  set +e
   local recovered=0
   local recovery_env=""
 
+  # The incident marker was written BEFORE the candidate env was activated.
+  # Never erase it on failures, even when mktemp/cp/chmod/mv also fail.
   echo "Deployment failed; attempting controlled rollback" >&2
   if [[ "$had_previous" -eq 1 ]]; then
-    # Never publish the previous configuration until recovery has succeeded.
-    # The in-progress deployment may have already changed the database.
     recovery_env="$(mktemp ./.release.env.recovery.XXXXXXXX)"
-    cp "$PREVIOUS_ENV" "$recovery_env"
-    chmod 600 "$recovery_env"
-
-    if [[ -n "$rollback_backup" && -f "$rollback_backup" ]]; then
-      echo "Restoring pre-deploy database snapshot and previous application release" >&2
-      if bash ops/restore_postgres.sh "$recovery_env" "$rollback_backup" "RESTORE:${POSTGRES_DB}"; then
-        recovered=1
-      fi
-    elif [[ -z "$rollback_backup" ]]; then
-      echo "No database snapshot was created; restoring previous application images only" >&2
-      if docker compose --env-file "$recovery_env" -f "$COMPOSE_FILE" pull backend worker frontend &&
-         docker compose --env-file "$recovery_env" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy; then
-        recovered=1
+    if [[ -n "$recovery_env" && -f "$recovery_env" ]] &&
+       cp "$PREVIOUS_ENV" "$recovery_env" &&
+       chmod 600 "$recovery_env"; then
+      if [[ -n "$rollback_backup" && -f "$rollback_backup" ]]; then
+        echo "Restoring pre-deploy database snapshot and previous application release" >&2
+        if bash ops/restore_postgres.sh "$recovery_env" "$rollback_backup" "RESTORE:${POSTGRES_DB}"; then
+          recovered=1
+        fi
+      elif [[ -z "$rollback_backup" ]]; then
+        echo "No database snapshot was created; restoring previous application images only" >&2
+        if docker compose --env-file "$recovery_env" -f "$COMPOSE_FILE" pull backend worker frontend &&
+           docker compose --env-file "$recovery_env" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy; then
+          recovered=1
+        fi
       fi
     fi
 
     if [[ "$recovered" -eq 1 ]]; then
-      if python3 ops/smoke_http.py --base-url "$previous_public_base_url" --requests 20 --max-p95-ms "$MAX_P95_MS"; then
-        mv -f -- "$recovery_env" "$CURRENT_ENV"
+      if python3 ops/smoke_http.py --base-url "$previous_public_base_url" --requests 20 --max-p95-ms "$MAX_P95_MS" &&
+         mv -f -- "$recovery_env" "$CURRENT_ENV"; then
+        recovered=2
         recovery_env=""
-        if [[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]; then
-          printf '%s\n' "$previous_release_sha" > .release-sha
-          chmod 600 .release-sha
-        fi
-        rm -f -- "$RECOVERY_REQUIRED"
-      else
-        recovered=0
       fi
     fi
   else
     echo "No previous release exists; cannot automatically restore this deployment" >&2
   fi
 
-  if [[ "$recovered" -ne 1 ]]; then
-    # The active environment still describes the interrupted deployment.
-    # Never pretend that an unsuccessful restore recovered the previous app.
+  if [[ "$recovered" -eq 2 ]]; then
+    # .release-sha already points to the previous release during a failed
+    # deployment. Preserve it; only the active env needed to be restored.
+    rm -f -- "$RECOVERY_REQUIRED"
+  else
     printf 'failed_release=%s\nprevious_release=%s\nreason=automatic_rollback_failed\n' \
-      "$RELEASE_SHA" "$previous_release_sha" > "$RECOVERY_REQUIRED"
-    chmod 600 "$RECOVERY_REQUIRED"
+      "$RELEASE_SHA" "$previous_release_sha" > "$RECOVERY_REQUIRED" || true
+    chmod 600 "$RECOVERY_REQUIRED" || true
     echo "CRITICAL: rollback not verified; manual recovery required ($RECOVERY_REQUIRED)" >&2
   fi
   if [[ -n "$recovery_env" ]]; then rm -f -- "$recovery_env"; fi
@@ -251,4 +256,5 @@ PY
 rm -f "$PREVIOUS_ENV"
 echo "$RELEASE_SHA" > .release-sha
 chmod 600 .release-sha
+rm -f -- "$RECOVERY_REQUIRED"
 echo "Deployment succeeded: ${RELEASE_SHA}"
