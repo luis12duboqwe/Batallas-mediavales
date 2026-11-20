@@ -1,6 +1,6 @@
 # Medievol — Auditoría E2E independiente del recorrido del jugador
 
-Fecha: 2026-11-20. Rama: `parallel/medievol-e2e-20261120`. Base inspeccionada: `main@281de839102894ae1d3766156e17fc771ba0a9b9`.
+Fecha: 2026-11-20. Rama: `parallel/medievol-e2e-20261120`. Base inicial: `main@281de839102894ae1d3766156e17fc771ba0a9b9`. Revalidación independiente: `main@9419ecde34dee13af7b25badc90c3559107f1a5b` (incluye cambios de combate y espionaje ya fusionados).
 
 ## Alcance, seguridad y método
 
@@ -12,7 +12,7 @@ Se reutilizaron `app.seed` y los fixtures `prepare_g2_e2e.py`, `prepare_g7_resea
 
 | Validación | Resultado | Evidencia |
 |---|---:|---|
-| Sintaxis de 7 scripts `parallel-journey-*.mjs` | 7/7 | `node --check` |
+| Sintaxis de 9 scripts `parallel-journey-*.mjs` | 9/9 | `node --check` |
 | Frontend lint | OK | `npm run lint` — exit 0 |
 | Compilación frontend y presupuesto de JS | OK | `npm run build` — initial 399.3 KiB, mayor chunk 325.6 KiB |
 | Pruebas backend focalizadas de auth/mundos/edificios/tropas/movimientos/combate/espionaje | 24/24 | `pytest` — 24 passed, 5 warnings, 51.67s |
@@ -21,8 +21,10 @@ Se reutilizaron `app.seed` y los fixtures `prepare_g2_e2e.py`, `prepare_g7_resea
 | `parallel-journey-security.mjs` | 7/7 | `JOURNEY_SUMMARY reports-isolation-recovery passed=7 failed=0` |
 | `parallel-journey-crossworld.mjs` | 5/5 | `JOURNEY_SUMMARY crossworld-mutations passed=5 failed=0` |
 | `parallel-journey-map-actions.mjs` | **2/5** | `JOURNEY_SUMMARY map-action-adversarial passed=2 failed=3`; exit 1 **intencionalmente preservado** |
+| `parallel-journey-movement-target.mjs` | **4/7** | `JOURNEY_SUMMARY real-movement-target passed=4 failed=3` (dos objetivos ajenos 404 y nombre de ciudad propia vacío); exit 1 **preservado** |
+| `parallel-journey-queue-completion.mjs` | **5/5** | `JOURNEY_SUMMARY queue-completion passed=5 failed=0`, procesadas tres colas reales mediante servicio worker en SQLite aislado |
 
-**Resultado consolidado de nuevos escenarios: 25 aprobados, 3 fallidos, 28 ejecutados; 89.3% aprobados.** Esto es aprobación de escenarios, **no** porcentaje de producto terminado. Los 3 fallos son defectos reproducibles de producto. Se preservaron las aserciones y el estado de fallo en el PR de pruebas.
+**Resultado consolidado de nuevos escenarios: 34 aprobados, 6 fallidos, 40 ejecutados; 85.0% aprobados.** Esto es aprobación de escenarios, **no** porcentaje de producto terminado. Los 6 fallos reproducibles de producto se agrupan en cinco incidencias (tres acciones inertes del mapa, bloqueo de objetivos ajenos en la pantalla militar y nombre de destino vacío). La revalidación de los cuatro recorridos existentes en el nuevo `main` conservó 23/23 aprobados. Se preservaron las aserciones y el estado de fallo en el PR de pruebas.
 
 ## Cobertura del recorrido según sus 8 objetivos
 
@@ -30,18 +32,26 @@ Se reutilizaron `app.seed` y los fixtures `prepare_g2_e2e.py`, `prepare_g7_resea
 |---|---|---|
 | 1. Registro, verificación y sesión | **Parcial** | Registro real y validaciones negativas, enlace de token aislado, verificación de un solo uso, login; no entrega SMTP real |
 | 2. Selección de mundo y capital | **Completa en el flujo de prueba** | Selección visual, capital única, unión idempotente, no creación directa, persistencia y segundo mundo |
-| 3. Producción y construcción | **Parcial** | Tarifas/almacenamiento y recursos autoritativos, mejora pagada, cola visible y persistente, duplicado rechazado; no tick económico prolongado ni finalización |
-| 4. Entrenamiento e investigación | **Parcial** | Inicio en backend, reflejo UI, colas persistentes, ceros y duplicados rechazados; no resolución final de temporizadores |
-| 5. Exploración y mapa | **Parcial — 3 fallos** | Mapa y límites, selección bárbara, enlace Atacar positivo; Espiar, Comerciar y Mensaje inoperantes |
-| 6. Combate, espionaje e informes | **Parcial** | Fixtures resueltos, semillas/rounds y retorno contrastados con API y vista, informe de espionaje contrastado; sin lanzamiento completo desde UI |
+| 3. Producción y construcción | **Parcial** | Tarifas/almacenamiento, mejora pagada y cola persistente; transición de obra completada por worker con plazo acelerado en SQLite de pruebas. Sin prueba prolongada de producción por reloj real |
+| 4. Entrenamiento e investigación | **Completa bajo reloj de prueba** | Inicio, colas, exclusión de duplicados/ceros y finalización real vía `process_all_queues`; desbloqueo investigado, tropas acreditadas y vistas actualizadas tras recarga. No se simula el transcurso de horas en tiempo real |
+| 5. Exploración y mapa | **Parcial — 3 fallos** | Mapa y límites, selección bárbara, enlace Atacar navega; Espiar, Comerciar y Mensaje inertes. Además, la pantalla de destino de ataque/espionaje está bloqueada para ciudades ajenas |
+| 6. Combate, espionaje e informes | **Parcial — bloqueo P1** | Fixtures resueltos, semillas/rondas y retorno contrastados con API y vista; no es posible iniciar una misión real contra una ciudad enemiga o bárbara desde `SendMovementView` (404 de lectura de objetivo y botón deshabilitado) |
 | 7. Desconexión y errores | **Completa en el flujo de prueba** | Aborto de solicitud real de mapa con reintento exitoso, offline/online, JWT inválido, cierre de sesión y reingreso |
 | 8. Reglas entre mundos | **Completa en las operaciones comprobadas** | Acceso mapa sin membresía 403, ciudades ajenas 404, ataque/spy prohibidos y sin movimientos, construcción, tropas, investigación, mercado y transporte prohibidos, sin nuevas colas |
 
-**Cobertura efectiva estricta: 3/8 etapas completas en el alcance ensayado = 37.5%; 5/8 parcialmente verificadas = 62.5%; 8/8 con al menos una prueba.** No se realizó un único recorrido **continuo** completo desde alta hasta combate: se encadenaron pruebas con fixtures de cuentas separadas. Por eso no se declara un 100% de recorrido real.
+**Cobertura efectiva bajo condiciones de prueba: 4/8 etapas completas = 50.0%; 4/8 parcialmente verificadas = 50.0%; 8/8 con al menos una prueba.** No se realizó un único recorrido **continuo** completo desde alta hasta combate: se encadenaron pruebas con fixtures de cuentas separadas. Por eso no se declara un 100% de recorrido real.
 
 ## Hallazgos reproducidos y destino
 
 **P0: ninguno confirmado.**
+
+### P1 — QA-MOVE-01: no se puede enviar ataque ni espionaje a ciudades ajenas desde `SendMovementView`
+
+**Propietario:** responsable de la página `batalla_medieval_frontend/src/pages/SendMovementView.jsx` y contrato público de objetivos, a asignar por coordinación; no cambiarlo desde QA. **Reproducción:** en el entorno aislado con cuentas `g9_combat` y `g2_browser`, abrir `/send-movement/13` (bárbara `G9 Auditable Barbarian` en el fixture) y después `/send-movement/9` (capital de otro jugador en el fixture). La página llama `GET /city/{id}/status?world_id=1`, que devuelve **404** correctamente porque este endpoint es privado del propietario. `targetCity` permanece `null` y `Enviar Tropas` está deshabilitado. **Esperado:** obtener metadatos públicos autorizados de la casilla/objetivo para mostrar el nombre y permitir enviar una misión cuya validez determine el backend. **Evidencia:** `parallel-journey-movement-target.mjs`, 404 exactos para bárbaro y otro jugador, sin marchas accidentales. **Impacto:** bloquea el recorrido militar real desde UI; no se corrige reduciendo controles de acceso del backend.
+
+### P2 — QA-MOVE-02: la misma pantalla muestra «Objetivo:» sin nombre incluso para ciudades propias
+
+El endpoint privado `/city/{id}/status` devuelve `CityResourceStatus` sin `name`; el frontend usa `targetCity.name`. Control positivo en la misma prueba: ciudad propia devuelve 200, botón activado, pero cabecera mostrada `Objetivo:` en lugar de `Objetivo: Capital de g9_combat`. El destino debe mostrar un nombre obtenido de una fuente autorizada y no confiar en un campo inexistente del contrato.
 
 ### P1 — QA-MAP-01: botón «Espiar» no hace nada
 
@@ -57,23 +67,27 @@ Se reutilizaron `app.seed` y los fixtures `prepare_g2_e2e.py`, `prepare_g7_resea
 
 **P3 producto:** ninguno reproducido.
 
+**Asignación prioritaria:** QA-MOVE-01 al responsable de la pantalla militar y API pública del mapa; QA-MOVE-02 al mismo dueño. Mantener las tres regresiones del mapa en la rama del mapa. El PR #143 del mapa propone deshabilitar controles sin integración; si se adopta esa opción transitoria, debe demostrarse el estado deshabilitado y explicativo, pero no contabilizarse la función como implementada.
+
 ## Problemas de la PRUEBA diferenciados de producto
 
 - El primer arranque de Playwright falló por binario Chromium no correspondiente a la versión 1.55.0. Se corrigió el entorno aislado instalando el headless compatible; las pruebas posteriormente corrieron.
 - Un correo de test con dominio `example.test` fue rechazado por el validador de correo (422): dato inválido del test, cambiado a `example.com`; registro y verificación luego pasaron.
 - Una aserción de selector tenía una precedencia `await` incorrecta: corregida y repetida, 5/5 onboarding.
-- Una selección temprana del mapa se solapaba con la hidratación de la ciudad: el test espera ahora la casilla de la capital antes de saltar a las coordenadas; la selección pasó. Las tres acciones inertes se confirmaron **después** de corregir esta condición y de evitar falsos positivos por textos del reloj en el resto del dashboard.
+- Una selección temprana del mapa se solapaba con la hidratación de la ciudad: el test espera ahora la casilla de la capital antes de saltar a las coordenadas; la selección pasó.
+- El primer intento de completar colas importó directamente el servicio de worker en un orden que produjo un import circular. Se corrigió inicializando la aplicación primero y se repitió en **una tercera base desechable nueva**: `parallel-journey-queue-completion.mjs` 5/5. Los errores en cascada de la primera ejecución se atribuyeron al arnés de pruebas y no al producto.
 - Estos problemas de la herramienta **no** se contabilizan como defectos del producto.
 
 ## Reproducción controlada
 
 Ejecutar **solo en un checkout desechable**, con variables de entorno explícitas `APP_ENV=test`, `DATABASE_URL=sqlite:////tmp/medievol-journey-...db`, `PARALLEL_JOURNEY_DB=/tmp/medievol-journey-...db`, `PARALLEL_JOURNEY_ALLOW_MUTATIONS=isolated`, `VITE_API_URL=http://127.0.0.1:8108` y `E2E_BASE_URL=http://127.0.0.1:4273`. La DB debe estar migrada y sembrada con los fixtures indicados, después invocar `node e2e/parallel-journey-fixtures.mjs` (desde `batalla_medieval_frontend`, con `PYTHONPATH` / `PARALLEL_JOURNEY_PYTHON` apuntando al backend). Levantar el backend de prueba en 8108 y el preview de Vite compilado hacia esa API en 4273; instalar `@playwright/test@1.55.0` y su Chromium.
 
-Ejecutar, por este orden, `node e2e/parallel-journey-onboarding.mjs`, `node e2e/parallel-journey-progression.mjs`, `node e2e/parallel-journey-security.mjs`, `node e2e/parallel-journey-crossworld.mjs`, `node e2e/parallel-journey-map-actions.mjs`. **Usar una nueva DB para repetir todo** porque los escenarios de onboarding/unión/progreso mutan deliberadamente solo los fixtures; no son independientes de una nueva semilla. El último script debe terminar con exit 1 mientras persistan los tres defectos.
+Ejecutar, por este orden, `node e2e/parallel-journey-onboarding.mjs`, `node e2e/parallel-journey-progression.mjs`, `node e2e/parallel-journey-queue-completion.mjs` (requiere `PARALLEL_JOURNEY_PYTHON` apuntando al intérprete con dependencias backend), `node e2e/parallel-journey-movement-target.mjs`, `node e2e/parallel-journey-security.mjs`, `node e2e/parallel-journey-crossworld.mjs`, `node e2e/parallel-journey-map-actions.mjs`. **Usar una nueva DB para repetir todo** porque los escenarios de onboarding/unión/progreso mutan deliberadamente solo los fixtures; no son independientes de una nueva semilla. Los scripts `parallel-journey-movement-target.mjs` y `parallel-journey-map-actions.mjs` deben terminar con exit 1 mientras persistan sus respectivas tres aserciones. La prueba de colas debe correr una sola vez sobre la DB recién sembrada y después de `progression`, porque consume colas intencionalmente.
 
 ## Entrega y cierre pendiente
 
 - Aceptar el PR **solo como borrador**, sin merge.
 - Coordinar QA-MAP-01/02/03 con la responsable de `MapView.jsx`; repetir las tres regresiones tras corrección en su rama, antes de fusionarlas.
+- Prioridad P1: asignar QA-MOVE-01, con regresión nueva obligatoria, a responsable del frontend militar/contrato de objetivos; corregir también QA-MOVE-02.
 - Coordinar un job E2E de CI aislado para estos scripts, fuera de este alcance de escritura.
-- Pendiente para recorrido completamente verificado: correo real controlado (sin tocar producción), ticks y completado de colas, despacho UI de ataque/espio, y recorrido integral en una sola cuenta con los mismos datos.
+- Pendiente para recorrido completamente verificado: correo real controlado (sin tocar producción), producción económica prolongada bajo reloj real, despacho UI de ataque/espio actualmente bloqueado por P1, recorrido integral en una sola cuenta, y automatización en CI de los nuevos scripts. Las colas **sí** se verificaron hasta finalización con el worker real y un adelanto de sus deadlines **solo en SQLite de pruebas**.
