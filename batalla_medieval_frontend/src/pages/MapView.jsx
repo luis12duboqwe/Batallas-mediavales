@@ -25,8 +25,8 @@ const PveDifficulty = ({ tile }) => {
 };
 
 const MapView = () => {
-  const { user } = useUserStore();
-  const { currentCity } = useCityStore();
+  const user = useUserStore((state) => state.user);
+  const currentCity = useCityStore((state) => state.currentCity);
   const navigate = useNavigate();
   const [center, setCenter] = useState({ x: 0, y: 0 });
   const [tiles, setTiles] = useState([]);
