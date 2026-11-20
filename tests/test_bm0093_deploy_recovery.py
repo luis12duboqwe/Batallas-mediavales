@@ -162,7 +162,12 @@ def test_recovery_smoke_targets_previous_origin_not_new_origin(deploy_lab):
     old_base = "https://staging.example.invalid"
     new_base = "https://new.example.invalid"
     base = deploy_lab["base"]
-    base.write_text(base.read_text(encoding="utf-8").replace(old_base, new_base), encoding="utf-8")
+    base.write_text(
+        base.read_text(encoding="utf-8").replace(
+            "staging.example.invalid", "new.example.invalid"
+        ),
+        encoding="utf-8",
+    )
     result = _run(deploy_lab)
     assert result.returncode == 41, result.stderr
     assert _trace(deploy_lab)[-1] == "smoke:" + old_base
