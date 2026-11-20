@@ -2,7 +2,7 @@
 
 ## Estado técnico verificable
 
-**Bloque A: exportación de datos (PR en revisión).** La ruta autenticada
+**Bloque A: exportación de datos (fusionado y validado en CI).** La ruta autenticada
 `GET /auth/me/export` devuelve un JSON con esquema versionado. Usa el usuario
 derivado del JWT validado por el servidor, **nunca** un ID de cuenta
 proporcionado por el cliente. Su contenido se genera con listas explícitas de
@@ -35,6 +35,32 @@ telemetría, logs de infraestructura, copias de seguridad y pagos externos
 eventuales) estén cubiertos. El archivo contiene información confidencial y
 se entrega directamente al navegador autenticado; el servidor no lo envía
 por correo ni almacena un archivo generado.
+
+## Bloque B — Solicitudes de privacidad (revisión manual)
+
+La API autenticada `GET/POST /auth/me/privacy-requests` permite registrar
+solicitudes de eliminación, corrección, consulta de retención y otras dudas.
+**Registrar una solicitud no elimina, bloquea, modifica ni anonimiza una
+cuenta**. Los casos pasan al sistema de soporte ya existente, donde solo
+personal autorizado por `support.manage` puede cambiar su estado.
+
+Los identificadores de usuario se obtienen exclusivamente del JWT autenticado.
+Cada jugador consulta únicamente sus propios casos. El tipo de caso y el
+asunto se fijan por el servidor; el endpoint de soporte general no puede
+crear asuntos reservados de privacidad. El sistema rechaza opciones no
+reconocidas y campos inesperados, y limita los detalles a 1000 caracteres.
+Mientras un caso de la misma categoría permanece abierto o en revisión,
+una repetición devuelve el número anterior en lugar de crear uno nuevo.
+
+**Límite:** PostgreSQL serializa solicitudes simultáneas mediante bloqueo
+de fila del usuario; en SQLite no existe ese mismo bloqueo de filas y la
+deduplicación concurrente es de mejor esfuerzo. No se garantiza tiempo de
+respuesta ni conclusión favorable sin política aprobada. No se ejecutan
+operaciones destructivas ni migraciones de esquema.
+
+La interfaz del perfil ofrece el formulario, confirmación de recepción
+y consulta de estado; la prueba G29 valida el recorrido real, persistencia
+e idempotencia secuencial.
 
 ## Pendientes para cerrar BM-0090
 

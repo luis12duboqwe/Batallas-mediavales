@@ -147,3 +147,35 @@ def test_privacy_request_uses_existing_review_and_does_not_delete_account(client
     assert client.post(
         "/auth/me/privacy-requests", json={"kind": "erasure"}, headers=headers(user),
     ).status_code == 403
+
+
+
+def test_privacy_support_workflow_reflects_admin_review(client, db_session, user):
+    operator = models.User(
+        username="bm90_support", email="bm90_support@example.com",
+        hashed_password="placeholder", is_verified=True,
+        is_admin=True, admin_role="support",
+    )
+    db_session.add(operator)
+    db_session.commit()
+    created = client.post(
+        "/auth/me/privacy-requests",
+        json={"kind": "retention"},
+        headers=headers(user),
+    )
+    assert created.status_code == 200
+    case_id = created.json()["id"]
+    admin_reply = client.patch(
+        "/support/admin/cases/" + str(case_id),
+        json={
+            "status": "resolved",
+            "resolution": "Revisión de soporte completada.",
+            "reason": "Atención a solicitud del titular",
+        },
+        headers=headers(operator),
+    )
+    assert admin_reply.status_code == 200, admin_reply.text
+    listing = client.get("/auth/me/privacy-requests", headers=headers(user))
+    assert listing.status_code == 200
+    assert listing.json()[0]["status"] == "resolved"
+    assert listing.json()[0]["resolution"] == "Revisión de soporte completada."

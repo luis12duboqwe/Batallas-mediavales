@@ -56,6 +56,10 @@ const ProfileView = () => {
   };
 
   useEffect(() => {
+    setPrivacySubmitting(false);
+    setPrivacyDetails('');
+    setPrivacyNotice('');
+    setPrivacyError('');
     if (user?.id) {
       fetchPrivacyRequests();
     } else {
