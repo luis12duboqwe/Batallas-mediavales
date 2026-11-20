@@ -127,6 +127,8 @@ jobs:
         run: npm run test:resilience
       - name: Validate list response contracts
         run: npm run test:states
+      - name: Validate selective city store subscriptions
+        run: npm run test:store-subscriptions
       - name: Lint frontend
         run: npm run lint
       - name: Build frontend
@@ -295,6 +297,9 @@ jobs:
       - name: Run G26 mobile map performance budgets
         working-directory: batalla_medieval_frontend
         run: node e2e/g26-map-performance.mjs
+      - name: Run G27 adventure deadline transition
+        working-directory: batalla_medieval_frontend
+        run: node e2e/g27-adventure-deadline.mjs
       - name: Show service logs
         if: always()
         run: |

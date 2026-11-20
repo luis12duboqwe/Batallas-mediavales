@@ -12,7 +12,7 @@ const CityPopup = ({ cityId, coordinate, onClose }) => {
   const [showTroopSelector, setShowTroopSelector] = useState(false);
   const [selectedTroops, setSelectedTroops] = useState({});
   const popupRef = useModalAccessibility(Boolean(cityId), onClose);
-  const { currentCity } = useCityStore();
+  const currentCity = useCityStore((state) => state.currentCity);
 
   useEffect(() => {
     if (!cityId) return undefined;

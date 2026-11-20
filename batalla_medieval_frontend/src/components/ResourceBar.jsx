@@ -20,7 +20,10 @@ const ResourceItem = ({ label, value, icon, tip }) => (
 
 const ResourceBar = () => {
   const { t } = useTranslation();
-  const { resources, storageLimit, militaryEconomy, tickResources } = useCityStore();
+  const resources = useCityStore((state) => state.resources);
+  const storageLimit = useCityStore((state) => state.storageLimit);
+  const militaryEconomy = useCityStore((state) => state.militaryEconomy);
+  const tickResources = useCityStore((state) => state.tickResources);
 
   useEffect(() => {
     const interval = setInterval(() => tickResources(1), 1000);

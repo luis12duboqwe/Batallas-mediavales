@@ -6,7 +6,7 @@ const QuestsView = () => {
   const [quests, setQuests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState(null);
-  const { currentCity } = useCityStore();
+  const currentCity = useCityStore((state) => state.currentCity);
 
   useEffect(() => {
     fetchQuests();

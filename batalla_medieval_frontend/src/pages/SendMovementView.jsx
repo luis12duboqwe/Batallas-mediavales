@@ -11,7 +11,9 @@ const SendMovementView = () => {
   const queryParams = new URLSearchParams(location.search);
   const isOasis = queryParams.get('type') === 'oasis';
 
-  const { currentCity, sendMovement, loadCity } = useCityStore();
+  const currentCity = useCityStore((state) => state.currentCity);
+  const sendMovement = useCityStore((state) => state.sendMovement);
+  const loadCity = useCityStore((state) => state.loadCity);
 
   const [targetCity, setTargetCity] = useState(null);
   const [troops, setTroops] = useState({});

@@ -7,7 +7,10 @@ import { useCityStore } from '../store/cityStore';
 
 const TroopsView = () => {
   const { t } = useTranslation();
-  const { queues, train, loadCity, cancelTroop } = useCityStore();
+  const queues = useCityStore((state) => state.queues);
+  const train = useCityStore((state) => state.train);
+  const loadCity = useCityStore((state) => state.loadCity);
+  const cancelTroop = useCityStore((state) => state.cancelTroop);
   const [units, setUnits] = useState([]);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [message, setMessage] = useState('');

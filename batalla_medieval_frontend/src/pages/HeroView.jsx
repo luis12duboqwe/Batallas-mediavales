@@ -5,7 +5,8 @@ import { useCityStore } from '../store/cityStore';
 const EQUIPMENT_SLOTS = ['head', 'body', 'feet', 'weapon', 'horse', 'artifact'];
 
 const HeroView = () => {
-  const { currentCity, loadCity } = useCityStore();
+  const currentCity = useCityStore((state) => state.currentCity);
+  const loadCity = useCityStore((state) => state.loadCity);
   const worldId = currentCity?.world_id;
   const [hero, setHero] = useState(null);
   const [items, setItems] = useState([]);

@@ -13,7 +13,7 @@ const MESSAGE_TABS = [
 const MESSAGE_TAB_KEYS = MESSAGE_TABS.map(([tab]) => tab);
 
 const MessagesView = () => {
-  const { currentCity } = useCityStore();
+  const currentCity = useCityStore((state) => state.currentCity);
   const [activeTab, setActiveTab] = useState('inbox');
   const [messages, setMessages] = useState([]);
   const [selectedMessage, setSelectedMessage] = useState(null);

@@ -4,13 +4,22 @@ import Timer from '../components/Timer';
 import { useCityStore } from '../store/cityStore';
 import useModalAccessibility from '../hooks/useModalAccessibility';
 
+const adventureDeadlineMs = (adventure) => {
+  if (!adventure.started_at) return null;
+  const durationSeconds = Number(adventure.duration);
+  if (!Number.isFinite(durationSeconds)) return null;
+  const deadline = Date.parse(adventure.started_at) + durationSeconds * 1000;
+  return Number.isFinite(deadline) ? deadline : null;
+};
+
 const AdventuresView = () => {
-  const { currentCity } = useCityStore();
+  const currentCity = useCityStore((state) => state.currentCity);
   const worldId = currentCity?.world_id;
   const [adventures, setAdventures] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [claimResult, setClaimResult] = useState(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const resultDialogRef = useModalAccessibility(Boolean(claimResult), () => setClaimResult(null));
 
   const fetchAdventures = async () => {
@@ -20,6 +29,7 @@ const AdventuresView = () => {
     try {
       const res = await api.getAdventures(worldId);
       setAdventures(res.data || []);
+      setNowMs(Date.now());
     } catch (err) {
       console.error('Failed to load adventures', err);
       setError(err.response?.data?.detail || 'No se pudieron cargar las aventuras.');
@@ -31,6 +41,19 @@ const AdventuresView = () => {
   useEffect(() => {
     fetchAdventures();
   }, [worldId]);
+
+  // One scheduled update per upcoming deadline, not a full-screen rerender
+  // on the global resources heartbeat. This also handles several adventures.
+  useEffect(() => {
+    const upcoming = adventures
+      .filter((adventure) => adventure.status === 'active')
+      .map(adventureDeadlineMs)
+      .filter((deadline) => deadline !== null && deadline > nowMs);
+    if (upcoming.length === 0) return undefined;
+    const nearest = Math.min(...upcoming);
+    const timer = setTimeout(() => setNowMs(Date.now()), Math.max(0, nearest - Date.now() + 50));
+    return () => clearTimeout(timer);
+  }, [adventures, nowMs]);
 
   const handleStart = async (id) => {
     try {
@@ -71,9 +94,9 @@ const AdventuresView = () => {
         {adventures.map((adv) => {
           const isAvailable = adv.status === 'available';
           const isActive = adv.status === 'active';
-          const endTime = adv.started_at ? new Date(adv.started_at) : null;
-          if (endTime) endTime.setSeconds(endTime.getSeconds() + adv.duration);
-          const isReadyToClaim = isActive && endTime && new Date() >= endTime;
+          const deadlineMs = adventureDeadlineMs(adv);
+          const endTime = deadlineMs === null ? null : new Date(deadlineMs);
+          const isReadyToClaim = isActive && deadlineMs !== null && nowMs >= deadlineMs;
 
           return (
             <article key={adv.id} className="bg-gray-800 p-4 rounded border border-gray-700 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4" data-testid={`adventure-${adv.id}`}>
@@ -85,7 +108,7 @@ const AdventuresView = () => {
               </div>
 
               <div className="flex items-center gap-4">
-                {isActive && !isReadyToClaim && endTime && <div className="text-yellow-400 font-mono"><Timer targetDate={endTime} onFinish={fetchAdventures} /></div>}
+                {isActive && !isReadyToClaim && endTime && <div className="text-yellow-400 font-mono"><Timer endTime={endTime} /></div>}
                 {isAvailable && <button type="button" onClick={() => handleStart(adv.id)} className="btn btn-sm btn-primary" data-testid={`adventure-start-${adv.id}`}>Comenzar</button>}
                 {isReadyToClaim && <button type="button" onClick={() => handleClaim(adv.id)} className="btn btn-sm btn-success" data-testid={`adventure-claim-${adv.id}`}>Reclamar recompensa</button>}
                 {adv.status === 'completed' && <span className="text-green-500">Completada</span>}

@@ -15,7 +15,8 @@ const categoryMeta = [
 ];
 
 const MovementsView = () => {
-  const { movements, loadMovements } = useCityStore();
+  const movements = useCityStore((state) => state.movements);
+  const loadMovements = useCityStore((state) => state.loadMovements);
 
   useEffect(() => {
     loadMovements().catch(() => {});
