@@ -235,3 +235,96 @@ def test_private_realtime_channel_requires_explicit_world_scope():
         )
     )
     assert world_socket.messages == []
+
+
+def test_alliance_realtime_rechecks_current_recipients_after_member_is_kicked():
+    manager = ChatManager()
+    sender = DummySocket()
+    continuing_member = DummySocket()
+    kicked_member = DummySocket()
+    foreign_world = DummySocket()
+
+    for socket, user_id, world_id in (
+        (sender, 1, 101),
+        (continuing_member, 2, 101),
+        (kicked_member, 3, 101),
+        (foreign_world, 4, 202),
+    ):
+        manager.register_connection(
+            socket,
+            channel="alliance",
+            user_id=user_id,
+            world_id=world_id,
+            alliance_id=55,
+        )
+
+    initial = {"content": "before kick"}
+    asyncio.run(
+        manager.broadcast(
+            channel="alliance",
+            message=initial,
+            sender_id=1,
+            world_id=101,
+            alliance_id=55,
+            authorized_user_ids={1, 2, 3},
+        )
+    )
+    assert sender.messages == [initial]
+    assert continuing_member.messages == [initial]
+    assert kicked_member.messages == [initial]
+    assert foreign_world.messages == []
+    assert foreign_world not in manager.connection_meta
+
+    after_kick = {"content": "after kick"}
+    asyncio.run(
+        manager.broadcast(
+            channel="alliance",
+            message=after_kick,
+            sender_id=1,
+            world_id=101,
+            alliance_id=55,
+            authorized_user_ids={1, 2},
+        )
+    )
+    assert sender.messages[-1] == after_kick
+    assert continuing_member.messages[-1] == after_kick
+    assert kicked_member.messages == [initial]
+    assert kicked_member not in manager.connection_meta
+    assert kicked_member not in manager.alliance_connections[55]
+
+
+def test_alliance_broadcast_fails_closed_without_current_membership_snapshot():
+    manager = ChatManager()
+    socket = DummySocket()
+    manager.register_connection(
+        socket,
+        channel="alliance",
+        user_id=10,
+        world_id=101,
+        alliance_id=55,
+    )
+    # Neither a missing authorization snapshot nor one for the wrong
+    # world is permission to deliver an alliance message.
+    asyncio.run(
+        manager.broadcast(
+            channel="alliance",
+            message={"content": "missing recipients"},
+            sender_id=10,
+            alliance_id=55,
+            world_id=101,
+        )
+    )
+    assert socket.messages == []
+
+    asyncio.run(
+        manager.broadcast(
+            channel="alliance",
+            message={"content": "wrong world"},
+            sender_id=10,
+            alliance_id=55,
+            world_id=202,
+            authorized_user_ids={10},
+        )
+    )
+    assert socket.messages == []
+    assert socket not in manager.connection_meta
