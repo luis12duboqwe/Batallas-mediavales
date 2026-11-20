@@ -407,3 +407,15 @@ def test_deploy_rejects_concurrent_rollback_lock_before_docker(deploy_lab):
         assert "already running" in result.stderr
         assert _trace(deploy_lab) == []
         assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+
+def test_symlink_operation_lock_is_rejected_before_docker(deploy_lab):
+    target = deploy_lab["root"] / "unrelated.txt"
+    target.write_text("preserve", encoding="utf-8")
+    link = deploy_lab["root"] / ".ops-state" / "operation.lock"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(target)
+    result = _run(deploy_lab)
+    assert result.returncode == 2
+    assert "symbolic link" in result.stderr
+    assert target.read_text(encoding="utf-8") == "preserve"
+    assert _trace(deploy_lab) == []
