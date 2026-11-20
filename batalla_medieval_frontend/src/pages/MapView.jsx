@@ -198,11 +198,11 @@ const MapView = () => {
               No hay casillas disponibles en esta zona.
             </div>
           )}
-          {!loadError && <div className="relative w-max mx-auto p-10" data-testid="map-grid-content">
-            <button type="button" aria-label="Mover mapa hacia arriba" onClick={() => handleMove(0, 5)} className="absolute top-2 left-1/2 -translate-x-1/2 btn btn-xs btn-circle"><GameIcon name="arrowUp" size={18} /></button>
-            <button type="button" aria-label="Mover mapa hacia abajo" onClick={() => handleMove(0, -5)} className="absolute bottom-2 left-1/2 -translate-x-1/2 btn btn-xs btn-circle"><GameIcon name="arrowDown" size={18} /></button>
-            <button type="button" aria-label="Mover mapa hacia la izquierda" onClick={() => handleMove(-5, 0)} className="absolute left-2 top-1/2 -translate-y-1/2 btn btn-xs btn-circle"><GameIcon name="arrowLeft" size={18} /></button>
-            <button type="button" aria-label="Mover mapa hacia la derecha" onClick={() => handleMove(5, 0)} className="absolute right-2 top-1/2 -translate-y-1/2 btn btn-xs btn-circle"><GameIcon name="arrowRight" size={18} /></button>
+          {!loadError && <div className="relative w-max mx-auto p-12" data-testid="map-grid-content">
+            <button type="button" aria-label="Mover mapa hacia arriba" onClick={() => handleMove(0, 5)} className="absolute top-1 left-1/2 -translate-x-1/2 btn btn-circle w-11 h-11 min-h-0"><GameIcon name="arrowUp" size={18} /></button>
+            <button type="button" aria-label="Mover mapa hacia abajo" onClick={() => handleMove(0, -5)} className="absolute bottom-1 left-1/2 -translate-x-1/2 btn btn-circle w-11 h-11 min-h-0"><GameIcon name="arrowDown" size={18} /></button>
+            <button type="button" aria-label="Mover mapa hacia la izquierda" onClick={() => handleMove(-5, 0)} className="absolute left-1 top-1/2 -translate-y-1/2 btn btn-circle w-11 h-11 min-h-0"><GameIcon name="arrowLeft" size={18} /></button>
+            <button type="button" aria-label="Mover mapa hacia la derecha" onClick={() => handleMove(5, 0)} className="absolute right-1 top-1/2 -translate-y-1/2 btn btn-circle w-11 h-11 min-h-0"><GameIcon name="arrowRight" size={18} /></button>
             <p id="map-keyboard-help" className="sr-only">Usa las flechas para moverte entre casillas. Inicio y Fin navegan por la fila; Control más Inicio o Fin va a los extremos del mapa. Enter o Espacio selecciona una casilla.</p>
             <div ref={mapGridRef} className="grid gap-0.5 bg-black/50 p-1" role="group" aria-label="Cuadrícula del mapa" aria-describedby="map-keyboard-help">
               {mapRows.map(([y, rowTiles]) => (
@@ -254,6 +254,10 @@ const MapView = () => {
                       <button type="button" disabled title="Selecciona Espionaje en el formulario de Enviar Tropas." className="btn btn-sm btn-info w-full">Espiar</button>
                       <button type="button" disabled title="Utiliza la sección Mercado para comerciar." className="btn btn-sm btn-success w-full">Comerciar</button>
                       <button type="button" disabled title="Utiliza la sección Mensajes para contactar jugadores." className="btn btn-sm btn-warning w-full">Mensaje</button>
+                      <p className="col-span-2 text-xs text-gray-200">
+                        Para espiar, abre Atacar y elige Espionaje en el formulario.
+                        Comercio y mensajes se gestionan desde sus secciones del menú.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -262,7 +266,7 @@ const MapView = () => {
                   <div><div className="text-sm text-gray-400">Oasis</div><div className="font-bold text-lg text-white flex items-center gap-2"><GameIcon name={selectedOasisResource?.icon || 'oasis'} size={20} />{selectedOasisResource?.label || selectedTile.resource_type} (+{selectedTile.bonus_percent}%)</div></div>
                   <PveDifficulty tile={selectedTile} />
                   <div><div className="text-sm text-gray-400">Estado</div><div className="font-bold text-white">{selectedTile.is_conquered ? (selectedTile.owner_id ? 'Conquistado' : 'Ocupado') : 'Salvaje'}</div></div>
-                  {canSendFromCity && <div className="grid grid-cols-2 gap-2"><button type="button" disabled={loading} className="btn btn-sm btn-error w-full" onClick={() => navigate(`/send-movement/${selectedTile.oasis_id}?type=oasis`)}>Atacar</button><button type="button" disabled title="Los oasis se atacan desde el formulario de movimiento." className="btn btn-sm btn-info w-full">Espiar</button></div>}
+                  {canSendFromCity && <div className="grid grid-cols-2 gap-2"><button type="button" disabled={loading} className="btn btn-sm btn-error w-full" onClick={() => navigate(`/send-movement/${selectedTile.oasis_id}?type=oasis`)}>Atacar</button><button type="button" disabled title="Los oasis se atacan desde el formulario de movimiento." className="btn btn-sm btn-info w-full">Espiar</button><p className="col-span-2 text-xs text-gray-200">El espionaje de oasis no está disponible desde el mapa.</p></div>}
                 </div>
               ) : (
                 <div className="text-gray-500 italic mt-4">Terreno salvaje. No hay asentamientos aquí.</div>
