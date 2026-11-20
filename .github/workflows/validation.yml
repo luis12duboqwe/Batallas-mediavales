@@ -287,6 +287,9 @@ jobs:
       - name: Run G24 resilience journey
         working-directory: batalla_medieval_frontend
         run: node e2e/g24-resilience.mjs
+      - name: Run G25 loading/empty/error journey
+        working-directory: batalla_medieval_frontend
+        run: node e2e/g25-states.mjs
       - name: Show service logs
         if: always()
         run: |

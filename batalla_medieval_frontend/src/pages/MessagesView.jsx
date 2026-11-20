@@ -17,6 +17,8 @@ const MessagesView = () => {
   const [messages, setMessages] = useState([]);
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const [recipientSearch, setRecipientSearch] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [recipientId, setRecipientId] = useState(null);
@@ -24,29 +26,27 @@ const MessagesView = () => {
   const [content, setContent] = useState('');
 
   useEffect(() => {
-    if (activeTab === 'inbox') loadInbox();
-    if (activeTab === 'sent') loadSent();
-  }, [activeTab]);
-
-  const loadInbox = async () => {
+    let active = true;
+    setMessages([]);
+    setLoadError(false);
+    if (activeTab === 'compose') {
+      setLoading(false);
+      return () => { active = false; };
+    }
     setLoading(true);
-    try {
-      const { data } = await api.getInbox();
-      setMessages(data);
-    } catch (error) {
-      console.error(error);
-    } finally { setLoading(false); }
-  };
-
-  const loadSent = async () => {
-    setLoading(true);
-    try {
-      const { data } = await api.getSent();
-      setMessages(data);
-    } catch (error) {
-      console.error(error);
-    } finally { setLoading(false); }
-  };
+    const request = activeTab === 'inbox' ? api.getInbox() : api.getSent();
+    request.then(({ data }) => {
+      if (active) setMessages(Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : []);
+    }).catch((error) => {
+      if (active) {
+        console.error(error);
+        setLoadError(true);
+      }
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [activeTab, retryKey]);
 
   const handleSearch = async (query) => {
     setRecipientSearch(query);
@@ -179,8 +179,13 @@ const MessagesView = () => {
               <div className="max-h-[600px] overflow-y-auto">
                 {loading ? (
                   <div className="p-4 text-center text-gray-500" role="status">Cargando...</div>
+                ) : loadError ? (
+                  <div role="alert" data-testid="messages-load-error" className="p-4 text-sm text-red-200">
+                    <p>No se pudieron cargar los mensajes.</p>
+                    <button type="button" className="btn-primary mt-3" onClick={() => setRetryKey((value) => value + 1)}>Reintentar mensajes</button>
+                  </div>
                 ) : messages.length === 0 ? (
-                  <div className="p-4 text-center text-gray-500">No hay mensajes</div>
+                  <div data-testid="messages-empty" role="status" className="p-4 text-center text-gray-500">No hay mensajes</div>
                 ) : (
                   messages.map((message) => (
                     <button

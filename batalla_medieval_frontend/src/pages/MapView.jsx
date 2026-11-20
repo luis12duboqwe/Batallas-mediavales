@@ -30,6 +30,8 @@ const MapView = () => {
   const [center, setCenter] = useState({ x: 0, y: 0 });
   const [tiles, setTiles] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const [selectedTile, setSelectedTile] = useState(null);
   const [jumpCoords, setJumpCoords] = useState({ x: 0, y: 0 });
 
@@ -41,20 +43,31 @@ const MapView = () => {
   }, [currentCity]);
 
   useEffect(() => {
-    if (user?.world_id) fetchTiles();
-  }, [center, user?.world_id]);
-
-  const fetchTiles = async () => {
-    setLoading(true);
-    try {
-      const res = await api.getMapTiles(user.world_id, center.x, center.y, RADIUS);
-      setTiles(res.data.tiles);
-    } catch (error) {
-      console.error('Failed to load map', error);
-    } finally {
+    let active = true;
+    if (!user?.world_id) {
+      setTiles([]);
       setLoading(false);
+      return () => { active = false; };
     }
-  };
+    setLoading(true);
+    setLoadError(false);
+    setSelectedTile(null);
+    api.getMapTiles(user.world_id, center.x, center.y, RADIUS)
+      .then(({ data }) => {
+        if (active) setTiles(Array.isArray(data?.tiles) ? data.tiles : []);
+      })
+      .catch((error) => {
+        if (active) {
+          console.error('Failed to load map', error);
+          setTiles([]);
+          setLoadError(true);
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [center.x, center.y, user?.world_id, retryKey]);
 
   const handleJump = (event) => {
     event.preventDefault();
@@ -145,7 +158,18 @@ const MapView = () => {
       <div className="flex flex-1 min-w-0 flex-col gap-4 lg:flex-row lg:overflow-hidden">
         <div className="min-h-[28rem] min-w-0 flex-1 relative bg-gray-900 rounded overflow-auto p-4" data-testid="map-grid-panel">
           {loading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20" role="status">Cargando...</div>}
-          <div className="relative w-max mx-auto p-10" data-testid="map-grid-content">
+          {loadError && !loading && (
+            <div role="alert" data-testid="map-load-error" className="rounded border border-red-700 bg-red-950/60 p-4 text-sm text-red-100">
+              <p>No se pudo cargar el mapa. La vista se recuperará al reintentar.</p>
+              <button type="button" className="btn-primary mt-3" onClick={() => setRetryKey((value) => value + 1)}>Reintentar mapa</button>
+            </div>
+          )}
+          {!loading && !loadError && tiles.length === 0 && (
+            <div role="status" data-testid="map-empty" className="p-4 text-center text-gray-300">
+              No hay casillas disponibles en esta zona.
+            </div>
+          )}
+          {!loadError && <div className="relative w-max mx-auto p-10" data-testid="map-grid-content">
             <button type="button" aria-label="Mover mapa hacia arriba" onClick={() => handleMove(0, 5)} className="absolute top-2 left-1/2 -translate-x-1/2 btn btn-xs btn-circle"><GameIcon name="arrowUp" size={18} /></button>
             <button type="button" aria-label="Mover mapa hacia abajo" onClick={() => handleMove(0, -5)} className="absolute bottom-2 left-1/2 -translate-x-1/2 btn btn-xs btn-circle"><GameIcon name="arrowDown" size={18} /></button>
             <button type="button" aria-label="Mover mapa hacia la izquierda" onClick={() => handleMove(-5, 0)} className="absolute left-2 top-1/2 -translate-y-1/2 btn btn-xs btn-circle"><GameIcon name="arrowLeft" size={18} /></button>
@@ -157,7 +181,7 @@ const MapView = () => {
                 </div>
               ))}
             </div>
-          </div>
+          </div>}
         </div>
 
         <aside className="w-full shrink-0 bg-gray-800 p-4 rounded shadow-lg border border-gray-700 flex flex-col lg:w-80" aria-label="Detalles de la casilla seleccionada" data-testid="map-details-panel">
