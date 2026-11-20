@@ -8,6 +8,7 @@ ENV_FILE="/tmp/bm-g5-ci.env"
 BAD_ENV_FILE="/tmp/bm-g5-ci-bad.env"
 BAD_TLS_ENV_FILE="/tmp/bm-g5-ci-bad-tls.env"
 BACKUP_DIR="/tmp/bm-g5-backups"
+FAKE_DOCKER_DIR=""
 COMPOSE_FILE="docker-compose.deploy.yml"
 PROJECT_NAME="bm-g5-ci"
 SMOKE_PID=""
@@ -18,6 +19,7 @@ cleanup() {
   fi
   docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1 || true
   rm -rf "$BACKUP_DIR" "$ENV_FILE" "$BAD_ENV_FILE" "$BAD_TLS_ENV_FILE"
+  if [[ -n "$FAKE_DOCKER_DIR" ]]; then rm -rf "$FAKE_DOCKER_DIR"; fi
 }
 trap cleanup EXIT
 
@@ -124,6 +126,43 @@ CURRENT_MARKER="$(docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$
   psql -h 127.0.0.1 -U batalla -d batalla_ci -Atqc "SELECT marker FROM recovery_probe WHERE id=1;")"
 if [[ "$CURRENT_MARKER" != "after-backup" ]]; then
   echo "Refused restore unexpectedly changed the database: '$CURRENT_MARKER'" >&2
+  exit 1
+fi
+
+# Corrupt a copied archive but keep a checksum pointing at the healthy source.
+TAMPERED_BACKUP="$BACKUP_DIR/tampered-ci.dump"
+cp "$BACKUP_FILE" "$TAMPERED_BACKUP"
+cp "${BACKUP_FILE}.sha256" "${TAMPERED_BACKUP}.sha256"
+printf 'intentional-corruption' >> "$TAMPERED_BACKUP"
+if COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" RESTORE_START_SERVICES=0 \
+  bash ops/restore_postgres.sh "$ENV_FILE" "$TAMPERED_BACKUP" "RESTORE:batalla_ci"; then
+  echo "Checksum for a different file wrongly accepted a tampered archive" >&2
+  exit 1
+fi
+
+# Inject a Docker stop failure; restore must refuse before touching the DB.
+FAKE_DOCKER_DIR="$(mktemp -d /tmp/bm-g5-fail-stop.XXXXXX)"
+REAL_DOCKER="$(command -v docker)"
+cat > "$FAKE_DOCKER_DIR/docker" <<'SH'
+#!/usr/bin/env bash
+if [[ "$*" == *"stop backend worker"* ]]; then
+  echo "Injected refusal to stop application writers" >&2
+  exit 73
+fi
+exec "$BM_REAL_DOCKER" "$@"
+SH
+chmod 700 "$FAKE_DOCKER_DIR/docker"
+if BM_REAL_DOCKER="$REAL_DOCKER" PATH="$FAKE_DOCKER_DIR:$PATH" \
+  COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" RESTORE_START_SERVICES=0 \
+  bash ops/restore_postgres.sh "$ENV_FILE" "$BACKUP_FILE" "RESTORE:batalla_ci"; then
+  echo "Restore continued despite failure to stop writers" >&2
+  exit 1
+fi
+
+CURRENT_MARKER="$(docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
+  psql -h 127.0.0.1 -U batalla -d batalla_ci -Atqc "SELECT marker FROM recovery_probe WHERE id=1;")"
+if [[ "$CURRENT_MARKER" != "after-backup" ]]; then
+  echo "Refused fail-closed restore unexpectedly changed the database: '$CURRENT_MARKER'" >&2
   exit 1
 fi
 

@@ -48,7 +48,18 @@ if [[ ! -f "$CHECKSUM_FILE" ]]; then
   echo "Restore refused: checksum file missing: $CHECKSUM_FILE" >&2
   exit 2
 fi
-sha256sum --check "$CHECKSUM_FILE"
+# Verify the *selected* archive, not a different filename embedded in .sha256.
+EXPECTED_HASH="$(awk 'NR == 1 {print $1}' "$CHECKSUM_FILE")"
+if [[ ! "$EXPECTED_HASH" =~ ^[[:xdigit:]]{64}$ ]] || [[ "$(wc -l < "$CHECKSUM_FILE")" -ne 1 ]]; then
+  echo "Restore refused: invalid backup checksum format" >&2
+  exit 2
+fi
+ACTUAL_HASH="$(sha256sum "$BACKUP_FILE" | cut -d' ' -f1)"
+if [[ "${EXPECTED_HASH,,}" != "$ACTUAL_HASH" ]]; then
+  echo "Restore refused: checksum mismatch for requested archive" >&2
+  exit 2
+fi
+echo "Backup checksum verified for requested archive"
 
 # pg_restore --create uses the database name embedded in the archive, NOT the
 # -d connection database. Refuse a wrong-database archive *before* stopping
@@ -61,7 +72,7 @@ if [[ "$ARCHIVE_DATABASE" != "$POSTGRES_DB" ]]; then
 fi
 
 echo "Stopping application writers before restore"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" stop backend worker || true
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" stop backend worker
 
 echo "Terminating remaining database client sessions"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
