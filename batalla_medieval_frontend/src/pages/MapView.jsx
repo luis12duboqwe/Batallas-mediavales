@@ -64,10 +64,14 @@ const MapView = () => {
       return () => { active = false; };
     }
     setLoading(true);
-    setLoadError(false);
+    // Preserve the visible retry affordance while a later request (including
+    // an initial city-centering request) is in flight. Removing the alert here
+    // makes the retry button transient and can strand keyboard/mouse users.
+    // Clear the error only after a successful response.
     api.getMapTiles(worldId, center.x, center.y, RADIUS)
       .then(({ data }) => {
         if (!active) return;
+        setLoadError(false);
         const nextTiles = readMapTilesResponse(data);
         setTiles(nextTiles);
         // Keep selection only while its coordinate remains visible, and refresh
@@ -187,7 +191,7 @@ const MapView = () => {
       <div className="flex flex-1 min-w-0 flex-col gap-4 lg:flex-row lg:overflow-hidden">
         <div className="min-h-[28rem] min-w-0 flex-1 relative bg-gray-900 rounded overflow-auto p-4" data-testid="map-grid-panel" aria-busy={loading}>
           {loading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20" role="status">Cargando...</div>}
-          {loadError && !loading && (
+          {loadError && (
             <div role="alert" data-testid="map-load-error" className="rounded border border-red-700 bg-red-950/60 p-4 text-sm text-red-100">
               <p>No se pudo cargar el mapa. La vista se recuperará al reintentar.</p>
               <button type="button" className="btn-primary mt-3" onClick={() => setRetryKey((value) => value + 1)}>Reintentar mapa</button>
