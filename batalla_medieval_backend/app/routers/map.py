@@ -171,6 +171,38 @@ def get_map_tiles(
     return schemas.MapResponse(tiles=tiles)
 
 
+@router.get("/city/{city_id}", response_model=schemas.MapCityTarget)
+def get_map_city_target(
+    city_id: int,
+    world_id: int,
+    db: Session = Depends(get_db),
+    _membership: models.PlayerWorld = Depends(require_world_access),
+):
+    """Return map-public metadata only, scoped to the joined world.
+
+    The owner-only /city/{id}/status must remain private: it includes
+    resources, military queues, upkeep and other sensitive information.
+    """
+    city = (
+        db.query(models.City)
+        .options(selectinload(models.City.owner))
+        .filter(models.City.id == city_id, models.City.world_id == world_id)
+        .first()
+    )
+    if city is None:
+        raise error_response(404, "map_target_not_found", "Target city not found")
+    return schemas.MapCityTarget(
+        id=city.id,
+        name=city.name,
+        x=city.x,
+        y=city.y,
+        world_id=city.world_id,
+        settlement_type=city.settlement_type,
+        owner_id=city.owner_id,
+        owner_name=city.owner.username if city.owner else None,
+    )
+
+
 @router.get("/oasis/{oasis_id}", response_model=schemas.OasisRead)
 def get_oasis(
     oasis_id: int,
