@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ReportCard from '../components/ReportCard';
 import { useCityStore } from '../store/cityStore';
 
@@ -97,11 +97,30 @@ const ReportEntry = ({ report }) => {
 };
 
 const ReportsView = () => {
-  const { reports, loadReports } = useCityStore();
+  const loadReports = useCityStore((state) => state.loadReports);
+  const worldId = useCityStore((state) => state.currentCity?.world_id);
+  const [reports, setReports] = useState([]);
+  const [loadState, setLoadState] = useState('loading');
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    loadReports().catch(() => {});
-  }, [loadReports]);
+    let active = true;
+    setReports([]);
+    setLoadState('loading');
+    loadReports().then((result) => {
+      if (active) {
+        if (!Array.isArray(result?.reports)) throw new Error('La respuesta de reportes es inválida.');
+        setReports(result.reports);
+        setLoadState('ready');
+      }
+    }).catch((error) => {
+      if (active) {
+        console.error('Failed to load reports', error);
+        setLoadState('error');
+      }
+    });
+    return () => { active = false; };
+  }, [loadReports, worldId, retryKey]);
 
   return (
     <div className="space-y-6">
@@ -110,9 +129,15 @@ const ReportsView = () => {
         <p className="text-amber-100/80">Resultados de batallas y misiones de espionaje</p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
-        {reports.length === 0 && <div className="skeleton col-span-2 h-32 w-full" />}
-        {reports.length === 0 && <p className="col-span-2 text-gray-400">No hay reportes aún.</p>}
-        {reports.map((report) => (
+        {loadState === 'loading' && <div role="status" data-testid="reports-loading" className="skeleton col-span-2 h-32 w-full" aria-label="Cargando reportes" />}
+        {loadState === 'error' && (
+          <div role="alert" data-testid="reports-load-error" className="col-span-2 rounded border border-red-700 bg-red-950/60 p-4 text-red-100">
+            <p>No se pudieron cargar los reportes.</p>
+            <button type="button" className="btn-primary mt-3" onClick={() => setRetryKey((value) => value + 1)}>Reintentar reportes</button>
+          </div>
+        )}
+        {loadState === 'ready' && reports.length === 0 && <p data-testid="reports-empty" role="status" className="col-span-2 text-gray-400">No hay reportes aún.</p>}
+        {loadState === 'ready' && reports.map((report) => (
           <ReportEntry key={report.id} report={report} />
         ))}
       </div>

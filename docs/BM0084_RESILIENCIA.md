@@ -15,6 +15,14 @@
 - `node e2e/g24-resilience.mjs`: desconexión, recuperación, mantenimiento, recarga con JWT inválido y sesión expirada en español.
 - Frontend lint/build, backend, concurrencia, G21–G24, navegador, auditoría y Docker obligatorios antes de fusionar.
 
+## Bloque 2: estados de carga, vacío, error y reintento
+
+- Mapa: cada nueva zona descarta respuestas retrasadas de zonas anteriores; los errores se distinguen de un mapa sin casillas, con reintento manual.
+- Mensajería: cambio de carpeta y reintento cancelan lógicamente peticiones anteriores; la carpeta vacía solo se muestra si la solicitud tuvo éxito.
+- Reportes: estado de carga, error recuperable y vacío real separados; no quedan esqueletos de carga permanentes.
+- G25 fuerza respuestas 503 hasta reintento explícito, incluso con dobles peticiones iniciales; verifica recuperación y vacíos con Playwright.
+- Los normalizadores validan los contratos HTTP 200: `null`, HTML, objetos incompletos y tipos erróneos no pueden ocultarse como listas vacías.
+
 ## Siguiente bloque de BM-0084
 
 Completar estados vacíos, fallos recuperables y casos adversariales por pantalla (mapa, mensajes, reportes, recursos) antes de certificar toda la fase.
