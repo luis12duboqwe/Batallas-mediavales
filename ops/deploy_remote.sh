@@ -90,6 +90,28 @@ if [[ "$had_previous" -eq 1 && ! "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]; t
   echo "Deployment refused: existing release has no trustworthy .release-sha" >&2
   exit 2
 fi
+
+previous_public_base_url=""
+if [[ "$had_previous" -eq 1 ]]; then
+  python3 ops/preflight.py "$PREVIOUS_ENV"
+  # A database switch requires a separately rehearsed migration and recovery
+  # plan; the automatic rollback can only restore the same PostgreSQL identity.
+  previous_public_base_url="$(python3 - "$PREVIOUS_ENV" "$NEXT_ENV" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, 'ops')
+from preflight import read_env
+
+previous = read_env(Path(sys.argv[1]))
+next_release = read_env(Path(sys.argv[2]))
+keys = ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "DB_URL")
+if any(previous.get(key) != next_release.get(key) for key in keys):
+    print("Deployment refused: PostgreSQL connection changed; manual migration required", file=sys.stderr)
+    raise SystemExit(2)
+print(previous["PUBLIC_BASE_URL"])
+PY
+)"
+fi
 mv "$NEXT_ENV" "$CURRENT_ENV"
 
 rollback_backup=""
@@ -121,7 +143,7 @@ rollback() {
     fi
 
     if [[ "$recovered" -eq 1 ]]; then
-      if python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-ms "$MAX_P95_MS"; then
+      if python3 ops/smoke_http.py --base-url "$previous_public_base_url" --requests 20 --max-p95-ms "$MAX_P95_MS"; then
         mv -f -- "$recovery_env" "$CURRENT_ENV"
         recovery_env=""
         if [[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]; then
