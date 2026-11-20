@@ -1,9 +1,16 @@
 import axios from 'axios';
+import { localizeAxiosError } from '../utils/apiError';
 
 const axiosClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
   withCredentials: true,
 });
+
+// BM-0083: localize player-facing legacy errors without changing HTTP contracts.
+axiosClient.interceptors.response.use(
+  (response) => response,
+  (error) => Promise.reject(localizeAxiosError(error)),
+);
 
 axiosClient.interceptors.request.use((config) => {
   const token = localStorage.getItem('bm_token');
