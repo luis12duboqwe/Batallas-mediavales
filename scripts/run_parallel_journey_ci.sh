@@ -96,7 +96,15 @@ python scripts/prepare_g9_combat_e2e.py
 python scripts/prepare_g10_espionage_e2e.py
 (cd batalla_medieval_frontend && node e2e/parallel-journey-fixtures.mjs)
 start_api
+# Focused state and browser regressions must run on a clean G2 login fixture,
+# before the core journey mutates player sessions and world memberships.
+(cd batalla_medieval_frontend && node --test e2e/parallel-adventures-state.mjs)
+(cd batalla_medieval_frontend && node e2e/parallel-adventures-flow.mjs)
 run_suite core onboarding progression queue-completion movement-target security crossworld map-actions
+# Map accessibility, navigation and contextual actions are separate from
+# the broad player-journey suites and must remain mandatory gates.
+(cd batalla_medieval_frontend && node e2e/parallel-map-navigation.mjs)
+(cd batalla_medieval_frontend && node e2e/parallel-map-actions-integration.mjs)
 stop_api
 
 create_db live
