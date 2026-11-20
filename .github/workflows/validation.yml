@@ -300,6 +300,9 @@ jobs:
       - name: Run G27 adventure deadline transition
         working-directory: batalla_medieval_frontend
         run: node e2e/g27-adventure-deadline.mjs
+      - name: Run G28 authenticated account export
+        working-directory: batalla_medieval_frontend
+        run: node e2e/g28-account-export.mjs
       - name: Show service logs
         if: always()
         run: |
