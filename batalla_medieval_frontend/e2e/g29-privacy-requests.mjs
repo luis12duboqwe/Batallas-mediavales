@@ -53,6 +53,61 @@ try {
   await page.getByTestId('privacy-case-' + created.id).waitFor({ timeout: 15000 });
   await page.getByText('g2_browser').first().waitFor();
   assert.equal(await page.getByTestId('privacy-error').count(), 0);
+
+  // Preserve prior cases when the initial history GET is still pending.
+  await page.getByTestId('privacy-kind').selectOption('retention');
+  const [retentionResponse] = await Promise.all([
+    page.waitForResponse((response) => response.url().includes('/auth/me/privacy-requests') &&
+      response.request().method() === 'POST', { timeout: 15000 }),
+    page.getByTestId('privacy-submit').click(),
+  ]);
+  const retention = await retentionResponse.json();
+  await page.getByTestId('privacy-case-' + retention.id).waitFor();
+
+  let firstSlowGet = true;
+  let noteGetStarted;
+  const getStarted = new Promise((resolve) => { noteGetStarted = resolve; });
+  await page.route('**/auth/me/privacy-requests', async (route) => {
+    if (route.request().method() === 'GET' && firstSlowGet) {
+      firstSlowGet = false;
+      noteGetStarted();
+      await new Promise((resolve) => setTimeout(resolve, 1400));
+    }
+    await route.continue();
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await getStarted;
+  await page.getByTestId('privacy-kind').selectOption('rectification');
+  const [rectificationResponse] = await Promise.all([
+    page.waitForResponse((response) => response.url().includes('/auth/me/privacy-requests') &&
+      response.request().method() === 'POST', { timeout: 15000 }),
+    page.getByTestId('privacy-submit').click(),
+  ]);
+  const rectification = await rectificationResponse.json();
+  await page.getByTestId('privacy-case-' + rectification.id).waitFor();
+  await page.getByTestId('privacy-case-' + retention.id).waitFor({ timeout: 15000 });
+  await page.getByTestId('privacy-case-' + created.id).waitFor();
+  assert.equal(await page.locator('[data-testid^="privacy-case-"]').count(), 3);
+  await page.unroute('**/auth/me/privacy-requests');
+
+  // A rejected POST must leave earlier cases visible and retain its error.
+  let failNextPost = true;
+  await page.route('**/auth/me/privacy-requests', async (route) => {
+    if (route.request().method() === 'POST' && failNextPost) {
+      failNextPost = false;
+      return route.fulfill({
+        status: 503, contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Temporary failure' }),
+      });
+    }
+    return route.continue();
+  });
+  await page.getByTestId('privacy-kind').selectOption('other');
+  await page.getByTestId('privacy-submit').click();
+  await page.getByTestId('privacy-error').waitFor({ timeout: 15000 });
+  await page.getByTestId('privacy-case-' + retention.id).waitFor();
+  assert.equal(await page.locator('[data-testid^="privacy-case-"]').count(), 3);
+  await page.unroute('**/auth/me/privacy-requests');
   assert.deepEqual(errors, []);
   console.log('G29 BM-0090 passed: auth, human review intake, dedupe, persistence, account intact');
 } finally {

@@ -37,10 +37,10 @@ const ProfileView = () => {
     }
   }, [user]);
 
-  const fetchPrivacyRequests = async () => {
+  const fetchPrivacyRequests = async (keepError = false) => {
     const epoch = ++privacyEpoch.current;
     setPrivacyLoading(true);
-    setPrivacyError('');
+    if (!keepError) setPrivacyError('');
     try {
       const { data } = await api.getPrivacyRequests();
       if (epoch === privacyEpoch.current) {
@@ -48,7 +48,7 @@ const ProfileView = () => {
       }
     } catch {
       if (epoch === privacyEpoch.current) {
-        setPrivacyError('No se pudo consultar el estado de las solicitudes.');
+        setPrivacyError((previous) => keepError && previous ? previous : 'No se pudo consultar el estado de las solicitudes.');
       }
     } finally {
       if (epoch === privacyEpoch.current) setPrivacyLoading(false);
@@ -60,10 +60,11 @@ const ProfileView = () => {
     setPrivacyDetails('');
     setPrivacyNotice('');
     setPrivacyError('');
+    // Never render the previous account's request history on a session switch.
+    setPrivacyRequests([]);
     if (user?.id) {
       fetchPrivacyRequests();
     } else {
-      setPrivacyRequests([]);
       setPrivacyLoading(false);
     }
     return () => { privacyEpoch.current += 1; };
@@ -95,7 +96,12 @@ const ProfileView = () => {
         setPrivacyError('No se pudo registrar la solicitud. Inténtalo de nuevo.');
       }
     } finally {
-      if (epoch === privacyEpoch.current) setPrivacySubmitting(false);
+      if (epoch === privacyEpoch.current) {
+        setPrivacySubmitting(false);
+        // A submit can invalidate a slower initial GET. Always re-read the
+        // complete history, even if the POST failed; preserve its error.
+        void fetchPrivacyRequests(true);
+      }
     }
   };
 
