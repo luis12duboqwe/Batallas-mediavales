@@ -113,6 +113,17 @@ def test_invalid_building_name_is_rejected_by_all_calculators():
         balance.get_building_max_level("not_a_building")
 
 
+def test_building_effects_only_recognize_versioned_catalog_entries():
+    for building_type in balance.BUILDING_ORDER:
+        effect = balance.get_building_effect_definition(building_type)
+        assert effect["type"]
+        assert effect == balance.snapshot()["buildings"]["catalog"][building_type]["effect"]
+
+    for invalid in ("", "nonexistent", "quarry", "clay_mine"):
+        with pytest.raises(ValueError, match="Unknown building type"):
+            balance.get_building_effect_definition(invalid)
+
+
 @pytest.mark.parametrize("level", [0, 1, 2, 10, 20])
 def test_storage_and_population_follow_canonical_capacity_formulas(level):
     assert balance.get_storage_capacity(level) == 5000.0 + 2000.0 * level
