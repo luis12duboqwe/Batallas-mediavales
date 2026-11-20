@@ -328,3 +328,45 @@ def test_alliance_broadcast_fails_closed_without_current_membership_snapshot():
     )
     assert socket.messages == []
     assert socket not in manager.connection_meta
+
+
+def test_alliance_recipient_lookup_reflects_kick_and_rejects_other_world(db_session):
+    from app.routers import chat as chat_router
+
+    world = db_session.query(models.World).first()
+    leader = _create_user(db_session, "live_chat_leader", world)
+    member = _create_user(db_session, "live_chat_member", world)
+    alliance = models.Alliance(
+        name="Chat membership regression",
+        description="",
+        diplomacy="neutral",
+        leader_id=leader.id,
+        world_id=world.id,
+    )
+    db_session.add(alliance)
+    db_session.flush()
+    leader_row = models.AllianceMember(
+        alliance_id=alliance.id,
+        user_id=leader.id,
+        rank=3,
+    )
+    member_row = models.AllianceMember(
+        alliance_id=alliance.id,
+        user_id=member.id,
+        rank=1,
+    )
+    db_session.add_all([leader_row, member_row])
+    db_session.commit()
+
+    assert chat_router._current_alliance_recipient_ids(
+        db_session, alliance.id, world.id
+    ) == {leader.id, member.id}
+    assert chat_router._current_alliance_recipient_ids(
+        db_session, alliance.id, world.id + 10000
+    ) == set()
+
+    db_session.delete(member_row)
+    db_session.commit()
+    assert chat_router._current_alliance_recipient_ids(
+        db_session, alliance.id, world.id
+    ) == {leader.id}
