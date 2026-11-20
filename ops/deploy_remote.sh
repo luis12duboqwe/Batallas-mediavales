@@ -86,6 +86,10 @@ if [[ -f "$CURRENT_ENV" ]]; then
     chmod 600 "$RELEASES_DIR/${previous_release_sha}.env"
   fi
 fi
+if [[ "$had_previous" -eq 1 && ! "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Deployment refused: existing release has no trustworthy .release-sha" >&2
+  exit 2
+fi
 mv "$NEXT_ENV" "$CURRENT_ENV"
 
 rollback_backup=""
