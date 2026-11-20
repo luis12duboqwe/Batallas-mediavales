@@ -29,6 +29,9 @@ def create_case(
     description: str,
     world_id: int | None,
 ) -> models.SupportCase:
+    if subject.strip().startswith("[PRIVACY]"):
+        raise HTTPException(status_code=400, detail="Reserved privacy request subject")
+
     if world_id is not None:
         try:
             world_membership.require_world_membership(
