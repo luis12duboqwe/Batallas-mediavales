@@ -4,7 +4,7 @@ import { useUserStore } from '../store/userStore';
 
 const Login = () => {
   const [form, setForm] = useState({ username: '', password: '' });
-  const { login, error, loading } = useUserStore();
+  const { login, error, loading, sessionExpired } = useUserStore();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -24,6 +24,11 @@ const Login = () => {
           <h1 className="text-2xl">Bienvenido a Batalla Medieval</h1>
           <p className="text-gray-400">Inicia sesión para comandar tu ciudad</p>
         </div>
+        {sessionExpired && (
+          <p role="alert" data-testid="session-expired" className="rounded border border-amber-500 bg-amber-950/60 p-3 text-sm text-amber-100">
+            Tu sesión ha expirado. Vuelve a iniciar sesión.
+          </p>
+        )}
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div>
             <label className="block text-sm mb-1">Usuario</label>

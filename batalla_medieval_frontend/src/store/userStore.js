@@ -12,16 +12,24 @@ export const useUserStore = create((set, get) => ({
   cities: [],
   loading: false,
   error: null,
+  sessionExpired: false,
   async login(credentials) {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, sessionExpired: false });
+    let issuedToken = null;
     try {
       const { data } = await api.login(credentials);
       const accessToken = data.access_token;
+      issuedToken = accessToken;
       window.localStorage.setItem('bm_token', accessToken);
       const profileResp = await api.getProfile();
-      set({ token: accessToken, user: profileResp.data, loading: false });
+      set({ token: accessToken, user: profileResp.data, loading: false, sessionExpired: false });
       return { token: accessToken, user: profileResp.data };
     } catch (err) {
+      // Do not retain a token if the authenticated profile could not load.
+      if (issuedToken && readStoredToken() === issuedToken) {
+        window.localStorage.removeItem('bm_token');
+      }
+      if (issuedToken) set({ token: null, user: null, cities: [] });
       set({ error: err.response?.data?.detail || 'Error al iniciar sesión', loading: false });
       throw err;
     }
@@ -38,7 +46,12 @@ export const useUserStore = create((set, get) => ({
   },
   logout() {
     window.localStorage.removeItem('bm_token');
-    set({ user: null, token: null, cities: [], error: null });
+    set({ user: null, token: null, cities: [], error: null, sessionExpired: false });
+  },
+  expireSession() {
+    if (!get().token && !readStoredToken()) return;
+    window.localStorage.removeItem('bm_token');
+    set({ user: null, token: null, cities: [], error: null, sessionExpired: true });
   },
   hydrateSession() {
     const storedToken = readStoredToken();
@@ -59,7 +72,7 @@ export const useUserStore = create((set, get) => ({
       return data;
     } catch (err) {
       if (err.response?.status === 401) {
-        get().logout();
+        get().expireSession();
       }
       throw err;
     }
@@ -73,7 +86,7 @@ export const useUserStore = create((set, get) => ({
       return data;
     } catch (err) {
       if (err.response?.status === 401) {
-        get().logout();
+        get().expireSession();
       }
       throw err;
     }

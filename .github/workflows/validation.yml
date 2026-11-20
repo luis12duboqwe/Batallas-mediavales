@@ -123,6 +123,8 @@ jobs:
         run: npm run lint:accessible-interactions
       - name: Validate sound lifecycle
         run: npm run test:sound
+      - name: Validate session recovery contract
+        run: npm run test:resilience
       - name: Lint frontend
         run: npm run lint
       - name: Build frontend
@@ -282,6 +284,9 @@ jobs:
       - name: Run G23 Spanish localization journey
         working-directory: batalla_medieval_frontend
         run: node e2e/g23-localization.mjs
+      - name: Run G24 resilience journey
+        working-directory: batalla_medieval_frontend
+        run: node e2e/g24-resilience.mjs
       - name: Show service logs
         if: always()
         run: |
