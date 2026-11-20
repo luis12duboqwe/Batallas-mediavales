@@ -75,21 +75,23 @@ def deploy_lab(tmp_path):
     )
     docker.chmod(0o755)
 
-    # Fault injection for recovery preparation and the metadata rename.
+    # Fault injection for recovery preparation and metadata publication.
     (bin_dir / "mktemp").write_text(
-        "#!/usr/bin/env bash\\n"
-        "if [[ \\\"$*\\\" == *'.release.env.recovery.'* && -n \\\"${BM_MKTEMP_EXIT:-}\\\" ]]; then\\n"
-        "  exit \\\"$BM_MKTEMP_EXIT\\\"\\n"
-        "fi\\n"
-        "exec /usr/bin/mktemp \\\"$@\\\"\\n",
+        """#!/usr/bin/env bash
+if [[ "$*" == *'.release.env.recovery.'* && -n "${BM_MKTEMP_EXIT:-}" ]]; then
+  exit "$BM_MKTEMP_EXIT"
+fi
+exec /usr/bin/mktemp "$@"
+""",
         encoding="utf-8",
     )
     (bin_dir / "mv").write_text(
-        "#!/usr/bin/env bash\\n"
-        "if [[ \\\"$*\\\" == *'.release.env.recovery.'* && -n \\\"${BM_RECOVERY_MV_EXIT:-}\\\" ]]; then\\n"
-        "  exit \\\"$BM_RECOVERY_MV_EXIT\\\"\\n"
-        "fi\\n"
-        "exec /usr/bin/mv \\\"$@\\\"\\n",
+        """#!/usr/bin/env bash
+if [[ "$*" == *'.release.env.recovery.'* && -n "${BM_RECOVERY_MV_EXIT:-}" ]]; then
+  exit "$BM_RECOVERY_MV_EXIT"
+fi
+exec /usr/bin/mv "$@"
+""",
         encoding="utf-8",
     )
     (bin_dir / "mktemp").chmod(0o755)
