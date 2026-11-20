@@ -9,7 +9,7 @@ permissions:
   contents: write
 jobs:
   refresh:
-    if: github.event.head_commit.message == 'chore(BM-0083): run one-time lockfile refresh'
+    if: startsWith(github.event.head_commit.message, 'chore(BM-0083)')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
