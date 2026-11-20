@@ -142,23 +142,23 @@ try {
   await waitForExperienceReady();
   const reportHeading = page.getByText('Espionaje en G10 Intelligence Target', { exact: true });
   await reportHeading.waitFor({ state: 'visible', timeout: 10000 });
+  const reportCard = reportHeading.locator('xpath=ancestor::*[contains(@class,"card")][1]');
   await reportHeading.click();
 
-  await page.getByText('¡Espionaje Exitoso!', { exact: true }).waitFor({ state: 'visible', timeout: 5000 });
+  await reportCard.getByRole('heading', { name: '¡Espionaje Exitoso!', exact: true }).waitFor({ state: 'visible', timeout: 5000 });
   for (const label of ['Recursos', 'Tropas', 'Edificios']) {
-    await page.getByText(label, { exact: true }).waitFor({ state: 'visible', timeout: 5000 });
+    await reportCard.getByRole('heading', { name: label, exact: true }).waitFor({ state: 'visible', timeout: 5000 });
   }
 
-  const auditPanel = page.getByTestId('spy-audit');
+  const auditPanel = reportCard.getByTestId('spy-audit');
   await auditPanel.waitFor({ state: 'visible', timeout: 5000 });
   const uiSeed = await auditPanel.getAttribute('data-spy-seed');
   if (uiSeed !== payload.seed) failures.push(`UI spy seed differs from API seed: ui=${uiSeed} api=${payload.seed}`);
-  const visibleSeed = ((await page.getByTestId('spy-seed').textContent()) || '').trim();
+  const visibleSeed = ((await reportCard.getByTestId('spy-seed').textContent()) || '').trim();
   if (visibleSeed !== payload.seed) failures.push(`Visible spy seed differs from API seed: ${visibleSeed}`);
-  const intelText = ((await page.getByTestId('spy-intel-level').textContent()) || '').trim();
+  const intelText = ((await reportCard.getByTestId('spy-intel-level').textContent()) || '').trim();
   if (!intelText.includes('nivel 3')) failures.push(`UI intelligence level mismatch: ${intelText}`);
 
-  const reportCard = reportHeading.locator('xpath=ancestor::*[contains(@class,"card")][1]');
   const reportText = (await reportCard.textContent()) || '';
   for (const expected of [
     'Arquero Real',

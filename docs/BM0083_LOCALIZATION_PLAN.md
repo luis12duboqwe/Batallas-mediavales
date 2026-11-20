@@ -1,0 +1,36 @@
+# BM-0083 — Localización final
+
+## Decisión de producto
+
+La auditoría del frontend encontró que inglés solo cubría el catálogo parcial de `src/locales/en.json`, mientras varias pantallas finales seguían conteniendo texto visible y nombres accesibles directamente en español. Mantener el selector inglés habría publicado una experiencia mixta e incumplido el criterio de BM-0083.
+
+Para v1.0 se adopta **español como único idioma de producción**. El archivo inglés puede permanecer en el repositorio como material de trabajo futuro, pero no se importa, no se anuncia como soportado y no puede seleccionarse desde UI/API.
+
+## Contrato
+
+- `es` es el único idioma retornado por `available_languages()`.
+- preferencias legacy como `en`, `en-US` u otro idioma se normalizan a `es` para conservar compatibilidad con clientes y cuentas antiguas;
+- la migración `0018_spanish_only_language` normaliza usuarios persistidos;
+- frontend arranca y cae siempre a `es`, sin detector de navegador ni import de `en.json`;
+- Perfil muestra español como estado informativo y no ofrece selector de idioma;
+- G4 prueba que una preferencia legacy de navegador en inglés no cambia la UI y que el estado español sobrevive a recarga;
+- `check-localization-policy.mjs` evita reintroducir inglés accidentalmente en el runtime;
+- los errores HTTP históricos del backend se traducen en el cliente sin cambiar los contratos JSON, con motivos de autenticación específicos en español y fallback seguro;
+- la mensajería no presenta alertas ni confirmaciones en inglés;
+- G23 verifica la UI, preferencia legacy, error de autenticación y navegación en español.
+
+## Evidencia de cierre requerida
+
+- migraciones upgrade/downgrade válidas;
+- tests backend y prueba focalizada BM-0083 verdes;
+- gate de localización, lint y build frontend verdes;
+- Browser E2E completo, incluido G4 actualizado y G23 de localización;
+- regresión Node del localizador de errores API;
+- seguridad, concurrencia, imágenes Docker y revisión final del HEAD exacto verdes antes del merge.
+
+## Compatibilidad de CI y dependencias (noviembre de 2026)
+
+- `PyJWT` queda fijado a `2.15.0` tras avisos detectados por `pip-audit` en `2.14.0`.
+- El lockfile frontend se regeneró con `npm audit fix --package-lock-only --ignore-scripts`; `npm audit --audit-level=high` y el build siguen siendo compuertas obligatorias.
+- Los runners de Browser E2E y accesibilidad se fijan en Ubuntu 24.04 porque Playwright 1.55.0 no soporta Ubuntu 26.04.
+- El workflow temporal para actualizar el lockfile fue retirado en el mismo commit de regeneración y no forma parte del CI permanente.

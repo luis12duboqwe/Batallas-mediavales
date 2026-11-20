@@ -182,9 +182,8 @@ const GameRoute = ({ children }) => (
 );
 
 const App = () => {
-  const { user, token, refreshCity } = useUserStore();
+  const { token, refreshCity } = useUserStore();
   const { loadCity } = useCityStore();
-  const { i18n } = useTranslation();
   const location = useLocation();
 
   useEffect(() => {
@@ -193,12 +192,6 @@ const App = () => {
       loadCity().catch(() => {});
     }
   }, [token, refreshCity, loadCity]);
-
-  useEffect(() => {
-    if (user?.language && i18n.resolvedLanguage !== user.language) {
-      i18n.changeLanguage(user.language);
-    }
-  }, [user?.language, i18n]);
 
   useEffect(() => {
     const unlockAudio = () => { void soundManager.unlock(); };

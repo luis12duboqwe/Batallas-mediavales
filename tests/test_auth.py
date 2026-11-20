@@ -31,11 +31,14 @@ def test_register_verify_login_end_to_end(client: httpx.Client, db_session, monk
         "email": "player1@example.com",
         "password": PASSWORD,
         "email_notifications": False,
+        # Compatibility probe: old clients may still send English, but BM-0083
+        # must normalize every production account to Spanish.
         "language": "en",
     }
     register_response = client.post("/auth/register", json=register_payload)
     assert register_response.status_code == 200
     assert register_response.json()["username"] == "player1"
+    assert register_response.json()["language"] == "es"
     assert len(sent_messages) == 1
 
     # Login is forbidden until the exact verification token delivered by email
@@ -66,11 +69,13 @@ def test_register_verify_login_end_to_end(client: httpx.Client, db_session, monk
     )
     assert token_resp.status_code == 200
     token_data = token_resp.json()
+    assert token_data["language"] == "es"
     auth_header = {"Authorization": f"Bearer {token_data['access_token']}"}
 
     me_resp = client.get("/auth/me", headers=auth_header)
     assert me_resp.status_code == 200
     assert me_resp.json()["username"] == "player1"
+    assert me_resp.json()["language"] == "es"
 
     # A purpose-limited verification JWT can never be used as an access token.
     purpose_confusion = client.get(
@@ -82,6 +87,7 @@ def test_register_verify_login_end_to_end(client: httpx.Client, db_session, monk
     user = db_session.query(models.User).filter(models.User.username == "player1").one()
     assert user.is_verified is True
     assert user.verification_token is None
+    assert user.language == "es"
 
 
 def test_registration_rejects_weak_password(client: httpx.Client):

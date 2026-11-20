@@ -27,13 +27,9 @@ await page.route('**/*', async (route) => {
 });
 
 page.on('console', (message) => {
-  if (message.type() === 'error') {
-    failures.push(`mobile console.error: ${message.text()}`);
-  }
+  if (message.type() === 'error') failures.push(`mobile console.error: ${message.text()}`);
 });
-page.on('pageerror', (error) => {
-  failures.push(`mobile pageerror: ${error.message}`);
-});
+page.on('pageerror', (error) => failures.push(`mobile pageerror: ${error.message}`));
 page.on('response', async (response) => {
   if (response.status() >= 400) {
     let body = '';
@@ -82,24 +78,23 @@ async function assertViewport(route) {
 }
 
 try {
+  // Simulate an old browser preference before login. Production must ignore it
+  // because BM-0083 intentionally ships Spanish as the only supported locale.
+  await page.addInitScript(() => localStorage.setItem('i18nextLng', 'en'));
   await login();
 
   const mobileNavigation = await waitForMobileNavigation('/');
   await assertViewport('/');
 
-  // The user profile defaults to English in the E2E fixture; App must apply it
-  // after the authenticated profile is loaded instead of leaving detector text.
-  await page.waitForFunction(() => document.body.innerText.includes('City'));
-  if (!(await mobileNavigation.getByRole('link', { name: 'Buildings' }).isVisible())) {
-    failures.push('Translated Buildings link is not reachable in mobile navigation');
+  await page.waitForFunction(() => document.body.innerText.includes('Ciudad'));
+  if (!(await mobileNavigation.getByRole('link', { name: 'Edificios' }).isVisible())) {
+    failures.push('Spanish Buildings link is not reachable in mobile navigation');
   }
-  if (!(await mobileNavigation.getByRole('link', { name: 'Market' }).isVisible())) {
-    failures.push('Market is not reachable in mobile navigation');
+  if (!(await mobileNavigation.getByRole('link', { name: 'Mercado' }).isVisible())) {
+    failures.push('Spanish Market link is not reachable in mobile navigation');
   }
 
-  // Keyboard focus and activation must work even though this browser context
-  // also advertises touch support.
-  const mapLink = mobileNavigation.getByRole('link', { name: 'Map' });
+  const mapLink = mobileNavigation.getByRole('link', { name: 'Mapa' });
   await mapLink.focus();
   const focused = await mapLink.evaluate((element) => element === document.activeElement);
   if (!focused) failures.push('Mobile navigation link could not receive keyboard focus');
@@ -108,8 +103,6 @@ try {
   await page.waitForLoadState('networkidle');
   await assertViewport('/map');
 
-  // Every visible MVP route must remain usable while API responses are delayed.
-  // This turns mobile/latency regressions and hidden 4xx/5xx calls into a CI gate.
   const visibleRoutes = [
     '/buildings',
     '/academy',
@@ -128,35 +121,33 @@ try {
   }
 
   await page.goto(`${BASE_URL}/profile`, { waitUntil: 'networkidle' });
-  await page.getByRole('heading', { name: 'User Profile' }).waitFor();
+  await page.getByRole('heading', { name: 'Perfil de Usuario' }).waitFor();
   await assertViewport('/profile');
 
-  const languageSelect = page.getByLabel('Language');
-  await languageSelect.selectOption('es');
-  await page.getByRole('button', { name: 'Save Changes' }).click();
-  await page.getByRole('heading', { name: 'Perfil de Usuario' }).waitFor();
-  if (!(await page.getByTestId('mobile-navigation').getByRole('link', { name: 'Ciudad' }).isVisible())) {
-    failures.push('Spanish language change did not update visible navigation');
+  const languageDisplay = page.getByTestId('profile-language');
+  if ((await languageDisplay.textContent())?.trim() !== 'Español') {
+    failures.push('Profile does not expose Spanish as the production language');
+  }
+  if (await page.locator('select[name="language"]').count()) {
+    failures.push('Profile still exposes a selectable language control');
+  }
+  if (await page.locator('option[value="en"]').count()) {
+    failures.push('English is still selectable in production');
   }
 
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'Perfil de Usuario' }).waitFor();
-  if (!(await page.getByLabel('Idioma').isVisible())) {
-    failures.push('Saved Spanish language did not persist after reload');
+  if (!(await page.getByTestId('profile-language').isVisible())) {
+    failures.push('Spanish-only profile state did not persist after reload');
   }
-  await assertViewport('/profile?language=es');
-
-  // Restore the deterministic fixture preference while also proving reverse
-  // switching works without a new login.
-  await page.getByLabel('Idioma').selectOption('en');
-  await page.getByRole('button', { name: 'Guardar Cambios' }).click();
-  await page.getByRole('heading', { name: 'User Profile' }).waitFor();
-
-  if (failures.length > 0) {
-    throw new Error(failures.join('\n'));
+  if (!(await page.getByTestId('mobile-navigation').getByRole('link', { name: 'Ciudad' }).isVisible())) {
+    failures.push('Legacy English browser preference changed UI after reload');
   }
+  await assertViewport('/profile');
 
-  console.log(`G4 UX smoke passed: all visible routes at 390x844, keyboard focus, ${API_DELAY_MS}ms API delay and persisted es/en switching`);
+  if (failures.length > 0) throw new Error(failures.join('\n'));
+
+  console.log(`G4 UX smoke passed: mobile routes, keyboard focus, ${API_DELAY_MS}ms API delay and Spanish-only localization policy`);
 } finally {
   await browser.close();
 }

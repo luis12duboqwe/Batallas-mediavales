@@ -5,13 +5,12 @@ import { api } from '../api/axiosClient';
 import GameIcon from '../components/GameIcon';
 
 const ProfileView = () => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { user, loadUser } = useUserStore();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     email_notifications: false,
-    language: 'en'
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -23,7 +22,6 @@ const ProfileView = () => {
         email: user.email || '',
         password: '',
         email_notifications: user.email_notifications || false,
-        language: user.language || 'en'
       });
     }
   }, [user]);
@@ -32,7 +30,7 @@ const ProfileView = () => {
     const { name, value, type, checked } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: type === 'checkbox' ? checked : value
+      [name]: type === 'checkbox' ? checked : value,
     }));
   };
 
@@ -46,7 +44,6 @@ const ProfileView = () => {
     if (formData.email !== user.email) payload.email = formData.email;
     if (formData.password) payload.password = formData.password;
     if (formData.email_notifications !== user.email_notifications) payload.email_notifications = formData.email_notifications;
-    if (formData.language !== user.language) payload.language = formData.language;
 
     if (Object.keys(payload).length === 0) {
       setLoading(false);
@@ -55,10 +52,7 @@ const ProfileView = () => {
 
     try {
       await api.updateProfile(payload);
-      const refreshedUser = await loadUser();
-      if (refreshedUser?.language) {
-        await i18n.changeLanguage(refreshedUser.language);
-      }
+      await loadUser();
       setMessage(t('profile.updated'));
       setFormData(prev => ({ ...prev, password: '' }));
     } catch (error) {
@@ -122,17 +116,10 @@ const ProfileView = () => {
           </div>
 
           <div>
-            <label htmlFor="profile-language" className="block text-gray-400 mb-1">{t('profile.language')}</label>
-            <select
-              id="profile-language"
-              name="language"
-              value={formData.language}
-              onChange={handleChange}
-              className="select select-bordered w-full bg-black/50 border-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
-            >
-              <option value="en">English</option>
-              <option value="es">Español</option>
-            </select>
+            <div className="block text-gray-400 mb-1">{t('profile.language')}</div>
+            <p data-testid="profile-language" className="rounded border border-gray-700 bg-black/30 px-3 py-2 text-gray-200">
+              Español
+            </p>
           </div>
 
           <div className="flex items-center gap-3">

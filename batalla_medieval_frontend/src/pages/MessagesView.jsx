@@ -73,12 +73,12 @@ const MessagesView = () => {
       setContent('');
     } catch (error) {
       console.error(error);
-      alert('Error sending message');
+      alert('No se pudo enviar el mensaje. Inténtalo de nuevo.');
     }
   };
 
   const handleDelete = async (id) => {
-    if (!confirm('Are you sure?')) return;
+    if (!confirm('¿Seguro que quieres eliminar este mensaje?')) return;
     try {
       await api.deleteMessage(id);
       setMessages(messages.filter((message) => message.id !== id));
