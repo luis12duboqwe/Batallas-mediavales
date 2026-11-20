@@ -24,6 +24,9 @@ if [[ ! -f "$BASE_ENV" ]]; then
   exit 2
 fi
 
+# Serialize deployments and operator rollbacks against the same host state.
+source ops/operation_lock.sh
+
 STATE_DIR=".ops-state"
 RELEASES_DIR="$STATE_DIR/releases"
 DEPLOYMENTS_DIR="$STATE_DIR/deployments"
