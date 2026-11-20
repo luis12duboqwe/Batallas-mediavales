@@ -97,6 +97,7 @@ export const api = {
   forgotPassword: (email) => axiosClient.post('/auth/forgot-password', { email }),
   resetPassword: (token, newPassword) => axiosClient.post('/auth/reset-password', { token, new_password: newPassword }),
   getProfile: () => axiosClient.get('/auth/me'),
+  exportAccount: () => axiosClient.get('/auth/me/export'),
   updateProfile: (data) => axiosClient.patch('/auth/me', data),
   getBalance: () => loadBalanceSnapshot(),
   getCities: (worldId) => axiosClient.get('/city/', { params: { world_id: worldId } }),
