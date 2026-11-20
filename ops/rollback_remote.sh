@@ -8,6 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_DIR"
 
+# Lock before reading the active release pointer and manifest.
+source ops/operation_lock.sh
+
 if [[ -z "$CURRENT_RELEASE" ]]; then
   if [[ ! -f .release-sha ]]; then
     echo "Usage: $0 <current-release-sha> ROLLBACK:<current-release-sha>" >&2
