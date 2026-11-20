@@ -35,8 +35,8 @@ def get_building_cost(building_type: str, level: int) -> Dict[str, float]:
 def get_troop_cost(troop_type: str, amount: int = 1) -> Dict[str, float]:
     """Return the same training cost used by the live troop queue."""
 
-    if amount < 1:
-        raise ValueError("Amount of troops must be >= 1")
+    if type(amount) is not int or amount < 1:
+        raise ValueError("Amount of troops must be a positive integer")
     definition = balance.UNIT_CATALOG.get(troop_type)
     if definition is None:
         raise KeyError(f"Unknown troop type: {troop_type}")
@@ -53,8 +53,8 @@ def get_training_time(troop_type: str, building_level: int = 1) -> float:
     ``building_level`` remains only for backwards call compatibility.
     """
 
-    if building_level < 1:
-        raise ValueError("Building level must be >= 1")
+    if type(building_level) is not int or building_level < 1:
+        raise ValueError("Building level must be a positive integer")
     definition = balance.UNIT_CATALOG.get(troop_type)
     if definition is None:
         raise KeyError(f"Unknown troop type: {troop_type}")
@@ -73,15 +73,18 @@ def enforce_storage_limits(
 
 
 def calculate_population_used(troop_quantities: Mapping[str, int]) -> float:
-    """Match the current live population model: one slot per troop."""
+    """Count occupied population slots using the canonical per-unit catalog."""
 
-    return float(
-        sum(
-            max(int(quantity), 0)
-            for troop_type, quantity in troop_quantities.items()
-            if troop_type in balance.UNIT_CATALOG
-        )
-    )
+    population = 0
+    for troop_type, quantity in troop_quantities.items():
+        definition = balance.UNIT_CATALOG.get(troop_type)
+        if definition is None:
+            # Preserve the legacy wrapper's handling of unknown unit keys.
+            continue
+        if type(quantity) is not int:
+            raise ValueError("Troop quantity must be an integer")
+        population += max(quantity, 0) * int(definition["population"])
+    return float(population)
 
 
 __all__ = [
