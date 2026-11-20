@@ -62,6 +62,23 @@ La interfaz del perfil ofrece el formulario, confirmación de recepción
 y consulta de estado; la prueba G29 valida el recorrido real, persistencia
 e idempotencia secuencial.
 
+### Bloque C — Unicidad transaccional de solicitudes activas
+
+La migración `0019_privacy_active_case_uniqueness` agrega una restricción
+única parcial de `(requester_id, subject)` para las cuatro categorías de
+privacidad cuando el estado es `open` o `in_progress`.
+Se aplica en SQLite y PostgreSQL. No limita tickets normales ni el historial
+resuelto/cerrado. El endpoint sigue intentando devolver el caso existente y,
+si una solicitud concurrente gana la carrera, revierte la transacción fallida
+y consulta el caso ganador. Las pruebas incluyen el índice real en SQLite,
+cambios de estado, categorías distintas y dos sesiones en PostgreSQL.
+
+**Migración segura:** antes de crear el índice se detectan duplicados activos.
+Si hay alguno, la migración se bloquea **sin eliminar ni cerrar solicitudes**.
+Personal autorizado debe revisar y resolver los duplicados, documentar la
+decisión y volver a ejecutar la migración. Un CI verde en una base nueva no
+certifica la ausencia de duplicados en una base externa.
+
 ## Pendientes para cerrar BM-0090
 
 1. **Términos y política de privacidad:** redactar y aprobar los textos
