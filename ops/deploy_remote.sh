@@ -33,6 +33,14 @@ PREVIOUS_ENV=".release.env.previous"
 mkdir -p "$RELEASES_DIR" "$DEPLOYMENTS_DIR"
 chmod 700 "$STATE_DIR" "$RELEASES_DIR" "$DEPLOYMENTS_DIR"
 
+# A failed automatic rollback can leave partially migrated services. Never
+# try another deployment until a human has reconciled the recovery marker.
+RECOVERY_REQUIRED="$STATE_DIR/recovery-required"
+if [[ -e "$RECOVERY_REQUIRED" ]]; then
+  echo "Deployment refused: unresolved recovery incident at $RECOVERY_REQUIRED" >&2
+  exit 2
+fi
+
 cp "$BASE_ENV" "$NEXT_ENV"
 {
   echo
@@ -84,25 +92,56 @@ rollback_backup=""
 rollback() {
   local exit_code=$?
   trap - ERR
+  local recovered=0
+  local recovery_env=""
+
   echo "Deployment failed; attempting controlled rollback" >&2
   if [[ "$had_previous" -eq 1 ]]; then
-    cp "$PREVIOUS_ENV" "$CURRENT_ENV"
-    chmod 600 "$CURRENT_ENV"
+    # Never publish the previous configuration until recovery has succeeded.
+    # The in-progress deployment may have already changed the database.
+    recovery_env="$(mktemp ./.release.env.recovery.XXXXXXXX)"
+    cp "$PREVIOUS_ENV" "$recovery_env"
+    chmod 600 "$recovery_env"
+
     if [[ -n "$rollback_backup" && -f "$rollback_backup" ]]; then
       echo "Restoring pre-deploy database snapshot and previous application release" >&2
-      bash ops/restore_postgres.sh "$CURRENT_ENV" "$rollback_backup" "RESTORE:${POSTGRES_DB}" || true
-    else
+      if bash ops/restore_postgres.sh "$recovery_env" "$rollback_backup" "RESTORE:${POSTGRES_DB}"; then
+        recovered=1
+      fi
+    elif [[ -z "$rollback_backup" ]]; then
       echo "No database snapshot was created; restoring previous application images only" >&2
-      docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" pull backend worker frontend || true
-      docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy || true
+      if docker compose --env-file "$recovery_env" -f "$COMPOSE_FILE" pull backend worker frontend &&
+         docker compose --env-file "$recovery_env" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy; then
+        recovered=1
+      fi
     fi
-    if [[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]; then
-      echo "$previous_release_sha" > .release-sha
-      chmod 600 .release-sha
+
+    if [[ "$recovered" -eq 1 ]]; then
+      if python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-ms "$MAX_P95_MS"; then
+        mv -f -- "$recovery_env" "$CURRENT_ENV"
+        recovery_env=""
+        if [[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]; then
+          printf '%s\n' "$previous_release_sha" > .release-sha
+          chmod 600 .release-sha
+        fi
+        rm -f -- "$RECOVERY_REQUIRED"
+      else
+        recovered=0
+      fi
     fi
   else
-    echo "No previous release exists; leaving services for diagnosis" >&2
+    echo "No previous release exists; cannot automatically restore this deployment" >&2
   fi
+
+  if [[ "$recovered" -ne 1 ]]; then
+    # The active environment still describes the interrupted deployment.
+    # Never pretend that an unsuccessful restore recovered the previous app.
+    printf 'failed_release=%s\nprevious_release=%s\nreason=automatic_rollback_failed\n' \
+      "$RELEASE_SHA" "$previous_release_sha" > "$RECOVERY_REQUIRED"
+    chmod 600 "$RECOVERY_REQUIRED"
+    echo "CRITICAL: rollback not verified; manual recovery required ($RECOVERY_REQUIRED)" >&2
+  fi
+  if [[ -n "$recovery_env" ]]; then rm -f -- "$recovery_env"; fi
   exit "$exit_code"
 }
 trap rollback ERR
