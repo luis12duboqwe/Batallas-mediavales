@@ -8,6 +8,14 @@ import { chromium } from '@playwright/test';
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:4173';
 const CREDENTIALS = { username: 'g2_browser', password: 'G2-Browser-Test-2026!' };
 
+async function waitForExperienceReady(page) {
+  const intro = page.getByTestId('intro-animation');
+  if (await intro.count()) await intro.waitFor({ state: 'detached', timeout: 10000 });
+  const loading = page.getByTestId('loading-screen');
+  await loading.waitFor({ state: 'attached', timeout: 1200 }).catch(() => {});
+  if (await loading.count()) await loading.waitFor({ state: 'detached', timeout: 10000 });
+}
+
 async function login(page) {
   await page.goto(BASE_URL + '/login', { waitUntil: 'domcontentloaded' });
   const intro = page.getByTestId('intro-animation');
@@ -19,6 +27,7 @@ async function login(page) {
   await inputs.nth(1).fill(CREDENTIALS.password);
   await page.locator('form button[type="submit"]').click();
   await page.waitForURL(BASE_URL + '/', { timeout: 15000 });
+  await waitForExperienceReady(page);
 }
 
 async function openMap(page) {
@@ -26,6 +35,7 @@ async function openMap(page) {
   await navigation.waitFor({ state: 'visible', timeout: 10000 });
   await navigation.click();
   await page.waitForURL((url) => url.pathname === '/map', { timeout: 10000 });
+  await waitForExperienceReady(page);
   await page.locator('[data-testid^="map-tile-"]').first().waitFor({ state: 'visible', timeout: 15000 });
   await waitForMap(page);
 }
@@ -175,8 +185,13 @@ async function runJourney(browser, label, viewport, touch) {
     verifyOrder(await snapshotOrder(page));
 
     // The coordinate system never pans outside the nonnegative map domain.
+    const originResponse = page.waitForResponse((res) =>
+      new URL(res.url()).pathname.endsWith('/map/tiles')
+      && new URL(res.url()).searchParams.get('x') === '0'
+      && new URL(res.url()).searchParams.get('y') === '0', { timeout: 15000 });
     await jump(page, 0, 0);
-    if (nextX !== 0 || startingCenter.y !== 0) await waitForMap(page);
+    await originResponse;
+    await waitForMap(page);
     const requestsBeforeBoundary = mapRequests;
     await page.getByRole('button', { name: 'Mover mapa hacia la izquierda' }).click();
     await page.getByRole('button', { name: 'Mover mapa hacia abajo' }).click();
