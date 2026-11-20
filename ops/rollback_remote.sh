@@ -19,6 +19,15 @@ if [[ ! "$CURRENT_RELEASE" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Current release must be a full 40-character git SHA" >&2
   exit 2
 fi
+if [[ ! -f .release-sha || ! -f .release.env ]]; then
+  echo "Rollback refused: active release metadata is missing" >&2
+  exit 2
+fi
+ACTIVE_RELEASE="$(tr -d '[:space:]' < .release-sha)"
+if [[ "$ACTIVE_RELEASE" != "$CURRENT_RELEASE" ]]; then
+  echo "Rollback refused: current release does not match active release" >&2
+  exit 2
+fi
 if [[ "$CONFIRMATION" != "ROLLBACK:${CURRENT_RELEASE}" ]]; then
   echo "Rollback refused. Re-run with confirmation: ROLLBACK:${CURRENT_RELEASE}" >&2
   exit 2
@@ -66,22 +75,37 @@ for key in ('POSTGRES_DB', 'PUBLIC_BASE_URL'):
 PY
 )"
 
-cp "$PREVIOUS_ENV" .release.env
-chmod 600 .release.env
+# Validate the snapshot before changing any active release pointer or service.
+if [[ -n "$ROLLBACK_BACKUP" && ! -f "$ROLLBACK_BACKUP" ]]; then
+  echo "Rollback refused: database snapshot missing: $ROLLBACK_BACKUP" >&2
+  exit 2
+fi
+
+# Keep the active configuration and release pointer unchanged until the restore
+# and smoke check have BOTH succeeded. The candidates live on the same filesystem
+# as their destinations so each final rename is atomic.
+STAGED_ENV="$(mktemp ./.release.env.rollback.XXXXXXXX)"
+STAGED_SHA="$(mktemp ./.release-sha.rollback.XXXXXXXX)"
+cleanup() {
+  rm -f -- "$STAGED_ENV" "$STAGED_SHA"
+}
+trap cleanup EXIT
+cp "$PREVIOUS_ENV" "$STAGED_ENV"
+chmod 600 "$STAGED_ENV"
+printf '%s\n' "$PREVIOUS_RELEASE_SHA" > "$STAGED_SHA"
+chmod 600 "$STAGED_SHA"
 
 if [[ -n "$ROLLBACK_BACKUP" ]]; then
-  if [[ ! -f "$ROLLBACK_BACKUP" ]]; then
-    echo "Rollback refused: database snapshot missing: $ROLLBACK_BACKUP" >&2
-    exit 2
-  fi
-  bash ops/restore_postgres.sh .release.env "$ROLLBACK_BACKUP" "RESTORE:${POSTGRES_DB}"
+  bash ops/restore_postgres.sh "$STAGED_ENV" "$ROLLBACK_BACKUP" "RESTORE:${POSTGRES_DB}"
 else
   echo "No database snapshot was associated with this deployment; rolling back application images only"
-  docker compose --env-file .release.env -f "$COMPOSE_FILE" pull backend worker frontend
-  docker compose --env-file .release.env -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy
+  docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" pull backend worker frontend
+  docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy
 fi
 
 python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-ms 750
-echo "$PREVIOUS_RELEASE_SHA" > .release-sha
-chmod 600 .release-sha
+
+# Commit metadata only after the candidate release has passed post-rollback smoke.
+mv -f -- "$STAGED_ENV" .release.env
+mv -f -- "$STAGED_SHA" .release-sha
 echo "Rollback succeeded: ${CURRENT_RELEASE} -> ${PREVIOUS_RELEASE_SHA}"
