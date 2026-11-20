@@ -5,6 +5,8 @@ Un fallo durante `ops/deploy_remote.sh` no equivale a un rollback correcto.
 ## Cambio de comportamiento
 
 - Cuando existe una release anterior, se exige su SHA válido antes de empezar a mutar la configuración activa.
+- El smoke del rollback usa el origen público de la versión anterior, no la URL de la nueva release.
+- Se rechaza un cambio en la identidad/conexión PostgreSQL durante el despliegue automatizado; requiere migración y recuperación planificadas por separado.
 - El rollback de emergencia usa la configuración anterior en un archivo privado temporal y solo publica dicha configuración al terminar la recuperación **y** aprobar el smoke.
 - Si falla la restauración, la recuperación de imágenes o el smoke, queda `.ops-state/recovery-required` (modo incidente). Se bloquean nuevos despliegues hasta que el estado real de servicios y base de datos sea reconciliado.
 - Se preserva el código original de error del despliegue; no se ocultan fallos de restore con `|| true`.
