@@ -183,7 +183,7 @@ const AdventuresView = () => {
         <button
           type="button"
           className="btn btn-sm btn-outline"
-          disabled={controlsBusy}
+          disabled={loading || Boolean(pendingAction)}
           onClick={() => void fetchAdventures(worldId)}
           data-testid="adventure-refresh"
         >
