@@ -108,6 +108,30 @@ try {
   await page.getByTestId('privacy-case-' + retention.id).waitFor();
   assert.equal(await page.locator('[data-testid^="privacy-case-"]').count(), 3);
   await page.unroute('**/auth/me/privacy-requests');
+  // A manual refresh clears a prior failure after recovery.
+  await page.getByRole('button', { name: 'Actualizar' }).click();
+  await page.getByTestId('privacy-error').waitFor({ state: 'detached', timeout: 15000 });
+
+  // A failed list request must show an error, and retry must remove it.
+  let failNextGet = true;
+  await page.route('**/auth/me/privacy-requests', async (route) => {
+    if (route.request().method() === 'GET' && failNextGet) {
+      failNextGet = false;
+      return route.fulfill({
+        status: 503, contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Temporary failure' }),
+      });
+    }
+    return route.continue();
+  });
+  await page.getByRole('button', { name: 'Actualizar' }).click();
+  await page.getByTestId('privacy-error').waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Actualizar' }).click();
+  await page.getByTestId('privacy-error').waitFor({ state: 'detached', timeout: 15000 });
+  await page.getByTestId('privacy-case-' + created.id).waitFor();
+  await page.getByTestId('privacy-case-' + retention.id).waitFor();
+  await page.getByTestId('privacy-case-' + rectification.id).waitFor();
+  await page.unroute('**/auth/me/privacy-requests');
   assert.deepEqual(errors, []);
   console.log('G29 BM-0090 passed: auth, human review intake, dedupe, persistence, account intact');
 } finally {

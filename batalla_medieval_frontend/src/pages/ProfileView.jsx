@@ -330,7 +330,7 @@ const ProfileView = () => {
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
               <h3 className="font-semibold text-gray-200">Estado de solicitudes</h3>
-              <button type="button" onClick={fetchPrivacyRequests} disabled={privacyLoading || privacySubmitting} className="text-sm underline text-amber-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400">
+              <button type="button" onClick={() => { void fetchPrivacyRequests(); }} disabled={privacyLoading || privacySubmitting} className="text-sm underline text-amber-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400">
                 Actualizar
               </button>
             </div>
