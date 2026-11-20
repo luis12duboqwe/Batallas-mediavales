@@ -4,6 +4,7 @@ All commands run in a temporary fixture repository; Docker, restore, and smoke
 are stubs. These tests never touch a staging or production deployment.
 """
 
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -181,3 +182,19 @@ def test_success_commits_both_release_pointers_after_smoke(rollback_lab):
     assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == PREVIOUS_SHA + "\n"
     assert not list(rollback_lab["root"].glob(".release.env.rollback.*"))
     assert not list(rollback_lab["root"].glob(".release-sha.rollback.*"))
+
+
+def test_manual_rollback_refused_if_release_operation_lock_is_held(rollback_lab):
+    lock_path = rollback_lab["root"] / ".ops-state" / "deploy.lock"
+    with lock_path.open("a+", encoding="utf-8") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = _run(rollback_lab)
+        assert result.returncode == 2
+        assert "another deploy or rollback is already running" in result.stderr
+        assert _trace(rollback_lab) == []
+        _assert_active_unchanged(rollback_lab)
+
+    # After release, manual rollback must be allowed through its own checks.
+    retried = _run(rollback_lab)
+    assert retried.returncode == 0, retried.stderr
+    assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == PREVIOUS_SHA + "\n"
