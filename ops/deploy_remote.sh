@@ -122,6 +122,7 @@ chmod 600 "$RECOVERY_REQUIRED"
 mv "$NEXT_ENV" "$CURRENT_ENV"
 
 rollback_backup=""
+backup_receipt=""
 rollback() {
   local exit_code=$?
   trap - ERR
@@ -173,6 +174,7 @@ rollback() {
     echo "CRITICAL: rollback not verified; manual recovery required ($RECOVERY_REQUIRED)" >&2
   fi
   if [[ -n "$recovery_env" ]]; then rm -f -- "$recovery_env"; fi
+  if [[ -n "$backup_receipt" ]]; then rm -f -- "$backup_receipt"; fi
   exit "$exit_code"
 }
 trap rollback ERR
@@ -180,18 +182,42 @@ trap rollback ERR
 echo "Ensuring PostgreSQL is healthy before backup"
 docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" up -d database
 
-has_schema="$(docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" exec -T database \
-  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "SELECT to_regclass('public.users') IS NOT NULL;" 2>/dev/null || true)"
-if [[ "$has_schema" == "t" ]]; then
-  bash ops/backup_postgres.sh "$CURRENT_ENV"
-  rollback_backup="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${POSTGRES_DB}-*.dump" -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
-  if [[ -z "$rollback_backup" ]]; then
-    echo "Backup completed but rollback snapshot could not be located" >&2
-    exit 1
-  fi
-else
-  echo "No existing application schema; treating this as first deployment"
+# Fail closed on a missing or failed database probe. A network or credential
+# error must never be mistaken for an empty first-install database.
+if ! has_schema="$(docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" exec -T database \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "SELECT to_regclass('public.users') IS NOT NULL;" 2>/dev/null)"; then
+  echo "Database schema probe failed; refusing deployment without a known backup state" >&2
+  false
 fi
+case "$has_schema" in
+  t)
+    backup_receipt="$(mktemp "$STATE_DIR/backup-receipt.XXXXXXXX")"
+    BACKUP_RECEIPT_FILE="$backup_receipt" bash ops/backup_postgres.sh "$CURRENT_ENV"
+    if [[ ! -s "$backup_receipt" ]]; then
+      echo "Backup completed without an exact archive receipt" >&2
+      false
+    fi
+    IFS= read -r rollback_backup < "$backup_receipt"
+    rm -f -- "$backup_receipt"
+    backup_receipt=""
+
+    backup_basename="${rollback_backup##*/}"
+    if [[ "${rollback_backup%/*}" != "${BACKUP_DIR%/}" ||
+          ! "$backup_basename" =~ ^${POSTGRES_DB}-[0-9]{8}T[0-9]{6}Z-[[:alnum:]]{8}\.dump$ ||
+          ! -s "$rollback_backup" || ! -s "${rollback_backup}.sha256" ||
+          -L "$rollback_backup" ]]; then
+      echo "Backup receipt did not identify a valid new archive in BACKUP_DIR" >&2
+      false
+    fi
+    ;;
+  f)
+    echo "No existing application schema; treating this as first deployment"
+    ;;
+  *)
+    echo "Unexpected schema probe result; refusing deployment without backup" >&2
+    false
+    ;;
+esac
 
 echo "Pulling immutable release images and pinned edge images"
 docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" pull migrate seed backend worker frontend nginx caddy
