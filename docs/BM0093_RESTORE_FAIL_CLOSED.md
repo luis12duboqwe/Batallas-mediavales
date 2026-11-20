@@ -17,3 +17,12 @@ efímero del propio CI.
 **Límites:** no se ha restaurado ningún sistema productivo. Antes de cerrar
 BM-0093 deben verificarse backups externos, procedimientos de recuperación
 en staging, tiempos RPO/RTO y la recuperación ante pérdida de servidor.
+
+**Aislamiento de backups:** cada ejecución usa un directorio temporal privado y un
+identificador único, además de la marca de tiempo. Dos respaldos creados en el
+mismo segundo no comparten archivo temporal ni sobrescriben el anterior. Se
+publican mediante enlaces atómicos únicamente archivos completos con checksum;
+si falla la verificación se retira la pareja creada por esa ejecución. La
+prueba G5 fija artificialmente la misma hora para dos exportaciones y verifica
+que ambas permanecen legibles e íntegramente verificadas. Esto no sustituye los
+respaldos externos ni una restauración ensayada en staging.
