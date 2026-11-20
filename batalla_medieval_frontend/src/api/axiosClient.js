@@ -233,6 +233,7 @@ export const api = {
 
   // Map
   getMapTiles: (worldId, x, y, radius = 10) => axiosClient.get('/map/tiles', { params: { world_id: worldId, x, y, radius } }),
+  getMapCityTarget: (cityId, worldId) => axiosClient.get(`/map/city/${cityId}`, { params: { world_id: worldId } }),
   getOasis: (oasisId) => axiosClient.get(`/map/oasis/${oasisId}`),
 
   // Themes
