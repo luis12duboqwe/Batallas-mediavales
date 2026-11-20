@@ -5,6 +5,7 @@ import sys
 from contextlib import contextmanager
 from datetime import timedelta
 
+import app as app_package
 from app import models
 from app import scheduler as scheduler_module
 from app.main import app
@@ -90,6 +91,10 @@ def test_worker_imports_without_eager_http_router_cycle():
         "assert app.worker.start_scheduler is not None"
     )
     env = {**os.environ, "APP_ENV": "test", "DATABASE_URL": "sqlite://"}
+    backend_path = os.path.dirname(os.path.dirname(app_package.__file__))
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (backend_path, os.environ.get("PYTHONPATH", "")) if part
+    )
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True, text=True, timeout=30, check=False, env=env
