@@ -4,7 +4,11 @@ import Timer from '../components/Timer';
 import { useCityStore } from '../store/cityStore';
 
 const BuildingsView = () => {
-  const { buildings, queues, loadCity, upgrade, cancelBuilding } = useCityStore();
+  const buildings = useCityStore((state) => state.buildings);
+  const queues = useCityStore((state) => state.queues);
+  const loadCity = useCityStore((state) => state.loadCity);
+  const upgrade = useCityStore((state) => state.upgrade);
+  const cancelBuilding = useCityStore((state) => state.cancelBuilding);
   const [message, setMessage] = useState('');
   const [messageKind, setMessageKind] = useState('status');
   const [busyId, setBusyId] = useState(null);

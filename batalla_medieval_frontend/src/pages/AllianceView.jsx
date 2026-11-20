@@ -18,7 +18,9 @@ const ALLIANCE_TAB_KEYS = ALLIANCE_TABS.map(([tab]) => tab);
 
 const AllianceView = () => {
   const { user } = useUserStore();
-  const { alliance, loadAlliance, currentCity } = useCityStore();
+  const alliance = useCityStore((state) => state.alliance);
+  const loadAlliance = useCityStore((state) => state.loadAlliance);
+  const currentCity = useCityStore((state) => state.currentCity);
   const [loading, setLoading] = useState(false);
   const [createName, setCreateName] = useState('');
   const [activeTab, setActiveTab] = useState('general');

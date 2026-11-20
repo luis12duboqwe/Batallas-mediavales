@@ -16,7 +16,8 @@ const resourceLabel = (value) => (
 );
 
 const MarketView = () => {
-  const { currentCity, loadCity } = useCityStore();
+  const currentCity = useCityStore((state) => state.currentCity);
+  const loadCity = useCityStore((state) => state.loadCity);
   const [activeTab, setActiveTab] = useState('send');
   const [offers, setOffers] = useState([]);
   const [commerceRules, setCommerceRules] = useState(null);

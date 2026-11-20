@@ -23,7 +23,7 @@ const formatSeconds = (seconds) => {
 
 const AcademyView = () => {
   const { t } = useTranslation();
-  const { loadCity } = useCityStore();
+  const loadCity = useCityStore((state) => state.loadCity);
   const [city, setCity] = useState(null);
   const [units, setUnits] = useState([]);
   const [activeQueue, setActiveQueue] = useState(null);

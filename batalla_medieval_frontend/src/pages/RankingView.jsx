@@ -9,7 +9,7 @@ const RankingView = () => {
   const [medals, setMedals] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const { currentCity } = useCityStore();
+  const currentCity = useCityStore((state) => state.currentCity);
   const worldId = currentCity?.world_id;
 
   useEffect(() => {

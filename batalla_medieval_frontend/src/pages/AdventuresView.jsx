@@ -5,7 +5,7 @@ import { useCityStore } from '../store/cityStore';
 import useModalAccessibility from '../hooks/useModalAccessibility';
 
 const AdventuresView = () => {
-  const { currentCity } = useCityStore();
+  const currentCity = useCityStore((state) => state.currentCity);
   const worldId = currentCity?.world_id;
   const [adventures, setAdventures] = useState([]);
   const [loading, setLoading] = useState(false);
