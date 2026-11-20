@@ -303,6 +303,9 @@ jobs:
       - name: Run G28 authenticated account export
         working-directory: batalla_medieval_frontend
         run: node e2e/g28-account-export.mjs
+      - name: Run G29 manual privacy request intake
+        working-directory: batalla_medieval_frontend
+        run: node e2e/g29-privacy-requests.mjs
       - name: Show service logs
         if: always()
         run: |
