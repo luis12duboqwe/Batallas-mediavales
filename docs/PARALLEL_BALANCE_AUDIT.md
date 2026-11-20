@@ -1,8 +1,8 @@
 # PARALLEL_BALANCE_AUDIT — Auditoría económica aislada
 
-**Corte auditado:** `main@281de839102894ae1d3766156e17fc771ba0a9b9` (20-11-2026).  
-**Rama de trabajo:** `parallel/medievol-economy-20261120`.  
-**Autoridad:** Plan Maestro PD-002, PD-009, PD-010, PD-013, PD-016 y BM-0040.  
+**Corte auditado:** `main@281de839102894ae1d3766156e17fc771ba0a9b9` (20-11-2026).
+**Rama de trabajo:** `parallel/medievol-economy-20261120`.
+**Autoridad:** Plan Maestro PD-002, PD-009, PD-010, PD-013, PD-016 y BM-0040.
 **Versiones intactas:** `BALANCE_VERSION=2026.08.23-bm0063.1`, `COMMERCE_RULES_VERSION=2026.08.24-bm0066-v1`.
 
 ## Lectura inicial y fronteras
