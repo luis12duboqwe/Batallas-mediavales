@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -145,6 +146,33 @@ def update_case(
         if assignee is None or not admin_permissions.effective_admin_role(assignee):
             raise HTTPException(status_code=400, detail="Assignee must be an administrator")
 
+    # Serialize a privacy-case reopen with new intake using the owner lock.
+    # Never reopen an older case when another case of the kind is active.
+    reopens_privacy = (
+        case.subject.startswith("[PRIVACY]")
+        and case.status == "resolved"
+        and status == "in_progress"
+    )
+    if reopens_privacy:
+        db.query(models.User).filter(
+            models.User.id == case.requester_id,
+        ).with_for_update().one()
+        conflicting = (
+            db.query(models.SupportCase)
+            .filter(
+                models.SupportCase.requester_id == case.requester_id,
+                models.SupportCase.subject == case.subject,
+                models.SupportCase.id != case.id,
+                models.SupportCase.status.in_(("open", "in_progress")),
+            )
+            .first()
+        )
+        if conflicting is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Another active privacy request already exists",
+            )
+
     normalized_resolution = None
     if resolution_provided and resolution is not None:
         normalized_resolution = resolution.strip() or None
@@ -152,6 +180,10 @@ def update_case(
     resulting_resolution = normalized_resolution if resolution_provided else case.resolution
     if resulting_status in {"resolved", "closed"} and not (resulting_resolution or "").strip():
         raise HTTPException(status_code=400, detail="Resolution is required")
+
+    case_requester_id = case.requester_id
+    case_subject = case.subject
+    case_original_id = case.id
 
     before = {
         "status": case.status,
@@ -201,6 +233,28 @@ def update_case(
         support_case_id=case.id,
     )
     db.add(case)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Roll back BOTH the case change and its administrative audit entry.
+        # The partial unique index is the final authority under races.
+        db.rollback()
+        if reopens_privacy:
+            conflicting = (
+                db.query(models.SupportCase)
+                .filter(
+                    models.SupportCase.requester_id == case_requester_id,
+                    models.SupportCase.subject == case_subject,
+                    models.SupportCase.id != case_original_id,
+                    models.SupportCase.status.in_(("open", "in_progress")),
+                )
+                .first()
+            )
+            if conflicting is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Another active privacy request already exists",
+                )
+        raise
     db.refresh(case)
     return case

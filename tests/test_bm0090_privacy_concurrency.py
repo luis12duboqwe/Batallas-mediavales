@@ -101,6 +101,9 @@ def _racing_requests(user_ids, kind, *, require_contention):
                         """),
                         {"pid_a": current_pids[0], "pid_b": current_pids[1]},
                     ).scalar_one()
+                    # PostgreSQL caches activity snapshots within a transaction.
+                    # Roll back after every probe to observe newly waiting workers.
+                    monitor.rollback()
                     if waiting == participant_count:
                         contention_seen = True
                         break

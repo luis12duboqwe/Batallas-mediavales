@@ -1,14 +1,14 @@
 """Scope achievement progress to one world.
 
 Revision ID: 0014_achievement_progress_world_scope
-Revises: 0013_message_world_scope
+Revises: 0013b_expand_alembic_version
 """
 
 from alembic import op
 import sqlalchemy as sa
 
 revision = "0014_achievement_progress_world_scope"
-down_revision = "0013_message_world_scope"
+down_revision = "0013b_expand_alembic_version"
 branch_labels = None
 depends_on = None
 
