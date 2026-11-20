@@ -278,6 +278,8 @@ def test_failed_schema_probe_never_assumes_first_install(deploy_lab):
     trace = _trace(deploy_lab)
     assert "backup" not in trace
     assert not any("pull migrate seed" in line for line in trace)
+    assert not any("up -d --remove-orphans" in line for line in trace)
+    assert _marker(deploy_lab).is_file()
     assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
 
 
@@ -289,6 +291,9 @@ def test_unrecognized_schema_probe_value_is_refused(deploy_lab):
     assert "Unexpected schema probe result" in result.stderr
     assert "backup" not in _trace(deploy_lab)
     assert not any("pull migrate seed" in line for line in _trace(deploy_lab))
+    assert not any("up -d --remove-orphans" in line for line in _trace(deploy_lab))
+    assert not any(line.startswith("restore:") for line in _trace(deploy_lab))
+    assert _marker(deploy_lab).is_file()
 
 
 def test_existing_release_with_missing_schema_is_refused(deploy_lab):
@@ -300,6 +305,9 @@ def test_existing_release_with_missing_schema_is_refused(deploy_lab):
     assert "Existing release has no users schema" in result.stderr
     assert "backup" not in _trace(deploy_lab)
     assert not any("pull migrate seed" in line for line in _trace(deploy_lab))
+    assert not any("up -d --remove-orphans" in line for line in _trace(deploy_lab))
+    assert not any(line.startswith("restore:") for line in _trace(deploy_lab))
+    assert _marker(deploy_lab).is_file()
 
 
 def test_confirmed_empty_database_can_take_first_install_path(deploy_lab):
@@ -372,3 +380,18 @@ def test_backup_receipt_accepts_trailing_directory_separator(deploy_lab):
         for line in _trace(deploy_lab)
     )
     assert not _marker(deploy_lab).exists()
+
+
+def test_pre_migration_image_pull_failure_does_not_restore_or_migrate(deploy_lab):
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0",
+        "BM_RELEASE_PULL_EXIT": "55",
+    })
+    assert result.returncode == 55
+    trace = _trace(deploy_lab)
+    assert "backup" in trace
+    assert not any("up -d --remove-orphans" in line for line in trace)
+    assert not any(line.startswith("restore:") for line in trace)
+    assert not any(line.startswith("smoke:") for line in trace)
+    assert not _marker(deploy_lab).exists()
+    assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
