@@ -63,14 +63,27 @@ try {
 
   const durations = await page.evaluate(async () => {
     const targets = [...document.querySelectorAll('button[data-testid^="map-tile-"]')];
+    const panel = document.querySelector('[data-testid="map-grid-panel"]');
+    if (!panel) throw new Error('Map scroll container is missing');
     const measurements = [];
     for (let i = 0; i < 24; i += 1) {
       const target = targets[(i * 37 + 11) % targets.length];
+      // Scrolling is setup, not part of selection latency. Ensure the tile can
+      // actually paint inside both the scroll panel and the mobile viewport.
+      target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const bounds = target.getBoundingClientRect();
+      const panelBounds = panel.getBoundingClientRect();
+      const visible = bounds.left >= Math.max(0, panelBounds.left)
+        && bounds.right <= Math.min(window.innerWidth, panelBounds.right)
+        && bounds.top >= Math.max(0, panelBounds.top)
+        && bounds.bottom <= Math.min(window.innerHeight, panelBounds.bottom);
+      if (!visible) throw new Error('Map tile was not visible before the measured click');
       const startedAt = performance.now();
       target.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      if (target.getAttribute('aria-pressed') !== 'true') {
-        throw new Error('Map selection did not become active after rendering');
+      if (target.getAttribute('aria-pressed') !== 'true' || !target.classList.contains('ring-2')) {
+        throw new Error('Visible map selection did not render its highlighted state');
       }
       measurements.push(performance.now() - startedAt);
     }
