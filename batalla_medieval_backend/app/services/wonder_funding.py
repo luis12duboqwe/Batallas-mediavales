@@ -40,8 +40,25 @@ def _project(db: Session, city: models.City, target_level: int, alliance_id: int
     ).with_for_update().one_or_none()
 
 
-def _member_alliance(db: Session, user_id: int, world_id: int) -> int | None:
-    membership = alliance_service.get_membership_in_world(db, user_id, world_id)
+def _member_alliance(
+    db: Session, user_id: int, world_id: int, *, lock: bool = False,
+) -> int | None:
+    if lock:
+        # A concurrent leave/kick must wait until an in-flight donation has
+        # been charged and recorded, never revoke the membership mid-spend.
+        membership = (
+            db.query(models.AllianceMember)
+            .join(models.Alliance, models.Alliance.id == models.AllianceMember.alliance_id)
+            .filter(
+                models.AllianceMember.user_id == user_id,
+                models.Alliance.world_id == world_id,
+            )
+            .with_for_update(of=models.AllianceMember)
+            .populate_existing()
+            .one_or_none()
+        )
+    else:
+        membership = alliance_service.get_membership_in_world(db, user_id, world_id)
     return membership.alliance_id if membership else None
 
 
@@ -134,8 +151,8 @@ def contribute(
         if city is None or city.owner_id is None or city.settlement_type != "city":
             raise ValueError("Wonder city not found")
 
-        member = _member_alliance(db, contributor_id, world_id)
-        owner_member = _member_alliance(db, city.owner_id, world_id)
+        member = _member_alliance(db, contributor_id, world_id, lock=True)
+        owner_member = _member_alliance(db, city.owner_id, world_id, lock=True)
         if member is None or member != owner_member:
             raise ValueError("Contributors and owner must belong to the same world alliance")
         if not _requirements_met(city):
@@ -212,7 +229,7 @@ def contribute(
 
 
 def require_funded_project(db: Session, city: models.City, target_level: int) -> models.WonderFunding:
-    alliance_id = _member_alliance(db, city.owner_id, city.world_id)
+    alliance_id = _member_alliance(db, city.owner_id, city.world_id, lock=True)
     if alliance_id is None:
         raise ValueError("Wonder owner must be an active alliance member")
     project = _project(db, city, target_level, alliance_id)

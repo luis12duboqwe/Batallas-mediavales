@@ -35,9 +35,20 @@ export default function WonderFundingPanel({ currentCity, refreshCity }) {
     let active = true;
     setRules(null);
     if (currentCity?.world_id) {
-      api.getWorlds().then(({ data }) => {
-        if (active) setRules(data.find((world) => world.id === currentCity.world_id)?.wonder_rules_version ?? 'legacy-v1');
-      }).catch(() => { if (active) setError('No se pudo consultar el contrato del mundo.'); });
+      // Normal players without an alliance cannot finance a Wonder. Avoid
+      // issuing a forbidden funding request during routine Buildings visits.
+      Promise.all([api.getWorlds(), api.getAlliance(currentCity.world_id)])
+        .then(([worldResponse, allianceResponse]) => {
+          if (!active) return;
+          const pinned = worldResponse.data.find(
+            (world) => world.id === currentCity.world_id,
+          )?.wonder_rules_version;
+          setRules(pinned === 'alliance-v2' && allianceResponse.data?.id
+            ? 'alliance-v2' : 'legacy-v1');
+        })
+        .catch(() => {
+          if (active) setError('No se pudieron verificar el mundo y la alianza.');
+        });
     }
     return () => { active = false; };
   }, [currentCity?.world_id]);

@@ -29,6 +29,9 @@ def _fixture(db_session, user, city):
 @pytest.mark.parametrize("same_key", [False, True])
 def test_parallel_funding_is_serialized_and_exactly_once(db_session, user, city, same_key):
     _fixture(db_session, user, city)
+    # Share only immutable scalar identifiers between worker threads, never
+    # live ORM objects bound to the setup session.
+    world_id, city_id, contributor_id = city.world_id, city.id, user.id
     barrier = threading.Barrier(2)
     key = uuid4().hex
     observations = []
@@ -40,8 +43,8 @@ def test_parallel_funding_is_serialized_and_exactly_once(db_session, user, city,
         try:
             barrier.wait(timeout=10)
             snapshot = wonder_funding.contribute(
-                session, world_id=city.world_id, contributor_id=user.id,
-                target_city_id=city.id, source_city_id=city.id,
+                session, world_id=world_id, contributor_id=contributor_id,
+                target_city_id=city_id, source_city_id=city_id,
                 amounts={"wood": 5000},
                 idempotency_key=key if same_key else f"{key}{n}",
             )
@@ -69,7 +72,7 @@ def test_parallel_funding_is_serialized_and_exactly_once(db_session, user, city,
         assert len(observations) == 1
 
     db_session.expire_all()
-    assert db_session.get(models.City, city.id).wood < 1100
+    assert db_session.get(models.City, city_id).wood < 1100
     assert db_session.query(models.WonderContribution).count() == 1
     funding = db_session.query(models.WonderFunding).one()
     assert funding.funded_wood == 5000
