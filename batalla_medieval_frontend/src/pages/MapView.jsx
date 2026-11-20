@@ -94,7 +94,7 @@ const MapView = () => {
     event.preventDefault();
     const parseCoordinate = (value) => {
       const text = String(value).trim();
-      if (!/^\\d+$/.test(text)) return null;
+      if (!/^\d+$/.test(text)) return null;
       const number = Number(text);
       return Number.isSafeInteger(number) ? number : null;
     };
@@ -110,8 +110,8 @@ const MapView = () => {
 
   const handleMove = useCallback((dx, dy) => {
     setCenter((previous) => {
-      const x = Math.max(0, previous.x + dx);
-      const y = Math.max(0, previous.y + dy);
+      const x = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, previous.x + dx));
+      const y = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, previous.y + dy));
       return x === previous.x && y === previous.y ? previous : { x, y };
     });
   }, []);
