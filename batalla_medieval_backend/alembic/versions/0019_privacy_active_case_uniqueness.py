@@ -1,6 +1,6 @@
 """Prevent duplicate active privacy requests in support cases.
 
-Revision ID: 0019_privacy_active_case_uniqueness
+Revision ID: 0019_privacy_active_unique
 Revises: 0018_spanish_only_language
 
 No existing support case is modified. If active privacy duplicates already
@@ -10,7 +10,7 @@ exist, migration refuses to proceed so operators can resolve them manually.
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0019_privacy_active_case_uniqueness"
+revision = "0019_privacy_active_unique"
 down_revision = "0018_spanish_only_language"
 branch_labels = None
 depends_on = None

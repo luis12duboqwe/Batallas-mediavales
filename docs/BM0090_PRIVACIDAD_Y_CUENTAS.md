@@ -64,11 +64,11 @@ e idempotencia secuencial.
 
 ### Bloque C — Unicidad transaccional de solicitudes activas
 
-La migración `0019_privacy_active_case_uniqueness` agrega una restricción
+La migración `0019_privacy_active_unique` agrega una restricción
 única parcial de `(requester_id, subject)` para las cuatro categorías de
 privacidad cuando el estado es `open` o `in_progress`.
 Se aplica en SQLite y PostgreSQL. No limita tickets normales ni el historial
-resuelto/cerrado. El endpoint sigue intentando devolver el caso existente y,
+resuelto/cerrado. Reabrir un caso histórico mientras otro del mismo tipo está activo devuelve HTTP 409 sin registrar falsos cambios de soporte. El endpoint sigue intentando devolver el caso existente y,
 si una solicitud concurrente gana la carrera, revierte la transacción fallida
 y consulta el caso ganador. Las pruebas incluyen el índice real en SQLite,
 cambios de estado, categorías distintas y dos sesiones en PostgreSQL.
