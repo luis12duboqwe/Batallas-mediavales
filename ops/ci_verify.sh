@@ -10,6 +10,7 @@ BAD_TLS_ENV_FILE="/tmp/bm-g5-ci-bad-tls.env"
 BACKUP_DIR="/tmp/bm-g5-backups"
 FAKE_DOCKER_DIR=""
 FAKE_DATE_DIR=""
+BACKUP_RECEIPT=""
 COMPOSE_FILE="docker-compose.deploy.yml"
 PROJECT_NAME="bm-g5-ci"
 SMOKE_PID=""
@@ -22,6 +23,7 @@ cleanup() {
   rm -rf "$BACKUP_DIR" "$ENV_FILE" "$BAD_ENV_FILE" "$BAD_TLS_ENV_FILE"
   if [[ -n "$FAKE_DOCKER_DIR" ]]; then rm -rf "$FAKE_DOCKER_DIR"; fi
   if [[ -n "$FAKE_DATE_DIR" ]]; then rm -rf "$FAKE_DATE_DIR"; fi
+  if [[ -n "$BACKUP_RECEIPT" ]]; then rm -f -- "$BACKUP_RECEIPT"; fi
 }
 trap cleanup EXIT
 
@@ -101,7 +103,15 @@ docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec
   psql -h 127.0.0.1 -U batalla -d batalla_ci -v ON_ERROR_STOP=1 -c \
   "CREATE TABLE recovery_probe (id integer primary key, marker text not null); INSERT INTO recovery_probe VALUES (1, 'before-backup');"
 
-COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" bash ops/backup_postgres.sh "$ENV_FILE"
+BACKUP_RECEIPT="$(mktemp /tmp/bm-g5-backup-receipt.XXXXXXXX)"
+COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" \
+  BACKUP_RECEIPT_FILE="$BACKUP_RECEIPT" bash ops/backup_postgres.sh "$ENV_FILE"
+test -s "$BACKUP_RECEIPT"
+IFS= read -r BACKUP_FILE < "$BACKUP_RECEIPT"
+test -s "$BACKUP_FILE"
+sha256sum --check "${BACKUP_FILE}.sha256"
+rm -f -- "$BACKUP_RECEIPT"
+BACKUP_RECEIPT=""
 
 # Force two backups to share the exact same second. Both must survive intact.
 FAKE_DATE_DIR="$(mktemp -d /tmp/bm-g5-fixed-date.XXXXXXXX)"
@@ -179,7 +189,8 @@ done
 rm -rf "$FAKE_DOCKER_DIR"
 FAKE_DOCKER_DIR=""
 
-BACKUP_FILE="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'batalla_ci-*.dump' | sort | tail -n1)"
+# Retain the exact backup returned by the first pg_dump invocation even
+# after other later/concurrent backups have populated BACKUP_DIR.
 test -n "$BACKUP_FILE"
 test -s "$BACKUP_FILE"
 test -s "${BACKUP_FILE}.sha256"
