@@ -84,7 +84,7 @@ from .wiki import (
 )
 from .chat import ChatMessageRead, ChatMessageCreate
 from .support import SupportCaseAdminUpdate, SupportCaseCreate, SupportCaseRead
-from .map import MapResponse, MapTile
+from .map import MapResponse, MapTile, MapCityTarget
 from .forum import (
     ForumThreadCreate,
     ForumThreadRead,
@@ -202,6 +202,7 @@ __all__ = [
     "ActiveWorldSnapshot",
     "MapTile",
     "MapResponse",
+    "MapCityTarget",
     "WikiArticleCreate",
     "WikiArticleRead",
     "WikiArticleUpdate",

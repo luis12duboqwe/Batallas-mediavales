@@ -24,3 +24,16 @@ class MapTile(BaseModel):
 
 class MapResponse(BaseModel):
     tiles: list[MapTile]
+
+
+class MapCityTarget(BaseModel):
+    """Only map-visible target metadata; never expose city private state."""
+
+    id: int
+    name: str
+    x: int
+    y: int
+    world_id: int
+    settlement_type: Literal["city", "camp"]
+    owner_id: Optional[int] = None
+    owner_name: Optional[str] = None
