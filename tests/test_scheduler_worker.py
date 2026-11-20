@@ -1,3 +1,7 @@
+import os
+import subprocess
+import sys
+
 from contextlib import contextmanager
 from datetime import timedelta
 
@@ -74,3 +78,20 @@ def test_completed_troop_queue_is_idempotent_on_retry(db_session, city):
     assert len(first) == 1
     assert second == []
     assert trained.quantity == 4
+
+
+def test_worker_imports_without_eager_http_router_cycle():
+    """The worker must start cleanly without preloading the HTTP application."""
+    script = (
+        "import sys; "
+        "import app.worker; "
+        "assert 'app.routers.admin' not in sys.modules; "
+        "import app.main; "
+        "assert app.worker.start_scheduler is not None"
+    )
+    env = {**os.environ, "APP_ENV": "test", "DATABASE_URL": "sqlite://"}
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, text=True, timeout=30, check=False, env=env
+    )
+    assert result.returncode == 0, result.stderr
