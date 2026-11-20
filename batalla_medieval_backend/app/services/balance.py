@@ -504,16 +504,29 @@ def unit_combat_stats_with_legacy_aliases() -> Dict[str, Dict[str, Any]]:
     return result
 
 
+def _require_integer_level(level: int, label: str) -> int:
+    """Reject fractional, textual and boolean levels before pricing capacity.
+
+    Existing negative storage/farm levels are still normalized to level zero.
+    The rule affects invalid inputs only; it does not modify balance values.
+    """
+    if isinstance(level, bool) or not isinstance(level, int):
+        raise ValueError(f"{label} must be an integer")
+    return level
+
+
 def get_storage_capacity(warehouse_level: int) -> float:
-    level = max(int(warehouse_level), 0)
+    level = max(_require_integer_level(warehouse_level, "Warehouse level"), 0)
     return STORAGE_BASE_CAPACITY + STORAGE_PER_WAREHOUSE_LEVEL * level
 
 
 def get_population_capacity(settlement_type: str, farm_level: int) -> int:
-    base = CAMP_POPULATION_MAX if settlement_type == "camp" else CITY_POPULATION_MAX
+    if settlement_type not in ("city", "camp"):
+        raise ValueError(f"Unknown settlement type: {settlement_type}")
+    level = max(_require_integer_level(farm_level, "Farm level"), 0)
     if settlement_type == "camp":
-        return base
-    return base + max(int(farm_level), 0) * POPULATION_PER_FARM_LEVEL
+        return CAMP_POPULATION_MAX
+    return CITY_POPULATION_MAX + level * POPULATION_PER_FARM_LEVEL
 
 
 def get_building_max_level(building_type: str) -> int:
@@ -524,6 +537,7 @@ def get_building_max_level(building_type: str) -> int:
 
 
 def get_building_build_time(building_type: str, target_level: int) -> int:
+    target_level = _require_integer_level(target_level, "Target building level")
     if target_level < 1:
         raise ValueError("Target building level must be at least 1")
     maximum = get_building_max_level(building_type)
@@ -533,6 +547,7 @@ def get_building_build_time(building_type: str, target_level: int) -> int:
 
 
 def get_building_cost(building_type: str, target_level: int) -> Dict[str, float]:
+    target_level = _require_integer_level(target_level, "Target building level")
     if target_level < 1:
         raise ValueError("Target building level must be at least 1")
     maximum = get_building_max_level(building_type)
