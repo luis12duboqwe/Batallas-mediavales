@@ -81,11 +81,18 @@ def test_all_direct_user_foreign_keys_require_eraser_impact_review():
     )
 
 
+def _is_sql_delete_cascade(fk):
+    return str(fk.ondelete or "").strip().upper() == "CASCADE"
+
+
 def test_nullable_shared_references_allow_non_destructive_detachment():
     keys = _user_foreign_keys()
     for relation in NULLABLE_REFERENCES:
         assert keys[relation].parent.nullable, (
             f"Deletion design assumes nullable reference: {relation}"
+        )
+        assert not _is_sql_delete_cascade(keys[relation]), (
+            f"Unsafe SQL cascade through nullable shared reference: {relation}"
         )
 
 
@@ -95,6 +102,97 @@ def test_required_shared_references_do_not_cascade_away_other_players_data():
         assert not keys[relation].parent.nullable, (
             f"Update dependency registry: {relation} became nullable"
         )
-        assert keys[relation].ondelete != "CASCADE", (
-            f"Unsafe implicit account delete cascade: {relation}"
+        assert not _is_sql_delete_cascade(keys[relation]), (
+            f"Unsafe SQL cascade in shared identity reference: {relation}"
+        )
+
+
+# Existing ORM delete/delete-orphan cascades are *not safe* account erasure
+# semantics. Snapshotting them ensures every changed edge receives a review.
+# In particular, User.messages_sent/received, User.cities, and
+# City.attacker_reports/defender_reports can affect another player's records.
+EXISTING_ORM_DELETE_CASCADES = frozenset({
+    "User.heroes",
+    "User.cities",
+    "User.premium_status",
+    "User.bookmarks",
+    "User.alliances",
+    "User.alliance_invitations",
+    "User.alliance_invitations_sent",
+    "User.alliance_chat_messages",
+    "User.messages_sent",
+    "User.messages_received",
+    "User.logs",
+    "User.achievement_progress",
+    "User.theme_ownerships",
+    "User.items",
+    "User.notifications",
+    "User.quest_progress",
+    "User.world_memberships",
+    "City.buildings",
+    "City.troops",
+    "City.building_queue",
+    "City.troop_queue",
+    "City.research_queue",
+    "City.reports",
+    "City.attacker_reports",
+    "City.defender_reports",
+    "City.market_offers",
+    "City.research",
+    "World.cities",
+    "World.alliances",
+    "World.movements",
+    "World.reports",
+    "World.players",
+    "Hero.items",
+    "Alliance.members",
+    "Alliance.invitations",
+    "Alliance.chat_messages",
+    "ForumThread.posts",
+})
+
+
+def test_orm_delete_cascade_edges_are_inventoried_before_account_erasure():
+    actual = {
+        f"{model.__name__}.{relationship.key}"
+        for model in (
+            models.User, models.City, models.World, models.Hero,
+            models.Alliance, models.ForumThread,
+        )
+        for relationship in model.__mapper__.relationships
+        if "delete" in relationship.cascade or "delete-orphan" in relationship.cascade
+    }
+    assert actual == EXISTING_ORM_DELETE_CASCADES, (
+        f"Unreviewed ORM delete cascades: {sorted(actual - EXISTING_ORM_DELETE_CASCADES)}; "
+        f"removed/changed edges: {sorted(EXISTING_ORM_DELETE_CASCADES - actual)}"
+    )
+
+
+# Indirect references must be considered even if no direct FK points to users.
+CRITICAL_INDIRECT_REFERENCES = {
+    "movements.origin_city_id": "cities.id",
+    "movements.target_city_id": "cities.id",
+    "movements.hero_id": "heroes.id",
+    "reports.city_id": "cities.id",
+    "reports.attacker_city_id": "cities.id",
+    "reports.defender_city_id": "cities.id",
+    "adventures.hero_id": "heroes.id",
+    "hero_items.hero_id": "heroes.id",
+}
+
+
+def test_indirect_movement_report_adventure_links_cannot_sql_cascade():
+    all_fks = {
+        f"{table.name}.{fk.parent.name}": fk
+        for table in Base.metadata.tables.values()
+        for fk in table.foreign_keys
+    }
+    for relation, target in CRITICAL_INDIRECT_REFERENCES.items():
+        assert relation in all_fks, f"Missing account erasure dependency: {relation}"
+        fk = all_fks[relation]
+        assert fk.target_fullname == target, (
+            f"Changed target of account erasure dependency: {relation}"
+        )
+        assert not _is_sql_delete_cascade(fk), (
+            f"Unsafe indirect SQL cascade during account erasure: {relation}"
         )

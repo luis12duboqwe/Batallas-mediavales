@@ -25,6 +25,27 @@ obligación legal de conservar o borrar datos.
 | Evidencia y moderación | logs, anticheat, soporte y acciones de administradores | aplicar retención mínima justificada y borrar datos personales innecesarios |
 | Copias de seguridad y telemetría | fuera de las relaciones ORM | inventariar períodos, controles de acceso y expiración de backups |
 
+## Cascadas ORM e indirectas que impiden un borrado ingenuo
+
+Las relaciones `User.messages_sent`, `User.messages_received`,
+`User.alliance_chat_messages`, `User.logs` y `User.cities` tienen
+`cascade="all, delete-orphan"` en SQLAlchemy. También lo tienen
+`City.attacker_reports` y `City.defender_reports`: un informe enlazado
+con la ciudad de un rival podría quedar eliminado aunque no perteneciera
+exclusivamente al usuario que solicita el borrado.
+
+Por eso **no basta comprobar `ForeignKey.ondelete`**. La compuerta de pruebas
+incluye una lista explícita de cascadas ORM del grafo
+`User → City/World/Hero/Alliance/ForumThread`, y falla cuando aparecen
+cascadas nuevas no revisadas. La prueba solo inventaría el peligro conocido;
+NO afirma que las cascadas existentes sean seguras.
+
+Las referencias indirectas críticas a `cities.id` y `heroes.id`
+(movimientos, informes, aventuras y objetos) también están identificadas
+y se comprueban frente a cascadas SQL no autorizadas. Para FKs directas a
+`users.id`, las comprobaciones de `ondelete` son insensibles a mayúsculas,
+tanto en referencias compartidas obligatorias como anulables.
+
 ## Estrategia propuesta antes de habilitar cualquier operación irreversible
 
 1. Validar identidad reciente y registrar solicitud con idempotencia. Revocar
