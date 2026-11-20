@@ -15,6 +15,8 @@ const ProfileView = () => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageIsError, setMessageIsError] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState('');
 
   useEffect(() => {
     if (user) {
@@ -60,6 +62,28 @@ const ProfileView = () => {
       setMessage(error.response?.data?.detail || t('profile.update_error'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setExportLoading(true);
+    setExportError('');
+    try {
+      const { data } = await api.exportAccount();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'medievol-datos-cuenta.json';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // Safari needs the object URL to outlive the synthetic download click.
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setExportError(error.response?.data?.detail || 'No se pudieron exportar los datos. Inténtalo de nuevo.');
+    } finally {
+      setExportLoading(false);
     }
   };
 
@@ -152,6 +176,24 @@ const ProfileView = () => {
             </div>
           )}
         </form>
+
+        <section aria-labelledby="account-data-title" className="mt-8 border-t border-gray-700 pt-6 space-y-3">
+          <h2 id="account-data-title" className="text-xl font-semibold text-amber-100">Tus datos</h2>
+          <p className="text-sm text-gray-300">
+            Descarga una copia en JSON de tu perfil, progreso de juego y comunicaciones de tu cuenta.
+            El archivo contiene información personal; guárdalo en un lugar privado.
+          </p>
+          <button
+            type="button"
+            data-testid="account-export"
+            onClick={handleExport}
+            disabled={exportLoading}
+            className="btn bg-gray-700 hover:bg-gray-600 text-white border border-amber-900/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
+          >
+            {exportLoading ? 'Preparando datos...' : 'Descargar mis datos'}
+          </button>
+          {exportError && <p role="alert" data-testid="account-export-error" className="text-sm text-red-300">{exportError}</p>}
+        </section>
       </div>
     </div>
   );

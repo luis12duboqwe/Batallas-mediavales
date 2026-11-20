@@ -18,12 +18,14 @@ def test_account_export_needs_current_valid_token(client, db_session, user):
     assert client.get(
         "/auth/me/export", headers={"Authorization": "Bearer malformed"}
     ).status_code == 401
-    login = client.get("/auth/me/export", headers=_headers(user))
+    original_headers = _headers(user)
+    login = client.get("/auth/me/export", headers=original_headers)
     assert login.status_code == 200
     assert login.json()["account"]["id"] == user.id
 
     user.auth_version += 1
     db_session.commit()
+    assert client.get("/auth/me/export", headers=original_headers).status_code == 401
     assert client.get("/auth/me/export", headers=_headers(user)).status_code == 200
 
 
@@ -77,8 +79,10 @@ def test_account_export_scopes_game_data_and_omits_credentials(client, db_sessio
         models.SupportCase(requester_id=user.id, subject="My ticket", description="Help me"),
         models.SupportCase(requester_id=stranger.id, subject="Foreign ticket",
                            description="secret support issue"),
-        models.ForumPost(thread_id=1, author_id=user.id, content="Own forum post"),
-        models.ForumPost(thread_id=2, author_id=stranger.id, content="Not own forum post"),
+        models.ChatMessage(user_id=user.id, world_id=city.world_id,
+                           channel="global", content="My chat content"),
+        models.ChatMessage(user_id=stranger.id, world_id=city.world_id,
+                           channel="global", content="Foreign chat content"),
     ])
     db_session.commit()
 
@@ -101,14 +105,14 @@ def test_account_export_scopes_game_data_and_omits_credentials(client, db_sessio
         "My authored message", "Received message",
     }
     assert [row["subject"] for row in payload["support_cases"]] == ["My ticket"]
-    assert [row["content"] for row in payload["forum_posts_authored"]] == ["Own forum post"]
+    assert [row["content"] for row in payload["chat_messages_authored"]] == ["My chat content"]
 
     serialized = json.dumps(payload)
     for secret in [
         user.hashed_password, user.password_reset_token, user.verification_token,
         stranger.email, stranger.hashed_password, "HiddenOpponentCity", "EnemyHero",
         "Foreign notification", "Secret from B", "Hidden message",
-        "not visible to tester", "Foreign ticket", "Not own forum post",
+        "not visible to tester", "Foreign ticket", "Foreign chat content",
     ]:
         assert secret not in serialized
     for banned_field in ["hashed_password", "verification_token", "password_reset_token",
