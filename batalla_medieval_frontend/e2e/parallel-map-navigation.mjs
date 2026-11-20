@@ -102,6 +102,15 @@ async function runJourney(browser, label, viewport, touch) {
     const startingCenter = await centerOf(page);
     const initialOrder = await snapshotOrder(page);
     verifyOrder(initialOrder);
+    // G12/BM-0067 locates barbarian/oasis tiles by the legacy title format.
+    // Preserve it while using richer aria-label text for screen readers.
+    const centerTile = page.getByTestId('map-tile-' + startingCenter.x + '-' + startingCenter.y);
+    assert.match(
+      await centerTile.getAttribute('title'),
+      new RegExp('^\\(' + startingCenter.x + ', ' + startingCenter.y + '\\) '),
+      'Legacy G12 coordinate title remains compatible',
+    );
+    assert.match(await centerTile.getAttribute('aria-label'), /Casilla /, 'Accessible tile label is independent of title');
 
     const sizing = await page.evaluate(() => ({
       documentWidth: document.documentElement.scrollWidth,
