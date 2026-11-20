@@ -48,6 +48,7 @@ def create_world(
         lifecycle_status=payload.lifecycle_status,
         special_rules=payload.special_rules,
         map_size=payload.map_size,
+        wonder_rules_version=payload.wonder_rules_version,
     )
     db.add(world)
     db.flush()

@@ -98,6 +98,19 @@ def build_account_export(db: Session, user: models.User) -> dict:
             ("id", "world_id", "starting_city_id", "expansion_points", "joined_at"),
         ),
         "cities": cities,
+        # Only projects owned by the account and donations it personally sent.
+        # Never include another contributor's identity or private source city.
+        "wonder_projects_owned": _owned_rows(
+            db, models.WonderFunding, "owner_id", user.id,
+            ("id", "world_id", "city_id", "alliance_id", "target_level",
+             "funded_wood", "funded_stone", "funded_iron", "funded_gold",
+             "status", "created_at"),
+        ),
+        "wonder_contributions_authored": _owned_rows(
+            db, models.WonderContribution, "contributor_id", user.id,
+            ("id", "world_id", "funding_id", "source_city_id", "wood",
+             "stone", "iron", "gold", "created_at"),
+        ),
         "buildings": _related_rows(
             db, models.Building, "city_id", city_ids,
             ("id", "city_id", "name", "level"),

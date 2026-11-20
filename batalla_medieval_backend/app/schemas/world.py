@@ -27,9 +27,11 @@ class WorldCreate(WorldBase):
     map_size: int = Field(default=100, ge=10)
     # Administration may explicitly open a world at creation, but draft is safe.
     lifecycle_status: Literal["draft", "open"] = "draft"
+    wonder_rules_version: Literal["legacy-v1", "alliance-v2"] = "alliance-v2"
 
 
 class WorldRead(WorldBase):
+    wonder_rules_version: Literal["legacy-v1", "alliance-v2"] = "legacy-v1"
     model_config = ConfigDict(from_attributes=True)
 
     id: int

@@ -10,6 +10,8 @@ from ..database import get_db
 from ..routers.auth import get_current_user
 from ..routers.responses import error_response
 from ..services import building
+from ..services import wonder_funding
+from ..schemas.wonder import WonderContributionCreate, WonderFundingRead
 
 router = APIRouter(tags=["buildings"])
 
@@ -82,3 +84,37 @@ def cancel_queue(
     if not success:
         raise error_response(404, "queue_not_found", "Queue entry not found or not owned by user")
     return None
+
+
+@router.get("/wonder/funding", response_model=WonderFundingRead)
+def get_wonder_funding(
+    city_id: int,
+    world_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    try:
+        return wonder_funding.get_funding(db, city_id, world_id, current_user.id)
+    except ValueError as exc:
+        raise error_response(403, "wonder_funding_unavailable", str(exc)) from exc
+
+
+@router.post("/wonder/contribute", response_model=WonderFundingRead)
+def contribute_wonder_funding(
+    payload: WonderContributionCreate,
+    world_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    try:
+        return wonder_funding.contribute(
+            db,
+            world_id=world_id,
+            contributor_id=current_user.id,
+            target_city_id=payload.target_city_id,
+            source_city_id=payload.source_city_id,
+            idempotency_key=payload.idempotency_key,
+            amounts={res: getattr(payload, res) for res in ("wood", "stone", "iron", "gold")},
+        )
+    except ValueError as exc:
+        raise error_response(400, "wonder_contribution_rejected", str(exc)) from exc

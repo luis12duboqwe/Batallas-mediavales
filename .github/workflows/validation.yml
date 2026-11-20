@@ -104,6 +104,7 @@ jobs:
           tests/test_bm0073_admin_concurrency.py
           tests/test_bm0074_anticheat_concurrency.py
           tests/test_bm0090_privacy_concurrency.py
+          tests/test_parallel_wonder_postgres.py
 
   frontend:
     name: Frontend

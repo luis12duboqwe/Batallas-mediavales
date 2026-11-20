@@ -24,6 +24,7 @@ def create_world(db: Session, name: str, speed: float = 1.0) -> models.World:
             resource_modifier=1.0,
             map_size=100,
             is_active=True,
+            wonder_rules_version="alliance-v2",
         )
         db.add(world)
         db.flush()

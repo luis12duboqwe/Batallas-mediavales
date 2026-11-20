@@ -190,6 +190,14 @@ export const api = {
       { params: { world_id: worldId } },
     ),
   cancelBuildingQueue: (queueId) => axiosClient.delete(`/building/queue/${queueId}`),
+  getWonderFunding: (cityId, worldId) => axiosClient.get('/building/wonder/funding', {
+    params: { city_id: cityId, world_id: worldId },
+  }),
+  contributeWonder: ({ worldId, targetCityId, sourceCityId, amounts, idempotencyKey }) =>
+    axiosClient.post('/building/wonder/contribute', {
+      target_city_id: targetCityId, source_city_id: sourceCityId,
+      idempotency_key: idempotencyKey, ...amounts,
+    }, { params: { world_id: worldId } }),
   trainTroops: ({ cityId, troopType, amount, worldId }) =>
     axiosClient.post(
       '/troop/train',

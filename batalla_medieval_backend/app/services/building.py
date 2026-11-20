@@ -17,6 +17,7 @@ from . import expansion as expansion_service
 from . import notification as notification_service
 from . import premium as premium_service
 from . import production, quest as quest_service, ranking, world_lifecycle
+from . import wonder_funding
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,8 @@ def get_available_buildings(db: Session, city: models.City) -> List[dict]:
     """Return server-authoritative quotes for buildings valid for a settlement."""
 
     existing_map = {building.name: building for building in city.buildings}
+    world = db.get(models.World, city.world_id)
+    wonder_v2 = world.wonder_rules_version == balance.WONDER_ALLIANCE_RULES
     result = []
 
     for name in balance.BUILDING_ORDER:
@@ -72,8 +75,12 @@ def get_available_buildings(db: Session, city: models.City) -> List[dict]:
         max_level = balance.get_building_max_level(name)
         target_level = current_level + 1
         is_max_level = current_level >= max_level
-        cost = {} if is_max_level else calculate_upgrade_cost(name, target_level)
-        build_time = 0 if is_max_level else calculate_build_time(name, target_level)
+        if not is_max_level and name == "world_wonder" and wonder_v2:
+            cost = balance.get_wonder_cost(target_level, world.wonder_rules_version)
+            build_time = balance.get_wonder_build_time(target_level, world.wonder_rules_version)
+        else:
+            cost = {} if is_max_level else calculate_upgrade_cost(name, target_level)
+            build_time = 0 if is_max_level else calculate_build_time(name, target_level)
 
         prereqs = BUILDING_PREREQUISITES.get(name, {})
         requirements_met = all(
@@ -81,6 +88,18 @@ def get_available_buildings(db: Session, city: models.City) -> List[dict]:
             and existing_map[req_name].level >= req_level
             for req_name, req_level in prereqs.items()
         )
+
+        funded = True
+        if name == "world_wonder" and wonder_v2 and not is_max_level:
+            alliance_id = wonder_funding._member_alliance(db, city.owner_id, city.world_id)
+            project = (
+                wonder_funding._project(db, city, target_level, alliance_id)
+                if alliance_id is not None else None
+            )
+            funded = bool(project and project.status == "ready" and all(
+                getattr(project, f"funded_{res}") == cost[res]
+                for res in balance.RESOURCE_FIELDS
+            ))
 
         result.append(
             {
@@ -90,7 +109,7 @@ def get_available_buildings(db: Session, city: models.City) -> List[dict]:
                 "level": current_level,
                 "max_level": max_level,
                 "is_max_level": is_max_level,
-                "can_upgrade": requirements_met and not is_max_level,
+                "can_upgrade": requirements_met and not is_max_level and funded,
                 "cost": cost,
                 "requirements_met": requirements_met,
                 "requirements": prereqs,
@@ -170,16 +189,32 @@ def queue_upgrade(db: Session, city: models.City, building_name: str) -> models.
         db.flush()
 
     target_level = int(building.level) + 1
-    cost = calculate_upgrade_cost(building_name, target_level)
-    if not production.check_cost(city, cost):
-        db.rollback()
-        raise ValueError("Insufficient resources")
-
-    production.pay_cost(city, cost)
-
-    finish_time = utc_now() + timedelta(
-        seconds=calculate_build_time(building_name, target_level)
+    world = db.get(models.World, city.world_id)
+    wonder_v2 = building_name == "world_wonder" and (
+        world.wonder_rules_version == balance.WONDER_ALLIANCE_RULES
     )
+    if wonder_v2:
+        # No new resource charge: previous contributions were debited and
+        # recorded in the persistent alliance escrow ledger.
+        try:
+            project = wonder_funding.require_funded_project(db, city, target_level)
+        except ValueError:
+            # A rejected queue must not leave a transient Building row in the
+            # caller's session, even when invoked outside an HTTP request.
+            db.rollback()
+            raise
+        project.status = "queued"
+        cost = {}
+        build_time = balance.get_wonder_build_time(target_level, world.wonder_rules_version)
+    else:
+        cost = calculate_upgrade_cost(building_name, target_level)
+        if not production.check_cost(city, cost):
+            db.rollback()
+            raise ValueError("Insufficient resources")
+        production.pay_cost(city, cost)
+        build_time = calculate_build_time(building_name, target_level)
+
+    finish_time = utc_now() + timedelta(seconds=build_time)
     queue_entry = models.BuildingQueue(
         city_id=city.id,
         building_type=building_name,
@@ -308,6 +343,19 @@ def process_building_queues(db: Session) -> List[dict]:
             db.add(building)
             db.flush()
 
+        # A fabricated/stale v2 queue must never increment the Wonder or close
+        # the world without an existing, owner-pinned, already-paid escrow.
+        funding_project = None
+        if queue_entry.building_type == "world_wonder":
+            queue_world = db.get(models.World, city.world_id)
+            if queue_world.wonder_rules_version == balance.WONDER_ALLIANCE_RULES:
+                funding_project = wonder_funding.queued_project_for_completion(
+                    db, city, int(queue_entry.target_level)
+                )
+                if funding_project is None:
+                    logger.error("wonder_queue_missing_owner_pinned_financing", extra={"queue_id": queue_entry.id})
+                    continue
+
         maximum = balance.get_building_max_level(queue_entry.building_type)
         previous_level = int(building.level)
         target_level = min(int(queue_entry.target_level), maximum)
@@ -321,6 +369,8 @@ def process_building_queues(db: Session) -> List[dict]:
             )
 
         world_won = False
+        if funding_project is not None:
+            funding_project.status = "completed"
         if building.name == "world_wonder" and building.level >= maximum:
             world = (
                 db.query(models.World)
@@ -336,6 +386,10 @@ def process_building_queues(db: Session) -> List[dict]:
                 if world.ended_at is None:
                     world.ended_at = now
                 world.winner_id = city.owner_id
+                if world.wonder_rules_version == balance.WONDER_ALLIANCE_RULES:
+                    # Sponsor alliance was pinned when the resources were
+                    # deposited: changing membership cannot steal the win.
+                    world.winner_alliance_id = funding_project.alliance_id
                 world_won = True
 
         finished_info.append(
@@ -405,10 +459,17 @@ def cancel_building_queue(db: Session, queue_id: int, user_id: int) -> bool:
         db, queue_entry.city_id
     )
 
-    paid_cost = queue_entry.paid_cost or calculate_upgrade_cost(
-        queue_entry.building_type,
-        queue_entry.target_level,
+    is_funded_wonder = (
+        queue_entry.building_type == "world_wonder"
+        and db.get(models.World, city.world_id).wonder_rules_version == balance.WONDER_ALLIANCE_RULES
     )
+    if is_funded_wonder:
+        wonder_funding.restore_cancelled_project(db, city, queue_entry.target_level)
+        paid_cost = {}  # escrow remains ready; never leak liquidity on cancellation
+    else:
+        paid_cost = queue_entry.paid_cost or calculate_upgrade_cost(
+            queue_entry.building_type, queue_entry.target_level,
+        )
     refund = {
         resource: float(amount) * REFUND_FACTOR
         for resource, amount in paid_cost.items()

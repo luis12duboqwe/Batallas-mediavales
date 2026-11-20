@@ -37,6 +37,7 @@ from .forum import ForumThread, ForumPost
 from .adventure import Adventure
 from .user_block import UserBlock
 from .support_case import SupportCase
+from .wonder_funding import WonderFunding, WonderContribution
 
 __all__ = [
     "User",
@@ -89,4 +90,6 @@ __all__ = [
     "Adventure",
     "UserBlock",
     "SupportCase",
+    "WonderFunding",
+    "WonderContribution",
 ]

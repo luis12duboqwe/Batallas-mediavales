@@ -30,9 +30,45 @@ commerce publishes its own independently versioned rules contract.
 from __future__ import annotations
 
 from copy import deepcopy
+from math import ceil
 from typing import Any, Dict, Tuple
 
 BALANCE_VERSION = "2026.08.23-bm0063.1"
+
+# BM-0062 v2 is an opt-in, world-pinned wonder-only schedule.
+# Never change BALANCE_VERSION or the legacy get_building_cost contract:
+# combat seeds and already-running worlds depend on it.
+WONDER_LEGACY_RULES = "legacy-v1"
+WONDER_ALLIANCE_RULES = "alliance-v2"
+WONDER_V2_GROWTH = 1.02
+WONDER_V2_TIME_BASE = 1200
+WONDER_V2_TIME_PER_LEVEL = 180
+
+
+def get_wonder_cost(level: int, rules_version: str) -> Dict[str, int | float]:
+    """Resource requirement for one level under a pinned world contract."""
+    level = _require_integer_level(level, "Wonder level")
+    if not 1 <= level <= 100:
+        raise ValueError("Wonder level must be between 1 and 100")
+    if rules_version == WONDER_LEGACY_RULES:
+        return get_building_cost("world_wonder", level)
+    if rules_version != WONDER_ALLIANCE_RULES:
+        raise ValueError("Unknown wonder rules version")
+    return {
+        res: ceil(value * WONDER_V2_GROWTH ** (level - 1))
+        for res, value in BUILDING_COSTS["world_wonder"].items()
+    }
+
+
+def get_wonder_build_time(level: int, rules_version: str) -> int:
+    level = _require_integer_level(level, "Wonder level")
+    if not 1 <= level <= 100:
+        raise ValueError("Wonder level must be between 1 and 100")
+    if rules_version == WONDER_LEGACY_RULES:
+        return get_building_build_time("world_wonder", level)
+    if rules_version != WONDER_ALLIANCE_RULES:
+        raise ValueError("Unknown wonder rules version")
+    return WONDER_V2_TIME_BASE + WONDER_V2_TIME_PER_LEVEL * level
 
 RESOURCE_FIELDS = ("wood", "stone", "iron", "gold")
 CITY_STARTING_RESOURCES: Dict[str, float] = {

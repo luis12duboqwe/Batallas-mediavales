@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import BuildingCard from '../components/BuildingCard';
 import Timer from '../components/Timer';
+import WonderFundingPanel from '../components/parallel-wonder/WonderFundingPanel';
 import { useCityStore } from '../store/cityStore';
 
 const BuildingsView = () => {
   const buildings = useCityStore((state) => state.buildings);
+  const currentCity = useCityStore((state) => state.currentCity);
   const queues = useCityStore((state) => state.queues);
   const loadCity = useCityStore((state) => state.loadCity);
   const upgrade = useCityStore((state) => state.upgrade);
@@ -97,6 +99,8 @@ const BuildingsView = () => {
           </div>
         </section>
       )}
+
+      <WonderFundingPanel currentCity={currentCity} refreshCity={loadCity} />
 
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
         {buildings.map((building) => (
