@@ -54,26 +54,37 @@ try {
     });
   });
 
+  async function assertPublicTargetIsUsable(targetId, expectedName) {
+    const attempts = [];
+    const collect = (response) => {
+      const url = new URL(response.url());
+      if (url.pathname.endsWith(`/city/${targetId}/status`)) {
+        attempts.push(response.status());
+      }
+    };
+    page.on('response', collect);
+    try {
+      await page.goto(`${UI}/send-movement/${targetId}`, { waitUntil: 'domcontentloaded' });
+      const heading = page.getByRole('heading', { name: `Objetivo: ${expectedName}`, exact: true });
+      try {
+        await heading.waitFor({ state: 'visible', timeout: 8000 });
+      } catch (error) {
+        const disabled = await page.getByRole('button', { name: 'Enviar Tropas' }).isDisabled();
+        const errors = await page.getByRole('alert').allTextContents();
+        throw new Error(`Target ${targetId} not rendered. submitDisabled=${disabled}, privateStatusResponses=${JSON.stringify(attempts)}, alerts=${JSON.stringify(errors)}. ${error.message}`);
+      }
+      assert.equal(await page.getByRole('button', { name: 'Enviar Tropas' }).isEnabled(), true);
+    } finally {
+      page.off('response', collect);
+    }
+  }
+
   await run.check('barbarian target must display public details and enable real dispatch', async () => {
-    const responsePromise = page.waitForResponse((response) =>
-      new URL(response.url()).pathname === `/city/${barbarian.city_id}/status`, { timeout: 12000 });
-    await page.goto(`${UI}/send-movement/${barbarian.city_id}`, { waitUntil: 'domcontentloaded' });
-    const response = await responsePromise;
-    assert.equal(response.status(), 200,
-      `Real barbarian target lookup returned HTTP ${response.status()}, so send is inaccessible. Use a public, world-scoped target read.`);
-    await page.getByRole('heading', { name: `Objetivo: ${barbarian.city_name}` }).waitFor({ timeout: 8000 });
-    assert.equal(await page.getByRole('button', { name: 'Enviar Tropas' }).isEnabled(), true);
+    await assertPublicTargetIsUsable(barbarian.city_id, barbarian.city_name);
   });
 
   await run.check('other-player target must display public details and enable dispatch', async () => {
-    const responsePromise = page.waitForResponse((response) =>
-      new URL(response.url()).pathname === `/city/${enemyCity.id}/status`, { timeout: 12000 });
-    await page.goto(`${UI}/send-movement/${enemyCity.id}`, { waitUntil: 'domcontentloaded' });
-    const response = await responsePromise;
-    assert.equal(response.status(), 200,
-      `Real enemy target lookup returned HTTP ${response.status()}, so the form cannot dispatch PvP or spies.`);
-    await page.getByRole('heading', { name: `Objetivo: ${enemyCity.name}` }).waitFor({ timeout: 8000 });
-    assert.equal(await page.getByRole('button', { name: 'Enviar Tropas' }).isEnabled(), true);
+    await assertPublicTargetIsUsable(enemyCity.id, enemyCity.name);
   });
 
   await run.check('no accidental march was created by visiting a target form', async () => {
