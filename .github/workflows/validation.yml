@@ -127,6 +127,8 @@ jobs:
         run: npm run test:resilience
       - name: Validate list response contracts
         run: npm run test:states
+      - name: Validate selective city store subscriptions
+        run: npm run test:store-subscriptions
       - name: Lint frontend
         run: npm run lint
       - name: Build frontend
