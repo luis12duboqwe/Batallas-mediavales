@@ -10,6 +10,7 @@ assert.equal(localizeApiErrorDetail('Invalid or expired verification token'), 'E
 assert.equal(localizeApiErrorDetail('Account frozen'), 'Cuenta suspendida. Contacta con soporte.');
 assert.equal(localizeApiErrorDetail('Account frozen: Contact an admin'), 'Cuenta suspendida. Contacta con soporte para conocer el motivo.');
 assert.equal(localizeApiErrorDetail('Account frozen: No cumplió las reglas'), 'Cuenta suspendida. Motivo: No cumplió las reglas.');
+assert.equal(localizeApiErrorDetail('Account frozen: No cumplió las reglas.'), 'Cuenta suspendida. Motivo: No cumplió las reglas.');
 assert.equal(localizeApiErrorDetail('Account frozen: Automated violation'), 'Cuenta suspendida. Contacta con soporte para conocer el motivo.');
 assert.equal(localizeApiErrorDetail('No active world'), generic);
 assert.equal(localizeApiErrorDetail('Unknown server failure'), generic);
