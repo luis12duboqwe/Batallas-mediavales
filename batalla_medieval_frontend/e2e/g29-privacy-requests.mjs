@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 
 // Manual privacy intake must not perform account deletion.
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:4173';
@@ -41,13 +41,14 @@ try {
   assert.match(await caseRow.innerText(), /Recibida/);
   assert.match(await page.getByTestId('privacy-success').innerText(), /no se ha eliminado ni modificado/);
 
-  const [repeatedResponse] = await Promise.all([
-    page.waitForResponse((response) => response.url().includes('/auth/me/privacy-requests') &&
-      response.request().method() === 'POST', { timeout: 15000 }),
-    page.getByTestId('privacy-submit').click(),
-  ]);
+  const repeatedPost = page.waitForResponse((response) => response.url().includes('/auth/me/privacy-requests') &&
+    response.request().method() === 'POST', { timeout: 15000 });
+  const repeatedGet = page.waitForResponse((response) => response.url().includes('/auth/me/privacy-requests') &&
+    response.request().method() === 'GET', { timeout: 15000 });
+  await page.getByTestId('privacy-submit').click();
+  const [repeatedResponse] = await Promise.all([repeatedPost, repeatedGet]);
   assert.equal((await repeatedResponse.json()).id, created.id);
-  assert.equal(await page.locator('[data-testid^="privacy-case-"]').count(), 1);
+  await expect(page.locator('[data-testid^="privacy-case-"]')).toHaveCount(1);
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByTestId('privacy-case-' + created.id).waitFor({ timeout: 15000 });
@@ -65,16 +66,15 @@ try {
   await page.getByTestId('privacy-case-' + retention.id).waitFor();
 
   let firstSlowGet = true;
-  let noteGetStarted;
-  const getStarted = new Promise((resolve) => { noteGetStarted = resolve; });
   await page.route('**/auth/me/privacy-requests', async (route) => {
     if (route.request().method() === 'GET' && firstSlowGet) {
       firstSlowGet = false;
-      noteGetStarted();
       await new Promise((resolve) => setTimeout(resolve, 1400));
     }
     await route.continue();
   });
+  const getStarted = page.waitForRequest((request) => request.url().includes('/auth/me/privacy-requests') &&
+    request.method() === 'GET', { timeout: 15000 });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await getStarted;
   await page.getByTestId('privacy-kind').selectOption('rectification');
@@ -87,7 +87,7 @@ try {
   await page.getByTestId('privacy-case-' + rectification.id).waitFor();
   await page.getByTestId('privacy-case-' + retention.id).waitFor({ timeout: 15000 });
   await page.getByTestId('privacy-case-' + created.id).waitFor();
-  assert.equal(await page.locator('[data-testid^="privacy-case-"]').count(), 3);
+  await expect(page.locator('[data-testid^="privacy-case-"]')).toHaveCount(3);
   await page.unroute('**/auth/me/privacy-requests');
 
   // A rejected POST must leave earlier cases visible and retain its error.
@@ -106,7 +106,7 @@ try {
   await page.getByTestId('privacy-submit').click();
   await page.getByTestId('privacy-error').waitFor({ timeout: 15000 });
   await page.getByTestId('privacy-case-' + retention.id).waitFor();
-  assert.equal(await page.locator('[data-testid^="privacy-case-"]').count(), 3);
+  await expect(page.locator('[data-testid^="privacy-case-"]')).toHaveCount(3);
   await page.unroute('**/auth/me/privacy-requests');
   // A manual refresh clears a prior failure after recovery.
   await page.getByRole('button', { name: 'Actualizar' }).click();
