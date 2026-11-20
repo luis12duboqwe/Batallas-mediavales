@@ -73,6 +73,14 @@ si una solicitud concurrente gana la carrera, revierte la transacción fallida
 y consulta el caso ganador. Las pruebas incluyen el índice real en SQLite,
 cambios de estado, categorías distintas y dos sesiones en PostgreSQL.
 
+**Compatibilidad PostgreSQL de Alembic:** La revisión antigua
+`0014_achievement_progress_world_scope` supera el límite de 32 caracteres
+de la tabla de versiones de Alembic. La nueva revisión intermedia
+`0013b_expand_alembic_version` amplía esa columna a 128 caracteres en
+PostgreSQL **antes** de llegar a la 0014; conserva los identificadores
+históricos y deja SQLite intacto. Una reversión no encoge esta columna,
+pues sería destructivo para identificadores existentes.
+
 **Migración segura:** antes de crear el índice se detectan duplicados activos.
 Si hay alguno, la migración se bloquea **sin eliminar ni cerrar solicitudes**.
 Personal autorizado debe revisar y resolver los duplicados, documentar la
