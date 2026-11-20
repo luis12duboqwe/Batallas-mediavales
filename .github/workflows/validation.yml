@@ -130,7 +130,7 @@ jobs:
 
   browser-e2e:
     name: Browser E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       APP_ENV: test
       DATABASE_URL: sqlite:////tmp/batalla-medieval-g2-e2e.db
@@ -222,7 +222,7 @@ jobs:
 
   accessibility-e2e:
     name: Accessibility and media E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       APP_ENV: test
       DATABASE_URL: sqlite:////tmp/batalla-medieval-g21-e2e.db
