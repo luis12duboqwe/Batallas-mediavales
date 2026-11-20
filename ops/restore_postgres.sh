@@ -50,6 +50,16 @@ if [[ ! -f "$CHECKSUM_FILE" ]]; then
 fi
 sha256sum --check "$CHECKSUM_FILE"
 
+# pg_restore --create uses the database name embedded in the archive, NOT the
+# -d connection database. Refuse a wrong-database archive *before* stopping
+# writers or terminating PostgreSQL sessions.
+ARCHIVE_DATABASE="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
+  pg_restore --list < "$BACKUP_FILE" | sed -n 's/^;[[:space:]]*dbname: //p')"
+if [[ "$ARCHIVE_DATABASE" != "$POSTGRES_DB" ]]; then
+  echo "Restore refused: backup database '${ARCHIVE_DATABASE:-unknown}' does not match configured '${POSTGRES_DB}'" >&2
+  exit 2
+fi
+
 echo "Stopping application writers before restore"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" stop backend worker || true
 
