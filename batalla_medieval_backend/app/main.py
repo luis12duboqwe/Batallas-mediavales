@@ -13,6 +13,7 @@ from .routers import (
     alliance,
     anticheat,
     auth,
+    account_data,
     building,
     chat,
     city,
@@ -63,6 +64,7 @@ app.add_middleware(
 app.add_middleware(LanguageMiddleware)
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+app.include_router(account_data.router)
 app.include_router(achievement.router)
 app.include_router(city.router, prefix="/city", tags=["City"])
 app.include_router(building.router, prefix="/building", tags=["Building"])
