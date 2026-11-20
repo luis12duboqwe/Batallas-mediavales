@@ -10,7 +10,7 @@
 
 El script `ops/backup_postgres.sh` permite un parámetro de entorno opcional `BACKUP_RECEIPT_FILE` que apunta a un archivo normal preexistente. Solo después de publicar el dump, comprobar su checksum y completar retención escribe en él la ruta exacta de su propio archivo de respaldo. Las ejecuciones habituales (cron/operación manual) no necesitan pasar este parámetro.
 
-`ops/deploy_remote.sh` crea un recibo privado dentro de `.ops-state`, invoca el backup con ese recibo y comprueba que su contenido es un dump nuevo, regular y no vacío en el `BACKUP_DIR` configurado, acompañado de checksum. Si no existe o no es válido, la operación aborta. Un backup de otra ejecución no puede sustituir silenciosamente el del despliegue. El recibo temporal se elimina tras utilizarse y durante cualquier rollback por error.
+`ops/deploy_remote.sh` crea un recibo privado dentro de `.ops-state`, invoca el backup con ese recibo y comprueba que su contenido es un dump nuevo, regular y no vacío en el `BACKUP_DIR` configurado, acompañado de checksum. El archivo recibido se trata como **candidato**: solo se asigna como snapshot de rollback después de superar todas las validaciones. El directorio de destino y el directorio del archivo se comparan como rutas normalizadas, incluidas barras finales. Si no existe o no es válido, la operación aborta y no utiliza el archivo rechazado para restaurar. Un backup de otra ejecución no puede sustituir silenciosamente el del despliegue. El recibo temporal se elimina tras utilizarse y durante cualquier rollback por error.
 
 ## Validación
 
