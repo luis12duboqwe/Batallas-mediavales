@@ -18,5 +18,9 @@ export const shouldExpireSession = (error, currentToken) => {
   return authorization === 'Bearer ' + currentToken;
 };
 
+// Late requests may only affect the login session that initiated them.
+export const hasUnchangedSession = (requestToken, activeToken, storedToken) =>
+  Boolean(requestToken) && requestToken === activeToken && activeToken === storedToken;
+
 export const isTemporaryServiceFailure = (error) =>
   [502, 503, 504].includes(error?.response?.status);

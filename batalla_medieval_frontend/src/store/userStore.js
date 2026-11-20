@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api } from '../api/axiosClient';
+import { hasUnchangedSession } from '../utils/transportState';
 
 const readStoredToken = () => {
   if (typeof window === 'undefined') return null;
@@ -68,10 +69,11 @@ export const useUserStore = create((set, get) => ({
     if (!token) return null;
     try {
       const { data } = await api.getCity();
+      if (!hasUnchangedSession(token, get().token, readStoredToken())) return null;
       set({ user: data.user, cities: data.cities });
       return data;
     } catch (err) {
-      if (err.response?.status === 401) {
+      if (err.response?.status === 401 && hasUnchangedSession(token, get().token, readStoredToken())) {
         get().expireSession();
       }
       throw err;
@@ -82,10 +84,11 @@ export const useUserStore = create((set, get) => ({
     if (!token) return null;
     try {
       const { data } = await api.getProfile();
+      if (!hasUnchangedSession(token, get().token, readStoredToken())) return null;
       set({ user: data });
       return data;
     } catch (err) {
-      if (err.response?.status === 401) {
+      if (err.response?.status === 401 && hasUnchangedSession(token, get().token, readStoredToken())) {
         get().expireSession();
       }
       throw err;

@@ -16,7 +16,7 @@ const ConnectionStatus = () => {
   const socket = useSocket();
   const [online, setOnline] = useState(initiallyOnline);
   const [realtime, setRealtime] = useState('idle');
-  const [unavailablePath, setUnavailablePath] = useState(null);
+  const [unavailablePaths, setUnavailablePaths] = useState(() => new Set());
 
   useEffect(() => {
     const onOffline = () => setOnline(false);
@@ -30,10 +30,18 @@ const ConnectionStatus = () => {
   }, []);
 
   useEffect(() => {
-    const onUnavailable = (event) => setUnavailablePath(event.detail?.path || '*');
+    const onUnavailable = (event) => {
+      const path = event.detail?.path || '*';
+      setUnavailablePaths((current) => new Set([...current, path]));
+    };
     const onRecovered = (event) => {
       const recoveredPath = event.detail?.path || '*';
-      setUnavailablePath((path) => path === recoveredPath ? null : path);
+      setUnavailablePaths((current) => {
+        if (!current.has(recoveredPath)) return current;
+        const pending = new Set(current);
+        pending.delete(recoveredPath);
+        return pending;
+      });
     };
     window.addEventListener(SERVICE_UNAVAILABLE_EVENT, onUnavailable);
     window.addEventListener(SERVICE_RECOVERED_EVENT, onRecovered);
@@ -67,7 +75,7 @@ const ConnectionStatus = () => {
   }, [socket, token]);
 
   const status = !online ? 'offline'
-    : unavailablePath ? 'service'
+    : unavailablePaths.size > 0 ? 'service'
       : token && realtime === 'reconnecting' ? 'reconnecting' : null;
   if (!status) return null;
 

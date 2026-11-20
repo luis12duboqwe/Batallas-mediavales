@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { shouldExpireSession, isTemporaryServiceFailure } from '../src/utils/transportState.js';
+import { shouldExpireSession, isTemporaryServiceFailure, hasUnchangedSession } from '../src/utils/transportState.js';
 
 const errorFor = (status, url = '/auth/me', token = 'current', headers = null) => ({
   response: { status },
@@ -21,4 +21,9 @@ assert.equal(shouldExpireSession(errorFor(401, '/auth/me', 'current', { get: (ke
 for (const status of [502, 503, 504]) assert.equal(isTemporaryServiceFailure(errorFor(status)), true);
 for (const status of [400, 401, 403, 404, 500]) assert.equal(isTemporaryServiceFailure(errorFor(status)), false);
 assert.equal(isTemporaryServiceFailure(new Error('Network Error')), false);
+assert.equal(hasUnchangedSession('current', 'current', 'current'), true);
+assert.equal(hasUnchangedSession('old', 'new', 'new'), false);
+assert.equal(hasUnchangedSession('old', 'old', 'new'), false);
+assert.equal(hasUnchangedSession('old', null, 'old'), false);
+assert.equal(hasUnchangedSession(null, null, null), false);
 console.log('BM-0084 session recovery contract passed: active/stale credentials, public auth routes, transient service responses');

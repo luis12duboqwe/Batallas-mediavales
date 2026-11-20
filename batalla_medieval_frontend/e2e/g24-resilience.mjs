@@ -18,11 +18,14 @@ try {
   await page.getByTestId('connection-status').waitFor({ state: 'hidden' });
 
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('bm:service-unavailable', { detail: { path: '/test-outage' } })));
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('bm:service-unavailable', { detail: { path: '/second-outage' } })));
   await page.getByTestId('connection-status').waitFor({ state: 'visible' });
   assert.equal(await page.getByTestId('connection-status').getAttribute('data-state'), 'service');
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('bm:service-recovered', { detail: { path: '/unrelated' } })));
   assert.equal(await page.getByTestId('connection-status').getAttribute('data-state'), 'service');
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('bm:service-recovered', { detail: { path: '/test-outage' } })));
+  assert.equal(await page.getByTestId('connection-status').getAttribute('data-state'), 'service', 'Another endpoint is still unavailable');
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('bm:service-recovered', { detail: { path: '/second-outage' } })));
   await page.getByTestId('connection-status').waitFor({ state: 'hidden' });
 
   // Reproduce a stored, expired token on a hard reload of a protected route.
