@@ -10,7 +10,7 @@ import time
 
 import pytest
 from fastapi import Response
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from app import models
 from app.database import SessionLocal, engine
@@ -65,10 +65,11 @@ def _racing_requests(user_ids, kind, *, require_contention):
 
     try:
         if require_contention:
-            # Block the user's row BEFORE either worker enters the handler.
-            # Other users' rows are deliberately not locked.
+            # NO KEY UPDATE blocks the handler's FOR UPDATE but permits the
+            # KEY SHARE validation of the SupportCase.requester_id foreign key.
+            # Otherwise an INSERT could impersonate a handler row-lock wait.
             blocker.execute(
-                text("SELECT id FROM users WHERE id = :id FOR UPDATE"),
+                text("SELECT id FROM users WHERE id = :id FOR NO KEY UPDATE"),
                 {"id": user_ids[0]},
             ).one()
         threads = [
@@ -98,6 +99,7 @@ def _racing_requests(user_ids, kind, *, require_contention):
                             WHERE pid IN (:pid_a, :pid_b)
                               AND wait_event_type = 'Lock'
                               AND state = 'active'
+                              AND query LIKE 'SELECT users.%'
                         """),
                         {"pid_a": current_pids[0], "pid_b": current_pids[1]},
                     ).scalar_one()
@@ -175,3 +177,25 @@ def test_concurrent_independent_accounts_remain_isolated(db_session, user):
         persisted = db_session.get(models.SupportCase, case.id)
         assert persisted.requester_id == user_id
         assert persisted.status == "open"
+
+
+def test_removed_handler_lock_fails_the_contention_gate(db_session, user):
+    """Negative control: simulate a handler missing FOR UPDATE, not an FK wait."""
+    rewritten = []
+
+    def remove_handler_lock(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().startswith("SELECT users.") and " FOR UPDATE" in statement:
+            rewritten.append(1)
+            return statement.replace(" FOR UPDATE", ""), parameters
+        return statement, parameters
+
+    event.listen(engine, "before_cursor_execute", remove_handler_lock, retval=True)
+    try:
+        with pytest.raises(AssertionError, match="Both requests did not block"):
+            _racing_requests([user.id, user.id], "erasure", require_contention=True)
+    finally:
+        event.remove(engine, "before_cursor_execute", remove_handler_lock)
+
+    assert len(rewritten) == 2, "Negative control did not remove both handler row locks"
+    db_session.expire_all()
+    assert db_session.query(models.SupportCase).filter_by(requester_id=user.id).count() == 1
