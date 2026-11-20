@@ -70,6 +70,7 @@ try {
     }
 
     claims.set(id, (claims.get(id) || 0) + 1);
+    if (id === 99104) await new Promise((resolve) => setTimeout(resolve, 300));
     row.status = id === 99104 ? 'failed' : 'completed';
     row.result = result(id === 99104 ? 'dead' : 'success');
     if (id === 99102) {
@@ -106,7 +107,10 @@ try {
   await page.getByTestId('adventure-result').waitFor({ state: 'visible' });
   await page.getByTestId('adventure-result').getByRole('button', { name: 'Continuar' }).click();
 
-  await page.getByTestId('adventure-claim-99104').click();
+  await page.getByTestId('adventure-claim-99104').evaluate((button) => {
+    button.click();
+    button.click();
+  });
   await page.getByTestId('adventure-result').waitFor({ state: 'visible' });
   assert.equal(claims.get(99104), 1);
   assert.equal(await page.getByTestId('adventure-claim-99104').count(), 0,
