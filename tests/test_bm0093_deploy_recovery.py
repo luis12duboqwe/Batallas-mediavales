@@ -3,6 +3,7 @@
 Only temporary fixture scripts are run. No real Docker, network, or database.
 """
 
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -395,3 +396,22 @@ def test_pre_migration_image_pull_failure_does_not_restore_or_migrate(deploy_lab
     assert not any(line.startswith("smoke:") for line in trace)
     assert not _marker(deploy_lab).exists()
     assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+
+
+def test_deployment_fails_before_mutation_if_operation_lock_is_held(deploy_lab):
+    lock_path = deploy_lab["root"] / ".ops-state" / "deploy.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        refused = _run(deploy_lab)
+        assert refused.returncode == 2
+        assert "another deploy or rollback is already running" in refused.stderr
+        assert _trace(deploy_lab) == []
+        assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+        assert not _marker(deploy_lab).exists()
+
+    # Once the holder releases the lock, this path reaches the normal
+    # database-start failure rather than being permanently locked.
+    retried = _run(deploy_lab)
+    assert retried.returncode == 41
+    assert "already running" not in retried.stderr
