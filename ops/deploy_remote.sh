@@ -202,7 +202,7 @@ case "$has_schema" in
     backup_receipt=""
 
     backup_basename="${candidate_backup##*/}"
-    if [[ "${candidate_backup%/*}" != "${BACKUP_DIR%/}" ||
+    if [[ "$(realpath -m -- "$(dirname -- "$candidate_backup")")" != "$(realpath -m -- "$BACKUP_DIR")" ||
           ! "$backup_basename" =~ ^${POSTGRES_DB}-[0-9]{8}T[0-9]{6}Z-[[:alnum:]]{8}\.dump$ ||
           ! -s "$candidate_backup" || ! -s "${candidate_backup}.sha256" ||
           -L "$candidate_backup" ]]; then
