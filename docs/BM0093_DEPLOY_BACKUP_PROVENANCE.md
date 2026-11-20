@@ -12,6 +12,21 @@ El script `ops/backup_postgres.sh` permite un parámetro de entorno opcional `BA
 
 `ops/deploy_remote.sh` crea un recibo privado dentro de `.ops-state`, invoca el backup con ese recibo y comprueba que su contenido es un dump nuevo, regular y no vacío en el `BACKUP_DIR` configurado, acompañado de checksum. El archivo recibido se trata como **candidato**: solo se asigna como snapshot de rollback después de superar todas las validaciones. El directorio de destino y el directorio del archivo se comparan como rutas normalizadas, incluidas barras finales. Si no existe o no es válido, la operación aborta y no utiliza el archivo rechazado para restaurar. Un backup de otra ejecución no puede sustituir silenciosamente el del despliegue. El recibo temporal se elimina tras utilizarse y durante cualquier rollback por error.
 
+## Errores antes y después de las migraciones
+
+Mientras la nueva release **no** haya iniciado `docker compose up`, el rollback
+no puede arrancar servicios mediante `compose up` porque sus dependencias
+ejecutarían migraciones y seed. Los fallos previos restauran únicamente el
+archivo de configuración anterior, sin arrancar dependencias.
+
+Si un entorno con release previa pierde `public.users`, la consulta falla
+o devuelve un valor inesperado, se conserva `.ops-state/recovery-required`
+para investigación humana incluso cuando la configuración se recupere.
+No se intenta regenerar el esquema mediante migraciones automáticas.
+
+Una vez iniciado el despliegue de servicios, el rollback controlado puede
+utilizar únicamente el snapshot validado y vinculado a esa ejecución.
+
 ## Validación
 
 - Pruebas con dobles locales: fallo de sondeo, resultado inesperado, desaparición del esquema en una release existente, primera instalación confirmada, recibo ausente o extraño, y presencia de un backup ajeno que parece más nuevo.
