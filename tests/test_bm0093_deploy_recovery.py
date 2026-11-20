@@ -346,3 +346,26 @@ def test_invalid_backup_receipt_blocks_release_pull(deploy_lab, receipt_mode):
     assert not any("pull migrate seed" in line for line in trace)
     assert not any(line.startswith("restore:") for line in trace)
     assert not list((deploy_lab["root"] / ".ops-state").glob("backup-receipt.*"))
+
+
+def test_backup_receipt_accepts_trailing_directory_separator(deploy_lab):
+    backup_dir = deploy_lab["root"] / "backups"
+    for path in (deploy_lab["base"], deploy_lab["root"] / ".release.env"):
+        original = path.read_text(encoding="utf-8")
+        path.write_text(
+            original.replace("BACKUP_DIR=" + str(backup_dir),
+                             "BACKUP_DIR=" + str(backup_dir) + "/"),
+            encoding="utf-8",
+        )
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0",
+        "BM_RELEASE_PULL_EXIT": "54",
+        "BM_TEST_BACKUP_DIR": str(backup_dir) + "/",
+    })
+    assert result.returncode == 54, result.stderr
+    assert any(
+        line.startswith("restore:") and
+        line.endswith("/batalla_ci-20261120T123456Z-A1b2C3d4.dump")
+        for line in _trace(deploy_lab)
+    )
+    assert not _marker(deploy_lab).exists()
