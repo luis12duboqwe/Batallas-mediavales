@@ -146,6 +146,50 @@ def build_account_export(db: Session, user: models.User) -> dict:
             ("id", "title", "body", "type", "created_at", "read"),
         ),
         "messages": messages,
+        # Only records owned/authored by this account. In particular, an
+        # opponent blocking this player is NOT part of the export.
+        "alliance_memberships": _owned_rows(
+            db, models.AllianceMember, "user_id", user.id,
+            ("id", "alliance_id", "rank"),
+        ),
+        "alliance_invitations_received": _owned_rows(
+            db, models.AllianceInvitation, "invited_user_id", user.id,
+            ("id", "alliance_id", "invited_by_id", "status",
+             "created_at", "responded_at"),
+        ),
+        "alliance_invitations_sent": _owned_rows(
+            db, models.AllianceInvitation, "invited_by_id", user.id,
+            ("id", "alliance_id", "invited_user_id", "status",
+             "created_at", "responded_at"),
+        ),
+        "alliance_chat_messages_authored": _owned_rows(
+            db, models.AllianceChatMessage, "user_id", user.id,
+            ("id", "alliance_id", "message", "created_at"),
+        ),
+        "map_bookmarks": _owned_rows(
+            db, models.MapBookmark, "user_id", user.id,
+            ("id", "name", "x", "y"),
+        ),
+        "premium_status": _owned_rows(
+            db, models.PremiumStatus, "user_id", user.id,
+            ("rubies_balance", "second_build_queue", "second_troop_queue",
+             "rename_city_unlocked", "rename_player_unlocked", "extra_themes",
+             "profile_banner", "instant_building_cancel",
+             "increased_message_storage", "map_bookmarks",
+             "selected_theme", "selected_banner"),
+        ),
+        "theme_ownerships": _owned_rows(
+            db, models.ThemeOwnership, "user_id", user.id,
+            ("id", "theme_id", "source", "created_at"),
+        ),
+        "season_results": _owned_rows(
+            db, models.SeasonResult, "user_id", user.id,
+            ("id", "season_id", "alliance_id", "rank", "points", "rewards"),
+        ),
+        "user_blocks_created": _owned_rows(
+            db, models.UserBlock, "blocker_id", user.id,
+            ("id", "blocked_id", "world_id", "created_at"),
+        ),
         "chat_messages_authored": _owned_rows(
             db, models.ChatMessage, "user_id", user.id,
             ("id", "world_id", "alliance_id", "channel", "receiver_id",
