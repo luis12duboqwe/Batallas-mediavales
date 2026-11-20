@@ -75,6 +75,26 @@ def deploy_lab(tmp_path):
     )
     docker.chmod(0o755)
 
+    # Fault injection for recovery preparation and the metadata rename.
+    (bin_dir / "mktemp").write_text(
+        "#!/usr/bin/env bash\\n"
+        "if [[ \\\"$*\\\" == *'.release.env.recovery.'* && -n \\\"${BM_MKTEMP_EXIT:-}\\\" ]]; then\\n"
+        "  exit \\\"$BM_MKTEMP_EXIT\\\"\\n"
+        "fi\\n"
+        "exec /usr/bin/mktemp \\\"$@\\\"\\n",
+        encoding="utf-8",
+    )
+    (bin_dir / "mv").write_text(
+        "#!/usr/bin/env bash\\n"
+        "if [[ \\\"$*\\\" == *'.release.env.recovery.'* && -n \\\"${BM_RECOVERY_MV_EXIT:-}\\\" ]]; then\\n"
+        "  exit \\\"$BM_RECOVERY_MV_EXIT\\\"\\n"
+        "fi\\n"
+        "exec /usr/bin/mv \\\"$@\\\"\\n",
+        encoding="utf-8",
+    )
+    (bin_dir / "mktemp").chmod(0o755)
+    (bin_dir / "mv").chmod(0o755)
+
     backups = tmp_path / "backups"
     backups.mkdir()
     active = _env(backups, "active@example.invalid")
@@ -187,3 +207,22 @@ def test_database_identity_change_requires_separate_migration(deploy_lab):
     assert "PostgreSQL connection changed" in result.stderr
     assert _trace(deploy_lab) == []
     assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+
+
+@pytest.mark.parametrize("failed_recovery_step", [
+    {"BM_MKTEMP_EXIT": "28"},
+    {"BM_RECOVERY_MV_EXIT": "29"},
+])
+def test_recovery_internal_failure_preserves_incident_marker_and_original_error(
+    deploy_lab, failed_recovery_step
+):
+    result = _run(deploy_lab, extra_env=failed_recovery_step)
+    assert result.returncode == 41, result.stderr
+    assert _marker(deploy_lab).is_file()
+    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
+    assert "new@example.invalid" in (deploy_lab["root"] / ".release.env").read_text(
+        encoding="utf-8"
+    )
+    again = _run(deploy_lab)
+    assert again.returncode == 2
+    assert "unresolved recovery incident" in again.stderr
