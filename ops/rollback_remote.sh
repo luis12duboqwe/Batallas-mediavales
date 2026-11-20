@@ -8,6 +8,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_DIR"
 
+# Manual rollback must be exclusive with a deployment or another rollback.
+# Acquire the same lock before reading any active-release metadata.
+STATE_DIR=".ops-state"
+if [[ ! -d "$STATE_DIR" ]]; then
+  echo "Rollback refused: deployment state directory missing" >&2
+  exit 2
+fi
+umask 077
+exec {DEPLOY_LOCK_FD}>> "$STATE_DIR/deploy.lock"
+if ! flock -n "$DEPLOY_LOCK_FD"; then
+  echo "Rollback refused: another deploy or rollback is already running" >&2
+  exit 2
+fi
+
 if [[ -z "$CURRENT_RELEASE" ]]; then
   if [[ ! -f .release-sha ]]; then
     echo "Usage: $0 <current-release-sha> ROLLBACK:<current-release-sha>" >&2
@@ -33,7 +47,6 @@ if [[ "$CONFIRMATION" != "ROLLBACK:${CURRENT_RELEASE}" ]]; then
   exit 2
 fi
 
-STATE_DIR=".ops-state"
 MANIFEST="$STATE_DIR/deployments/${CURRENT_RELEASE}.json"
 if [[ ! -f "$MANIFEST" ]]; then
   echo "Rollback manifest not found: $MANIFEST" >&2
