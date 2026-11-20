@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../api/axiosClient';
 import { useCityStore } from '../store/cityStore';
 import { formatDate } from '../utils/format';
@@ -14,6 +15,7 @@ const MESSAGE_TAB_KEYS = MESSAGE_TABS.map(([tab]) => tab);
 
 const MessagesView = () => {
   const currentCity = useCityStore((state) => state.currentCity);
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState('inbox');
   const [messages, setMessages] = useState([]);
   const [selectedMessage, setSelectedMessage] = useState(null);
@@ -23,6 +25,7 @@ const MessagesView = () => {
   const [recipientSearch, setRecipientSearch] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [recipientId, setRecipientId] = useState(null);
+  const [recipientPrefillError, setRecipientPrefillError] = useState('');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
 
@@ -49,7 +52,48 @@ const MessagesView = () => {
     return () => { active = false; };
   }, [activeTab, retryKey]);
 
+  // Resolve the map-selected city through world-scoped public metadata,
+  // rather than trusting a user ID/name embedded in the URL.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has('targetCityId')) return undefined;
+    let active = true;
+    setActiveTab('compose');
+    setSelectedMessage(null);
+    setRecipientId(null);
+    setRecipientSearch('');
+    setSearchResults([]);
+    setSubject('');
+    setContent('');
+    setRecipientPrefillError('');
+    if (!currentCity?.world_id) return undefined;
+
+    const id = Number(params.get('targetCityId'));
+    const requestedWorld = Number(params.get('worldId'));
+    if (!Number.isSafeInteger(id) || id < 1 || requestedWorld !== currentCity.world_id) {
+      setRecipientPrefillError('El destinatario no pertenece al mundo activo.');
+      return undefined;
+    }
+    api.getMapCityTarget(id, requestedWorld)
+      .then(({ data }) => {
+        if (!active) return;
+        if (!data.owner_id || !data.owner_name) {
+          setRecipientPrefillError('No se pueden enviar mensajes a un asentamiento bárbaro.');
+          return;
+        }
+        setRecipientId(data.owner_id);
+        setRecipientSearch(data.owner_name);
+      })
+      .catch(() => {
+        if (active) setRecipientPrefillError('No se pudo confirmar el destinatario.');
+      });
+    return () => { active = false; };
+  }, [location.search, currentCity?.world_id]);
+
   const handleSearch = async (query) => {
+    // Changing the visible username invalidates any previously selected ID.
+    setRecipientId(null);
+    setRecipientPrefillError('');
     setRecipientSearch(query);
     if (query.length < 3) {
       setSearchResults([]);
@@ -130,6 +174,7 @@ const MessagesView = () => {
         {activeTab === 'compose' ? (
           <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 max-w-2xl mx-auto">
             <h2 className="text-xl mb-4">Nuevo Mensaje</h2>
+            {recipientPrefillError && <p role="alert" className="mb-3 text-sm text-red-200">{recipientPrefillError}</p>}
             <div className="space-y-4">
               <div className="relative">
                 <label htmlFor="message-recipient" className="block text-sm text-gray-400 mb-1">Destinatario</label>
@@ -152,6 +197,7 @@ const MessagesView = () => {
                         onClick={() => {
                           setRecipientId(searchUser.id);
                           setRecipientSearch(searchUser.username);
+                          setRecipientPrefillError('');
                           setSearchResults([]);
                         }}
                         className="p-2 hover:bg-gray-700 cursor-pointer flex justify-between w-full text-left"
