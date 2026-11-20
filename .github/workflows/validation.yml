@@ -312,6 +312,21 @@ jobs:
       - name: Install frontend dependencies
         working-directory: batalla_medieval_frontend
         run: npm ci
+      # Temporary diagnostic; remove before PR review/merge.
+      - name: Prepare reviewed npm lockfile candidate
+        working-directory: batalla_medieval_frontend
+        run: |
+          npm audit fix --package-lock-only --ignore-scripts || true
+          node - <<'JS'
+          const fs = require('node:fs');
+          const lock = fs.readFileSync('package-lock.json').toString('base64');
+          console.log('NPMFIX_START');
+          for (let i = 0; i < lock.length; i += 12000) {
+            console.log('NPMFIXPART ' + (i / 12000) + ' ' + lock.slice(i, i + 12000));
+          }
+          console.log('NPMFIX_END');
+          JS
+          git restore -- package.json package-lock.json
       - name: Audit frontend dependencies
         working-directory: batalla_medieval_frontend
         run: npm audit --audit-level=high
