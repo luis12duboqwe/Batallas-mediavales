@@ -49,7 +49,7 @@ def deploy_lab(tmp_path):
         shutil.copy2(PROJECT / "ops" / file, ops / file)
     (ops / "restore_postgres.sh").write_text(
         "#!/usr/bin/env bash\n"
-        "printf 'restore:%s\\n' \"$1\" >> \"$BM_TRACE\"\n"
+        "printf 'restore:%s:%s\\n' \"$1\" \"$2\" >> \"$BM_TRACE\"\n"
         "exit \"${BM_RESTORE_EXIT:-0}\"\n", encoding="utf-8"
     )
     (ops / "smoke_http.py").write_text(
@@ -60,6 +60,22 @@ def deploy_lab(tmp_path):
         encoding="utf-8"
     )
     (ops / "load_smoke.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
+    (ops / "backup_postgres.sh").write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'backup\n' >> "$BM_TRACE"
+backup="$BM_TEST_BACKUP_DIR/batalla_ci-20261120T123456Z-A1b2C3d4.dump"
+printf 'fixture database dump' > "$backup"
+printf 'fixture checksum' > "$backup.sha256"
+if [[ "$BM_RECEIPT_MODE" == "empty" ]]; then exit 0; fi
+if [[ "$BM_RECEIPT_MODE" == "foreign" ]]; then
+  printf '%s\n' "$BM_TEST_BACKUP_DIR/other.dump" > "$BACKUP_RECEIPT_FILE"
+else
+  printf '%s\n' "$backup" > "$BACKUP_RECEIPT_FILE"
+fi
+""",
+        encoding="utf-8",
+    )
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -67,9 +83,16 @@ def deploy_lab(tmp_path):
     docker.write_text(
         "#!/usr/bin/env bash\n"
         "printf 'docker:%s\\n' \"$*\" >> \"$BM_TRACE\"\n"
-        "if [[ \"$*\" == *'up -d database'* ]]; then exit 41; fi\n"
+        "if [[ \"$*\" == *'up -d database'* ]]; then exit \"$BM_DATABASE_START_EXIT\"; fi\n"
+        "if [[ \"$*\" == *'SELECT to_regclass'* ]]; then\n"
+        "  if [[ \"$BM_SCHEMA_PROBE_EXIT\" != 0 ]]; then exit \"$BM_SCHEMA_PROBE_EXIT\"; fi\n"
+        "  printf '%s\\n' \"$BM_SCHEMA_PROBE_VALUE\"; exit 0\n"
+        "fi\n"
+        "if [[ \"$*\" == *'pull migrate seed backend worker frontend nginx caddy'* ]]; then\n"
+        "  exit \"$BM_RELEASE_PULL_EXIT\"\n"
+        "fi\n"
         "if [[ \"$*\" == *'pull backend worker frontend'* ]]; then\n"
-        "  exit \"${BM_RECOVERY_PULL_EXIT:-0}\"\n"
+        "  exit \"$BM_RECOVERY_PULL_EXIT\"\n"
         "fi\n"
         "exit 0\n", encoding="utf-8"
     )
@@ -107,7 +130,17 @@ exec /usr/bin/mv "$@"
     base_env.write_text(base, encoding="utf-8")
     trace = tmp_path / "trace"
     env = dict(os.environ)
-    env.update({"PATH": str(bin_dir) + os.pathsep + env.get("PATH", ""), "BM_TRACE": str(trace)})
+    env.update({
+        "PATH": str(bin_dir) + os.pathsep + env.get("PATH", ""),
+        "BM_TRACE": str(trace),
+        "BM_TEST_BACKUP_DIR": str(backups),
+        "BM_DATABASE_START_EXIT": "41",
+        "BM_SCHEMA_PROBE_EXIT": "0",
+        "BM_SCHEMA_PROBE_VALUE": "t",
+        "BM_RELEASE_PULL_EXIT": "0",
+        "BM_RECOVERY_PULL_EXIT": "0",
+        "BM_RECEIPT_MODE": "valid",
+    })
     return {"root": tmp_path, "base": base_env, "active": active, "env": env, "trace": trace}
 
 
