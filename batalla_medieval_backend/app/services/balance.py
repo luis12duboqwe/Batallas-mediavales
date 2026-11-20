@@ -561,6 +561,9 @@ def get_building_cost(building_type: str, target_level: int) -> Dict[str, float]
 
 
 def get_building_effect_definition(building_type: str) -> Dict[str, Any]:
+    # Unknown entries must not masquerade as valid prerequisite-only buildings.
+    if building_type not in BUILDING_MAX_LEVELS:
+        raise ValueError(f"Unknown building type: {building_type}")
     if building_type == "wall":
         return {"type": "defense_bonus", "per_level": WALL_BONUS_PER_LEVEL}
     if building_type == "market":
