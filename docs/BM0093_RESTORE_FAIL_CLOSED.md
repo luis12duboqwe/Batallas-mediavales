@@ -23,6 +23,8 @@ identificador único, además de la marca de tiempo. Dos respaldos creados en el
 mismo segundo no comparten archivo temporal ni sobrescriben el anterior. Se
 publican mediante enlaces atómicos únicamente archivos completos con checksum;
 si falla la verificación se retira la pareja creada por esa ejecución. La
-prueba G5 fija artificialmente la misma hora para dos exportaciones y verifica
-que ambas permanecen legibles e íntegramente verificadas. Esto no sustituye los
+prueba G5 fija artificialmente la misma hora para dos exportaciones simultáneas
+y verifica que ambas permanecen legibles e íntegramente verificadas. También
+simula un fallo a mitad de `pg_dump` y exige que no queden respaldos parciales,
+checksums huérfanos ni directorios temporales. Esto no sustituye los
 respaldos externos ni una restauración ensayada en staging.
