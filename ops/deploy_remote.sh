@@ -33,6 +33,16 @@ PREVIOUS_ENV=".release.env.previous"
 mkdir -p "$RELEASES_DIR" "$DEPLOYMENTS_DIR"
 chmod 700 "$STATE_DIR" "$RELEASES_DIR" "$DEPLOYMENTS_DIR"
 
+# Deploy and manual rollback mutate the same release pointers and services.
+# Hold a shared advisory lock for the entire command, before reading or
+# writing NEXT_ENV, CURRENT_ENV, the manifest or the recovery marker.
+umask 077
+exec {DEPLOY_LOCK_FD}>> "$STATE_DIR/deploy.lock"
+if ! flock -n "$DEPLOY_LOCK_FD"; then
+  echo "Deployment refused: another deploy or rollback is already running" >&2
+  exit 2
+fi
+
 # A failed automatic rollback can leave partially migrated services. Never
 # try another deployment until a human has reconciled the recovery marker.
 RECOVERY_REQUIRED="$STATE_DIR/recovery-required"
