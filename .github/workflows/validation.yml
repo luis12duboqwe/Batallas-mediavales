@@ -292,6 +292,9 @@ jobs:
       - name: Run G25 loading/empty/error journey
         working-directory: batalla_medieval_frontend
         run: node e2e/g25-states.mjs
+      - name: Run G26 mobile map performance budgets
+        working-directory: batalla_medieval_frontend
+        run: node e2e/g26-map-performance.mjs
       - name: Show service logs
         if: always()
         run: |

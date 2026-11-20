@@ -182,8 +182,9 @@ const GameRoute = ({ children }) => (
 );
 
 const App = () => {
-  const { token, refreshCity } = useUserStore();
-  const { loadCity } = useCityStore();
+  const token = useUserStore((state) => state.token);
+  const refreshCity = useUserStore((state) => state.refreshCity);
+  const loadCity = useCityStore((state) => state.loadCity);
   const location = useLocation();
 
   useEffect(() => {

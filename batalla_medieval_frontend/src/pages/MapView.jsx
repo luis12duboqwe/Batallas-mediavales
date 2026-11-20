@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/axiosClient';
 import { useUserStore } from '../store/userStore';
 import { useCityStore } from '../store/cityStore';
@@ -25,8 +25,8 @@ const PveDifficulty = ({ tile }) => {
 };
 
 const MapView = () => {
-  const { user } = useUserStore();
-  const { currentCity } = useCityStore();
+  const user = useUserStore((state) => state.user);
+  const currentCity = useCityStore((state) => state.currentCity);
   const navigate = useNavigate();
   const [center, setCenter] = useState({ x: 0, y: 0 });
   const [tiles, setTiles] = useState([]);
@@ -134,13 +134,17 @@ const MapView = () => {
     );
   };
 
-  const sortedTiles = [...tiles].sort((a, b) => (a.y !== b.y ? b.y - a.y : a.x - b.x));
-  const rows = {};
-  sortedTiles.forEach((tile) => {
-    if (!rows[tile.y]) rows[tile.y] = [];
-    rows[tile.y].push(tile);
-  });
-  const sortedY = Object.keys(rows).sort((a, b) => b - a);
+  // Only rebuild the grid when tile data changes, not on selection or form edits.
+  const mapRows = useMemo(() => {
+    const byRow = new Map();
+    for (const tile of tiles) {
+      if (!byRow.has(tile.y)) byRow.set(tile.y, []);
+      byRow.get(tile.y).push(tile);
+    }
+    return [...byRow.entries()]
+      .sort(([a], [b]) => b - a)
+      .map(([y, rowTiles]) => [y, rowTiles.sort((a, b) => a.x - b.x)]);
+  }, [tiles]);
   const selectedOasisResource = selectedTile?.oasis_id ? OASIS_RESOURCE_META[selectedTile.resource_type] : null;
   const selectedSettlementLabel = selectedTile?.settlement_type === 'camp' ? 'Campamento' : 'Ciudad';
   const selectedSettlementIsMine = Boolean(user?.id && selectedTile?.owner_id === user.id);
@@ -176,9 +180,9 @@ const MapView = () => {
             <button type="button" aria-label="Mover mapa hacia la izquierda" onClick={() => handleMove(-5, 0)} className="absolute left-2 top-1/2 -translate-y-1/2 btn btn-xs btn-circle"><GameIcon name="arrowLeft" size={18} /></button>
             <button type="button" aria-label="Mover mapa hacia la derecha" onClick={() => handleMove(5, 0)} className="absolute right-2 top-1/2 -translate-y-1/2 btn btn-xs btn-circle"><GameIcon name="arrowRight" size={18} /></button>
             <div className="grid gap-0.5 bg-black/50 p-1" role="group" aria-label="Cuadrícula del mapa">
-              {sortedY.map((y) => (
+              {mapRows.map(([y, rowTiles]) => (
                 <div key={y} className="flex gap-0.5">
-                  {rows[y].sort((a, b) => a.x - b.x).map((tile) => renderTile(tile))}
+                  {rowTiles.map((tile) => renderTile(tile))}
                 </div>
               ))}
             </div>

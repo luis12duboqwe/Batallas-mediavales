@@ -29,7 +29,9 @@ const buildingIcons = {
 
 const CityView = () => {
   const { t } = useTranslation();
-  const { buildings, loadCity, currentCity } = useCityStore();
+  const buildings = useCityStore((state) => state.buildings);
+  const loadCity = useCityStore((state) => state.loadCity);
+  const currentCity = useCityStore((state) => state.currentCity);
 
   useEffect(() => {
     loadCity().catch(() => {});

@@ -7,7 +7,7 @@ import GameIcon from './GameIcon';
 const WorldSelector = () => {
   const { worlds, currentWorldId, loadWorlds, setActiveWorld, joinWorld } = useWorldStore();
   const { user } = useUserStore();
-  const { loadCity } = useCityStore();
+  const loadCity = useCityStore((state) => state.loadCity);
   const [selectedWorld, setSelectedWorld] = useState(null);
   const [loading, setLoading] = useState(false);
 
