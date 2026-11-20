@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
-from ..routers.auth import get_current_user
+from ..routers.auth import decode_typed_token, get_current_user
 from ..schemas import privacy as privacy_schema
 from ..services import community as community_service
 from ..services import social_privacy
@@ -73,6 +73,43 @@ def _user_in_world(db: Session, user_id: int, world_id: int) -> bool:
         .first()
         is not None
     )
+
+
+def _socket_session_is_valid(db: Session, token: str, user_id: int, world_id: int) -> bool:
+    """Revalidate a long-lived socket against current account and world state.
+
+    Use scalar columns, not the identity-mapped User loaded during handshake:
+    moderation, password resets and world selection can change in another
+    session while the WebSocket remains connected.
+    """
+
+    try:
+        claims = decode_typed_token(token, "access")
+    except ValueError:
+        return False
+
+    account = (
+        db.query(
+            models.User.username,
+            models.User.auth_version,
+            models.User.is_verified,
+            models.User.is_frozen,
+            models.User.world_id,
+        )
+        .filter(models.User.id == user_id)
+        .one_or_none()
+    )
+    if (
+        account is None
+        or claims.get("sub") != account.username
+        or claims.get("ver") != account.auth_version
+        or not account.is_verified
+        or account.is_frozen
+        or account.world_id != world_id
+    ):
+        return False
+
+    return _user_in_world(db, user_id, world_id)
 
 
 def _normalize_content(content: object) -> str:
@@ -157,6 +194,13 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
     try:
         while True:
             data = await websocket.receive_json()
+            # Authentication is not a one-time handshake for a persistent
+            # connection. Freeze, password reset, token expiry and changing
+            # the selected world revoke this socket before any new writes.
+            if not _socket_session_is_valid(db, token, current_user.id, world_id):
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                break
+
             raw_content = data.get("content") if isinstance(data, dict) else None
             try:
                 filtered_content = _normalize_content(raw_content)
@@ -228,6 +272,8 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
                 authorized_user_ids=authorized_user_ids,
             )
     except WebSocketDisconnect:
+        pass
+    finally:
         chat_manager.disconnect(websocket)
 
 
