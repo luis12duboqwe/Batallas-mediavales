@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from app import models
 from app.routers.auth import create_access_token
 from app.services.chat_manager import ChatManager
@@ -125,3 +127,111 @@ def test_chat_history_and_private_chat_respect_active_world(client, db_session):
     foreign_history = client.get(f"/chat/private/{foreign.id}", headers=_headers(viewer))
     assert foreign_history.status_code == 403
     assert foreign_history.json()["detail"] == "Players do not share active world"
+
+
+def test_private_realtime_broadcast_is_partitioned_by_world_and_user_pair():
+    manager = ChatManager()
+    alice_world_one = DummySocket()
+    bob_world_one = DummySocket()
+    alice_world_two = DummySocket()
+    bob_world_two = DummySocket()
+    unrelated_world_one = DummySocket()
+
+    # The exact same two accounts can join multiple game worlds.
+    for socket, user_id, world_id, peer_id in (
+        (alice_world_one, 1, 101, 2),
+        (bob_world_one, 2, 101, 1),
+        (alice_world_two, 1, 202, 2),
+        (bob_world_two, 2, 202, 1),
+        (unrelated_world_one, 3, 101, 1),
+    ):
+        manager.register_connection(
+            socket,
+            channel="private",
+            user_id=user_id,
+            receiver_id=peer_id,
+            world_id=world_id,
+        )
+
+    world_one_payload = {"content": "world 101 only"}
+    asyncio.run(
+        manager.broadcast(
+            channel="private",
+            message=world_one_payload,
+            sender_id=1,
+            receiver_id=2,
+            world_id=101,
+        )
+    )
+    assert alice_world_one.messages == [world_one_payload]
+    assert bob_world_one.messages == [world_one_payload]
+    assert alice_world_two.messages == []
+    assert bob_world_two.messages == []
+    assert unrelated_world_one.messages == []
+
+    world_two_payload = {"content": "world 202 only"}
+    asyncio.run(
+        manager.broadcast(
+            channel="private",
+            message=world_two_payload,
+            sender_id=2,
+            receiver_id=1,
+            world_id=202,
+        )
+    )
+    assert alice_world_one.messages == [world_one_payload]
+    assert bob_world_one.messages == [world_one_payload]
+    assert alice_world_two.messages == [world_two_payload]
+    assert bob_world_two.messages == [world_two_payload]
+
+    # Disconnecting one world cannot unregister the other world's pair.
+    manager.disconnect(alice_world_one)
+    asyncio.run(
+        manager.broadcast(
+            channel="private",
+            message={"content": "world 101 follow-up"},
+            sender_id=2,
+            receiver_id=1,
+            world_id=101,
+        )
+    )
+    assert alice_world_one.messages == [world_one_payload]
+    assert bob_world_one.messages[-1]["content"] == "world 101 follow-up"
+    assert alice_world_two.messages == [world_two_payload]
+    assert bob_world_two.messages == [world_two_payload]
+
+
+def test_private_realtime_channel_requires_explicit_world_scope():
+    manager = ChatManager()
+    socket = DummySocket()
+
+    with pytest.raises(ValueError, match="scope metadata"):
+        manager.register_connection(
+            socket,
+            channel="private",
+            user_id=1,
+            receiver_id=2,
+        )
+
+    assert manager.connection_meta == {}
+    assert not manager.private_connections
+
+    # A private broadcast missing world_id must never fall back to a
+    # cross-world account pair.
+    world_socket = DummySocket()
+    manager.register_connection(
+        world_socket,
+        channel="private",
+        user_id=1,
+        receiver_id=2,
+        world_id=101,
+    )
+    asyncio.run(
+        manager.broadcast(
+            channel="private",
+            message={"content": "no world"},
+            sender_id=1,
+            receiver_id=2,
+        )
+    )
+    assert world_socket.messages == []

@@ -14,14 +14,16 @@ class ChatManager:
         self.global_connections: DefaultDict[int, Set[WebSocket]] = defaultdict(set)
         self.world_connections: DefaultDict[int, Set[WebSocket]] = defaultdict(set)
         self.alliance_connections: DefaultDict[int, Set[WebSocket]] = defaultdict(set)
-        self.private_connections: DefaultDict[Tuple[int, int], Set[WebSocket]] = defaultdict(set)
+        self.private_connections: DefaultDict[Tuple[int, int, int], Set[WebSocket]] = defaultdict(set)
         self.connection_meta: Dict[WebSocket, Dict[str, Any]] = {}
         self.last_message_at: Dict[int, datetime] = {}
         self.bad_words = {"badword", "curse", "offensive"}
 
     @staticmethod
-    def _private_key(user_a: int, user_b: int) -> Tuple[int, int]:
-        return tuple(sorted((user_a, user_b)))
+    def _private_key(world_id: int, user_a: int, user_b: int) -> Tuple[int, int, int]:
+        """One private conversation per world, not per account pair globally."""
+        first, second = sorted((user_a, user_b))
+        return (world_id, first, second)
 
     def register_connection(
         self,
@@ -39,8 +41,8 @@ class ChatManager:
             self.world_connections[world_id].add(websocket)
         elif channel == "alliance" and alliance_id is not None:
             self.alliance_connections[alliance_id].add(websocket)
-        elif channel == "private" and receiver_id is not None:
-            key = self._private_key(user_id, receiver_id)
+        elif channel == "private" and receiver_id is not None and world_id is not None:
+            key = self._private_key(world_id, user_id, receiver_id)
             self.private_connections[key].add(websocket)
         else:
             raise ValueError("Chat connection is missing required scope metadata")
@@ -65,8 +67,8 @@ class ChatManager:
             self.world_connections[meta["world_id"]].discard(websocket)
         elif channel == "alliance" and meta.get("alliance_id") is not None:
             self.alliance_connections[meta["alliance_id"]].discard(websocket)
-        elif channel == "private" and meta.get("receiver_id") is not None:
-            key = self._private_key(meta["user_id"], meta["receiver_id"])
+        elif channel == "private" and meta.get("receiver_id") is not None and meta.get("world_id") is not None:
+            key = self._private_key(meta["world_id"], meta["user_id"], meta["receiver_id"])
             self.private_connections[key].discard(websocket)
 
     def allow_message(self, user_id: int) -> bool:
@@ -101,8 +103,8 @@ class ChatManager:
             connections = list(self.world_connections.get(world_id, set()))
         elif channel == "alliance" and alliance_id is not None:
             connections = list(self.alliance_connections.get(alliance_id, set()))
-        elif channel == "private" and receiver_id is not None:
-            key = self._private_key(sender_id, receiver_id)
+        elif channel == "private" and receiver_id is not None and world_id is not None:
+            key = self._private_key(world_id, sender_id, receiver_id)
             connections = list(self.private_connections.get(key, set()))
         else:
             connections = []
