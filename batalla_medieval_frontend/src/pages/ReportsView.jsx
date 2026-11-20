@@ -109,7 +109,8 @@ const ReportsView = () => {
     setLoadState('loading');
     loadReports().then((result) => {
       if (active) {
-        setReports(Array.isArray(result?.reports) ? result.reports : []);
+        if (!Array.isArray(result?.reports)) throw new Error('La respuesta de reportes es inválida.');
+        setReports(result.reports);
         setLoadState('ready');
       }
     }).catch((error) => {

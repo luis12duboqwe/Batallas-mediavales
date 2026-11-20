@@ -20,7 +20,8 @@
 - Mapa: cada nueva zona descarta respuestas retrasadas de zonas anteriores; los errores se distinguen de un mapa sin casillas, con reintento manual.
 - Mensajería: cambio de carpeta y reintento cancelan lógicamente peticiones anteriores; la carpeta vacía solo se muestra si la solicitud tuvo éxito.
 - Reportes: estado de carga, error recuperable y vacío real separados; no quedan esqueletos de carga permanentes.
-- G25 fuerza respuestas 503, recuperaciones y vacíos de las tres pantallas a través de Playwright.
+- G25 fuerza respuestas 503 hasta reintento explícito, incluso con dobles peticiones iniciales; verifica recuperación y vacíos con Playwright.
+- Los normalizadores validan los contratos HTTP 200: `null`, HTML, objetos incompletos y tipos erróneos no pueden ocultarse como listas vacías.
 
 ## Siguiente bloque de BM-0084
 

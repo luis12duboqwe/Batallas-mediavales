@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { api } from '../api/axiosClient';
 import soundManager from '../services/sound';
+import { readReportListResponse } from '../utils/collectionResponse';
 
 const RESOURCE_FIELDS = ['wood', 'stone', 'iron', 'gold'];
 
@@ -167,7 +168,7 @@ export const useCityStore = create((set, get) => ({
     }
     if (!city?.world_id) return { reports: [] };
     const { data } = await api.getReports({ worldId: city.world_id });
-    const reportList = Array.isArray(data) ? data : data?.reports || [];
+    const reportList = readReportListResponse(data);
     set({ reports: reportList });
     return { reports: reportList };
   },

@@ -125,6 +125,8 @@ jobs:
         run: npm run test:sound
       - name: Validate session recovery contract
         run: npm run test:resilience
+      - name: Validate list response contracts
+        run: npm run test:states
       - name: Lint frontend
         run: npm run lint
       - name: Build frontend

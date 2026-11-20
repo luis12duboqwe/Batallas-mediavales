@@ -3,6 +3,7 @@ import { api } from '../api/axiosClient';
 import { useCityStore } from '../store/cityStore';
 import { formatDate } from '../utils/format';
 import { handleTablistKeyDown } from '../utils/accessibility';
+import { readMessageListResponse } from '../utils/collectionResponse';
 
 const MESSAGE_TABS = [
   ['inbox', 'Bandeja de Entrada'],
@@ -36,7 +37,7 @@ const MessagesView = () => {
     setLoading(true);
     const request = activeTab === 'inbox' ? api.getInbox() : api.getSent();
     request.then(({ data }) => {
-      if (active) setMessages(Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : []);
+      if (active) setMessages(readMessageListResponse(data));
     }).catch((error) => {
       if (active) {
         console.error(error);

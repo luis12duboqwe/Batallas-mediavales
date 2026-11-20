@@ -4,6 +4,7 @@ import { useUserStore } from '../store/userStore';
 import { useCityStore } from '../store/cityStore';
 import { useNavigate } from 'react-router-dom';
 import GameIcon from '../components/GameIcon';
+import { readMapTilesResponse } from '../utils/collectionResponse';
 
 const RADIUS = 7;
 const OASIS_RESOURCE_META = {
@@ -54,7 +55,7 @@ const MapView = () => {
     setSelectedTile(null);
     api.getMapTiles(user.world_id, center.x, center.y, RADIUS)
       .then(({ data }) => {
-        if (active) setTiles(Array.isArray(data?.tiles) ? data.tiles : []);
+        if (active) setTiles(readMapTilesResponse(data));
       })
       .catch((error) => {
         if (active) {
