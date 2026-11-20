@@ -211,6 +211,10 @@ case "$has_schema" in
     fi
     ;;
   f)
+    if [[ "$had_previous" -eq 1 ]]; then
+      echo "Existing release has no users schema; refusing an unbacked first-install path" >&2
+      false
+    fi
     echo "No existing application schema; treating this as first deployment"
     ;;
   *)
