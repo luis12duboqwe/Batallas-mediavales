@@ -4,6 +4,7 @@ All commands run in a temporary fixture repository; Docker, restore, and smoke
 are stubs. These tests never touch a staging or production deployment.
 """
 
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -45,7 +46,7 @@ BACKUP_RETENTION_DAYS=14
 @pytest.fixture
 def rollback_lab(tmp_path):
     (tmp_path / "ops").mkdir()
-    for filename in ("rollback_remote.sh", "preflight.py"):
+    for filename in ("rollback_remote.sh", "preflight.py", "operation_lock.sh"):
         shutil.copy2(PROJECT_ROOT / "ops" / filename, tmp_path / "ops" / filename)
 
     ops = tmp_path / "ops"
@@ -181,3 +182,14 @@ def test_success_commits_both_release_pointers_after_smoke(rollback_lab):
     assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == PREVIOUS_SHA + "\n"
     assert not list(rollback_lab["root"].glob(".release.env.rollback.*"))
     assert not list(rollback_lab["root"].glob(".release-sha.rollback.*"))
+
+
+def test_manual_rollback_rejects_concurrent_deploy_lock(rollback_lab):
+    lock_file = rollback_lab["root"] / ".ops-state" / "operation.lock"
+    with lock_file.open("a+", encoding="utf-8") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = _run(rollback_lab)
+        assert result.returncode == 2
+        assert "already running" in result.stderr
+        assert _trace(rollback_lab) == []
+        _assert_active_unchanged(rollback_lab)
