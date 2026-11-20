@@ -297,6 +297,9 @@ jobs:
       - name: Run G26 mobile map performance budgets
         working-directory: batalla_medieval_frontend
         run: node e2e/g26-map-performance.mjs
+      - name: Run G27 adventure deadline transition
+        working-directory: batalla_medieval_frontend
+        run: node e2e/g27-adventure-deadline.mjs
       - name: Show service logs
         if: always()
         run: |
