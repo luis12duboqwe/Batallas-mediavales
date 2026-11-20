@@ -27,3 +27,10 @@ Para v1.0 se adopta **español como único idioma de producción**. El archivo i
 - Browser E2E completo, incluido G4 actualizado y G23 de localización;
 - regresión Node del localizador de errores API;
 - seguridad, concurrencia, imágenes Docker y revisión final del HEAD exacto verdes antes del merge.
+
+## Compatibilidad de CI y dependencias (noviembre de 2026)
+
+- `PyJWT` queda fijado a `2.15.0` tras avisos detectados por `pip-audit` en `2.14.0`.
+- El lockfile frontend se regeneró con `npm audit fix --package-lock-only --ignore-scripts`; `npm audit --audit-level=high` y el build siguen siendo compuertas obligatorias.
+- Los runners de Browser E2E y accesibilidad se fijan en Ubuntu 24.04 porque Playwright 1.55.0 no soporta Ubuntu 26.04.
+- El workflow temporal para actualizar el lockfile fue retirado en el mismo commit de regeneración y no forma parte del CI permanente.
