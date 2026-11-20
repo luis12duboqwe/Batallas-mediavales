@@ -46,7 +46,8 @@ export const localizeApiErrorDetail = (detail) => {
   if (frozen) {
     const reason = frozen[1].trim();
     if (SPANISH_SIGNAL.test(reason) && !STRONG_ENGLISH_SIGNAL.test(reason)) {
-      return `Cuenta suspendida. Motivo: ${reason}`;
+      const ending = /[.!?]$/.test(reason) ? '' : '.';
+      return `Cuenta suspendida. Motivo: ${reason}${ending}`;
     }
     return 'Cuenta suspendida. Contacta con soporte para conocer el motivo.';
   }
