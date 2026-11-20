@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { localizeAxiosError } from '../utils/apiError';
+import { SESSION_EXPIRED_EVENT, SERVICE_UNAVAILABLE_EVENT, SERVICE_RECOVERED_EVENT, shouldExpireSession, isTemporaryServiceFailure } from '../utils/transportState';
 
 const axiosClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -8,8 +9,28 @@ const axiosClient = axios.create({
 
 // BM-0083: localize player-facing legacy errors without changing HTTP contracts.
 axiosClient.interceptors.response.use(
-  (response) => response,
-  (error) => Promise.reject(localizeAxiosError(error)),
+  (response) => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(SERVICE_RECOVERED_EVENT, {
+        detail: { path: response.config?.url || '' },
+      }));
+    }
+    return response;
+  },
+  (error) => {
+    if (typeof window !== 'undefined') {
+      const currentToken = window.localStorage.getItem('bm_token');
+      if (shouldExpireSession(error, currentToken)) {
+        window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+      }
+      if (isTemporaryServiceFailure(error)) {
+        window.dispatchEvent(new CustomEvent(SERVICE_UNAVAILABLE_EVENT, {
+          detail: { path: error.config?.url || '' },
+        }));
+      }
+    }
+    return Promise.reject(localizeAxiosError(error));
+  },
 );
 
 axiosClient.interceptors.request.use((config) => {
