@@ -107,6 +107,26 @@ docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec
   psql -h 127.0.0.1 -U batalla -d batalla_ci -v ON_ERROR_STOP=1 -c \
   "UPDATE recovery_probe SET marker='after-backup' WHERE id=1;"
 
+# A valid, checksummed dump from a different database must be refused
+# without stopping services or altering the current database.
+FOREIGN_BACKUP="$BACKUP_DIR/foreign-ci.dump"
+docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
+  createdb -U batalla foreign_ci
+docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
+  pg_dump --format=custom --no-owner --no-privileges -U batalla -d foreign_ci > "$FOREIGN_BACKUP"
+sha256sum "$FOREIGN_BACKUP" > "${FOREIGN_BACKUP}.sha256"
+if COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" RESTORE_START_SERVICES=0 \
+  bash ops/restore_postgres.sh "$ENV_FILE" "$FOREIGN_BACKUP" "RESTORE:batalla_ci"; then
+  echo "Wrong-database archive was accepted by restore_postgres.sh" >&2
+  exit 1
+fi
+CURRENT_MARKER="$(docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
+  psql -h 127.0.0.1 -U batalla -d batalla_ci -Atqc "SELECT marker FROM recovery_probe WHERE id=1;")"
+if [[ "$CURRENT_MARKER" != "after-backup" ]]; then
+  echo "Refused restore unexpectedly changed the database: '$CURRENT_MARKER'" >&2
+  exit 1
+fi
+
 COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" RESTORE_START_SERVICES=0 \
   bash ops/restore_postgres.sh "$ENV_FILE" "$BACKUP_FILE" "RESTORE:batalla_ci"
 RESTORED_MARKER="$(docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
