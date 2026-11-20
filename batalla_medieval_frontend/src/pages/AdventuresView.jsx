@@ -42,7 +42,20 @@ const AdventuresView = () => {
   const activeWorldRef = useRef(null);
   const requestGenerationRef = useRef(0);
   const activeActionRef = useRef(null);
-  const resultDialogRef = useModalAccessibility(Boolean(claimResult), () => setClaimResult(null));
+  const claimRestoresMainRef = useRef(false);
+  const closeResult = () => {
+    const restoreMain = claimRestoresMainRef.current;
+    claimRestoresMainRef.current = false;
+    setClaimResult(null);
+    if (restoreMain) {
+      // The claim button is replaced by the terminal result. Restore focus
+      // after the shared modal hook has finished its own focus restoration.
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => document.getElementById('main-content')?.focus());
+      });
+    }
+  };
+  const resultDialogRef = useModalAccessibility(Boolean(claimResult), closeResult);
 
   const fetchAdventures = useCallback(async (targetWorld, { clearError = true } = {}) => {
     if (!targetWorld || activeWorldRef.current !== targetWorld) return null;
@@ -73,6 +86,7 @@ const AdventuresView = () => {
   useEffect(() => {
     activeWorldRef.current = worldId;
     activeActionRef.current = null;
+    claimRestoresMainRef.current = false;
     setPendingAction(null);
     setClaimResult(null);
     setAdventures([]);
@@ -134,7 +148,10 @@ const AdventuresView = () => {
         : await api.claimAdventure(id, targetWorld);
       if (!isCurrent()) return;
       setAdventures((rows) => applyAdventureResponse(rows, id, action, response.data));
-      if (action === 'claim' && response.data) setClaimResult(response.data);
+      if (action === 'claim' && response.data) {
+        claimRestoresMainRef.current = true;
+        setClaimResult(response.data);
+      }
       setNowMs(Date.now());
       // A failed refresh must not roll back a mutation acknowledged by the API.
       await fetchAdventures(targetWorld);
@@ -149,7 +166,10 @@ const AdventuresView = () => {
         ? synced?.status === 'active'
         : ['completed', 'failed'].includes(synced?.status) && Boolean(synced.result);
       if (alreadyApplied) {
-        if (action === 'claim') setClaimResult(synced.result);
+        if (action === 'claim') {
+          claimRestoresMainRef.current = true;
+          setClaimResult(synced.result);
+        }
         setError('');
       } else {
         const fallback = action === 'start'
@@ -265,7 +285,10 @@ const AdventuresView = () => {
                   <button
                     type="button"
                     className="btn btn-sm btn-outline"
-                    onClick={() => setClaimResult(adv.result)}
+                    onClick={() => {
+                      claimRestoresMainRef.current = false;
+                      setClaimResult(adv.result);
+                    }}
                     data-testid={`adventure-result-${adv.id}`}
                   >
                     Ver resultado
@@ -308,7 +331,7 @@ const AdventuresView = () => {
                 Seed: <span data-testid="adventure-result-seed">{claimResult.seed}</span>
               </div>
             </div>
-            <button type="button" onClick={() => setClaimResult(null)} className="btn btn-primary w-full">Continuar</button>
+            <button type="button" onClick={closeResult} className="btn btn-primary w-full">Continuar</button>
           </div>
         </div>
       )}
