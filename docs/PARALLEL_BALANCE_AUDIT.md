@@ -16,6 +16,7 @@ BM-0040 establece una sola fuente numérica. BM-0060 incorpora madera/piedra/hie
 1. **Niveles de construcción no enteros.** `get_building_cost` aceptaba `1.5`, `1.0` y `True`; el primero generaba cotizaciones para niveles inexistentes (exponente fraccionario) y `get_building_build_time` producía tiempos no canónicos. Ambos rechazan tipos que no sean enteros genuinos, antes de calcular; los límites 1..máximo y las fórmulas legítimas no cambian.
 2. **Capacidades con coerción silenciosa.** `get_storage_capacity` y la población de ciudades truncaban `2.9` a nivel 2 o aceptaban textos numéricos y booleanos; ahora rechazan esos tipos. El suelo histórico `max(nivel, 0)` para enteros negativos se mantiene para no alterar una recuperación de datos legacy.
 3. **Tipos de asentamiento desconocidos.** `get_population_capacity` trataba un tipo inválido como `city`. Ahora acepta solo `city` y `camp`; no modifica los límites de ninguno. Los campamentos siguen sin recibir bonificación por granjas.
+4. **Efectos inventados para edificios desconocidos.** `get_building_effect_definition` devolvía el efecto comodín de desbloqueo aun cuando el edificio no existía. Ahora rechaza la clave, sin tocar la clasificación `prerequisite_unlock` de los edificios canónicos que carecen de efecto especializado.
 
 No hay cambios en costos, tiempos, factores de crecimiento, producción, mantenimiento, requisitos, límites máximos, identificadores de unidades/edificios, eventos, snapshots o versión de balance.
 
@@ -24,7 +25,7 @@ No hay cambios en costos, tiempos, factores de crecimiento, producción, manteni
 `tests/test_parallel_balance_contract.py` cubre:
 
 - Perfil explícito de los cuatro recursos, tasas, capacidad y versiones del catálogo.
-- Coincidencia de órdenes/tablas, ausencia de claves militares duplicadas, integridad de requisitos y equivalencia de alias legacy.
+- Coincidencia de órdenes/tablas, ausencia de claves militares duplicadas, integridad de requisitos, rechazo de efectos para edificios desconocidos y equivalencia de alias legacy.
 - Todos los edificios, con niveles inicial, 2, intermedio y máximo (incluido nivel 100 de la Maravilla); valores de costo no redondeados, crecimiento 1.20 y tiempo lineal.
 - Fuera de rango, fraccionarios, textos, `None`, booleanos, `Decimal`, `NaN` e infinito.
 - Almacenamiento y población en niveles 0, 1, 2, 10, 20, enteros negativos y asentamientos no canónicos.
