@@ -190,6 +190,8 @@ python3 ops/load_smoke.py \
 
 Estos probes acotados **no demuestran capacidad máxima de la plataforma** ni sustituyen un ensayo de carga con clientes distribuidos y métricas del servidor en un entorno aprobado. No subir el límite del proxy para forzar un resultado verde.
 
+**Validación controlada del 21-11-2026:** usando el nuevo `load_smoke.py` en una copia temporal sobre la vista previa HTTPS existente (que todavía sirve el Nginx anterior), 10 segundos, 6 clientes, `--target-rps 6`: **60 solicitudes**, 60/60 HTTP 200, **0 errores**, **p95 27,66 ms**. Backend/PostgreSQL permanecieron saludables sin reinicios. Sintaxis de Nginx propuesto **PASS** con imagen `nginx:1.28-alpine` aislada; 13 pruebas focalizadas de ritmo/Basic auth **PASS**. **No se modificó el VPS ni se actualizó su Nginx**; el retorno 429 de la nueva configuración aún requiere comprobación posterior al despliegue autorizado.
+
 Presupuesto inicial G5:
 
 - cero HTTP 5xx durante probes aceptados;
