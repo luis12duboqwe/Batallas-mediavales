@@ -7,7 +7,7 @@ world's rules, owners, rankings or resource balances.
 
 from __future__ import annotations
 
-from sqlalchemy import func
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -32,6 +32,26 @@ def audit_legacy_wonder_transition(db: Session, world_id: int) -> dict:
         players = db.query(func.count(models.PlayerWorld.id)).filter(
             models.PlayerWorld.world_id == world_id,
         ).scalar()
+        legacy_user_links = db.query(func.count(models.User.id)).filter(
+            models.User.world_id == world_id,
+        ).scalar()
+        # Legacy User.world_id may outlive the normalized PlayerWorld membership;
+        # count missing memberships separately, never by subtracting totals.
+        legacy_users_without_membership = (
+            db.query(func.count(models.User.id))
+            .outerjoin(
+                models.PlayerWorld,
+                and_(
+                    models.PlayerWorld.user_id == models.User.id,
+                    models.PlayerWorld.world_id == world_id,
+                ),
+            )
+            .filter(
+                models.User.world_id == world_id,
+                models.PlayerWorld.id.is_(None),
+            )
+            .scalar()
+        )
         city_count = db.query(func.count(models.City.id)).filter(
             models.City.world_id == world_id,
         ).scalar()
@@ -39,6 +59,22 @@ def audit_legacy_wonder_transition(db: Session, world_id: int) -> dict:
             models.City.world_id == world_id,
             models.City.owner_id.isnot(None),
         ).scalar()
+        owned_cities_without_membership = (
+            db.query(func.count(models.City.id))
+            .outerjoin(
+                models.PlayerWorld,
+                and_(
+                    models.PlayerWorld.user_id == models.City.owner_id,
+                    models.PlayerWorld.world_id == models.City.world_id,
+                ),
+            )
+            .filter(
+                models.City.world_id == world_id,
+                models.City.owner_id.isnot(None),
+                models.PlayerWorld.id.is_(None),
+            )
+            .scalar()
+        )
         alliances = db.query(func.count(models.Alliance.id)).filter(
             models.Alliance.world_id == world_id,
         ).scalar()
@@ -98,11 +134,13 @@ def audit_legacy_wonder_transition(db: Session, world_id: int) -> dict:
             blockers.append("PENDING_WONDER_QUEUE_REQUIRES_RECONCILIATION")
         if funding_projects or contributions:
             blockers.append("EXISTING_FUNDING_LEDGER_REQUIRES_RECONCILIATION")
-        if players:
+        if players or legacy_user_links:
             blockers.append("PLAYER_CONSENT_NOT_VERIFIED")
-        if owned_cities and not players:
+        if legacy_users_without_membership:
+            blockers.append("LEGACY_USER_LINK_WITHOUT_MEMBERSHIP")
+        if owned_cities_without_membership:
             blockers.append("OWNED_CITIES_WITHOUT_MEMBERSHIP")
-        if players and not alliances:
+        if (players or legacy_user_links) and not alliance_members:
             blockers.append("ALLIANCE_SPONSOR_POLICY_REQUIRED")
 
         warehouse_limit = balance.get_storage_capacity(
@@ -116,8 +154,11 @@ def audit_legacy_wonder_transition(db: Session, world_id: int) -> dict:
             "is_active": bool(world.is_active),
             "counts": {
                 "players": int(players),
+                "legacy_user_links": int(legacy_user_links),
+                "legacy_user_links_without_membership": int(legacy_users_without_membership),
                 "cities": int(city_count),
                 "owned_cities": int(owned_cities),
+                "owned_cities_without_membership": int(owned_cities_without_membership),
                 "alliances": int(alliances),
                 "alliance_members": int(alliance_members),
                 "wonder_buildings": int(wonder_buildings),
