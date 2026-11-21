@@ -23,7 +23,17 @@
 | Correo | El preview utiliza **Mailpit**, útil para pruebas; **no demuestra SMTP real** para usuarios externos |
 | Checkout limpio | **No**: dos archivos locales modificados (`app/routers/__init__.py` y `tests/test_scheduler_worker.py`). Frente a main, el primero coincide exactamente y el segundo solo difiere por una línea vacía final. Aun así, no hacer reset ni desplegar sobre el worktree sucio |
 
-No se accedió a contraseñas, tokens, bases de datos de usuarios ni buzones. No se realizaron modificaciones en el VPS.
+No se accedió a contraseñas, tokens, buzones ni datos de usuarios. No se modificaron servicios, configuración ni la base de datos del preview.
+
+### Ensayo adicional: migración reversible en entorno aislado (PASS)
+
+- Se clonó el HEAD `264237860ef0` en directorio temporal, sin cambiar el checkout del preview.
+- Con una imagen backend existente en el VPS, Docker `--network none`, `APP_ENV=test` y SQLite **desechable**, se ejecutaron todas las migraciones hasta `0019_privacy_active_unique`.
+- Se creó un **mundo sintético** y se migró a `0020_wonder_funding`: el mundo mantuvo `wonder_rules_version = legacy-v1`, y aparecieron las tablas de financiación.
+- Se ejecutó el **downgrade `0020 → 0019`**, conservando el mundo y retirando la nueva columna/tabla. El comando terminó con **exit 0**.
+- No hubo conexiones a PostgreSQL del preview ni a servicios externos desde el contenedor de prueba. El directorio temporal fue retirado.
+
+Este PASS prueba **compatibilidad básica y reversibilidad sobre SQLite aislado**, **no** certifica migración, backup, restauración o rollback de **PostgreSQL real en staging**.
 
 ## 2. Seguimiento canónico por puertas
 
@@ -47,7 +57,7 @@ No se accedió a contraseñas, tokens, bases de datos de usuarios ni buzones. No
 | Validation verde en HEAD exacto | **Comprobado** en main `26423786`; no equivale a validar el commit instalado en el VPS |
 | Staging real desde workflow con release inmutable | **Pendiente**. Vista previa desplegada a commit anterior; no se verificó despliegue mediante workflow de staging |
 | DNS, TLS y HTTPS de staging | **Parcial**: preview válido; el entorno final aprobado aún no está certificado |
-| Migración real y rollback de datos de staging | **Pendiente**: preview en Alembic 0019; PR #155 añade 0020 |
+| Migración real y rollback de datos de staging | **Pendiente en staging PostgreSQL**: preview en Alembic 0019; se verificó `0019 → 0020 → 0019` con un mundo sintético en SQLite desechable (PASS) |
 | Backup íntegro y restore drill sobre staging | **Sin evidencia real en esta inspección**; gate CI con fixtures no reemplaza staging |
 | Smoke HTTP y carga/soak de larga duración | **Parcial**: solo GET de salud comprobados; no se ejecutó carga ni soak |
 | Monitor horario, métricas y alertas | **Pendiente**: últimas ejecuciones programadas omitidas; falta prueba real de alerta |
