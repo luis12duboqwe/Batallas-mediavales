@@ -59,8 +59,16 @@ try {
     const worlds = await call('/worlds/active', { token });
     worldId = worlds.worlds.find((item) => item.lifecycle_status === 'open')?.id;
     assert.ok(worldId);
-    await page.getByTestId(`world-selector-${worldId}`).getByRole('button', { name: 'Unirse' }).click();
+    const selector = page.getByTestId(`world-selector-${worldId}`);
+    await selector.waitFor({ state: 'visible', timeout: 15000 });
+    await selector.getByRole('button', { name: 'Unirse' }).click();
+    // Browser click does not await the asynchronous joinWorld request. Wait for
+    // the UI's authoritative selected-world state before querying the API.
+    await page.waitForFunction((id) => {
+      return document.querySelector(`[data-testid="world-selector-${id}"]`)?.getAttribute('aria-current') === 'true';
+    }, worldId, { timeout: 15000 });
     const player = await playerSnapshot(token, worldId);
+    assert.equal(player.profile.world_id, worldId);
     assert.equal(player.cities.length, 1);
     city = player.cities[0];
     assert.equal(city.name, `Capital de ${user}`);
