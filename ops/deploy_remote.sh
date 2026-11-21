@@ -140,6 +140,9 @@ if [[ "$had_previous" -eq 0 ]]; then
   if [[ -n "$(find "$DEPLOYMENTS_DIR" -maxdepth 1 -type f -name '*.json' -print -quit)" ]]; then
     refuse_unmanaged "deployment manifests exist without $CURRENT_ENV"
   fi
+  if [[ -n "$(find "$RELEASES_DIR" -maxdepth 1 -type f -name '*.env' -print -quit)" ]]; then
+    refuse_unmanaged "archived releases exist without $CURRENT_ENV"
+  fi
   if ! existing_containers="$(docker compose --env-file "$NEXT_ENV" -f "$COMPOSE_FILE" ps -a -q)"; then
     refuse_unmanaged "unable to inspect existing Docker Compose project"
   fi
