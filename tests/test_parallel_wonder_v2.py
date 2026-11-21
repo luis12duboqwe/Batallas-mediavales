@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from app import models
+from app.database import SessionLocal
 from app.schemas.wonder import WonderContributionCreate
 from app.services import balance, building, wonder_funding
 from app.utils import utc_now
@@ -263,3 +264,62 @@ def test_v2_victory_keeps_pinned_sponsor_after_leaving_alliance(db_session, user
     db_session.refresh(city.world)
     assert city.world.lifecycle_status == "closed"
     assert city.world.winner_alliance_id == alliance.id
+
+
+def test_idempotent_replay_releases_transaction(db_session, user, city):
+    _setup(db_session, user, city, second_user=False)
+    key = uuid4().hex
+    amounts = _amounts(wood=100)
+    original = _fund(db_session, user.id, city, city, amounts, key)
+
+    assert _fund(db_session, user.id, city, city, amounts, key) == original
+    assert not db_session.in_transaction()
+    assert db_session.query(models.WonderContribution).count() == 1
+
+
+def test_contribution_snapshot_precedes_next_committed_contribution(
+    db_session, user, city, monkeypatch,
+):
+    _, ally, donor = _setup(db_session, user, city)
+    city_id, world_id, donor_id, ally_id = city.id, city.world_id, donor.id, ally.id
+    commit = db_session.commit
+
+    def commit_then_contribute():
+        monkeypatch.setattr(db_session, "commit", commit)
+        commit()
+        with SessionLocal() as concurrent:
+            wonder_funding.contribute(
+                concurrent, world_id=world_id, contributor_id=ally_id,
+                target_city_id=city_id, source_city_id=donor_id,
+                amounts={"wood": 200}, idempotency_key=uuid4().hex,
+            )
+
+    monkeypatch.setattr(db_session, "commit", commit_then_contribute)
+    result = _fund(db_session, user.id, city, city, _amounts(wood=100))
+
+    assert result["funded"]["wood"] == 100
+    assert wonder_funding.get_funding(
+        db_session, city_id, world_id, user.id,
+    )["funded"]["wood"] == 300
+
+
+@pytest.mark.parametrize("target_level", [9, 10, 50])
+def test_wonder_levels_require_the_last_unit_before_queueing(
+    db_session, user, city, target_level,
+):
+    _setup(db_session, user, city, level=target_level - 1, second_user=False)
+    cost = balance.get_wonder_cost(target_level, balance.WONDER_ALLIANCE_RULES)
+    partial = {**cost, "gold": cost["gold"] - 1}
+    snapshot = _fund(db_session, user.id, city, city, partial)
+    assert snapshot["target_level"] == target_level
+    assert snapshot["remaining"] == _amounts(gold=1)
+    assert not snapshot["can_queue"]
+
+    with pytest.raises(ValueError, match="complete alliance financing"):
+        building.queue_upgrade(db_session, city, "world_wonder")
+
+    snapshot = _fund(db_session, user.id, city, city, _amounts(gold=1))
+    assert snapshot["can_queue"]
+    queue = building.queue_upgrade(db_session, city, "world_wonder")
+    assert queue.target_level == target_level
+    assert queue.paid_cost == {}

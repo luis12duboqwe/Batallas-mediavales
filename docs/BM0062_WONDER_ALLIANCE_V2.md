@@ -103,3 +103,14 @@ carga son estables para que re-renderizados no reinicien timers de ocultación.
 **Resultado de la ejecución focalizada sobre test SQLite independiente:**
 5 escenarios de navegador aprobados, incluyendo el clic físico de
 «Construir» y la devolución a estado financiado tras cancelar.
+
+## Auditoría local de aportaciones
+
+- En una aportación nueva, la respuesta se calcula antes del commit. Antes
+  se leía el fondo después de liberar los bloqueos y la respuesta podía
+  incorporar una aportación confirmada por otra sesión en ese intervalo.
+- Un reintento idempotente válido devuelve el estado del fondo y termina
+  su transacción de lectura. Antes retenía los bloqueos hasta el cierre de
+  la sesión, aunque el servicio ya había devuelto la respuesta.
+- Las regresiones cubren ambos casos y el rechazo de una cola cuando falta
+  una sola unidad de oro en los niveles 9, 10 y 50.
