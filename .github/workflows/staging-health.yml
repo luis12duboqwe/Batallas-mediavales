@@ -42,6 +42,7 @@ jobs:
           --base-url "$STAGING_BASE_URL"
           --duration-seconds 10
           --concurrency 6
+          --target-rps 6
           --max-p95-ms 750
           --max-error-rate 0.005
 
