@@ -2,20 +2,19 @@
 """Print a non-PII, read-only impact report for one historical Wonder world.
 
 Example from a controlled operator shell (not from public traffic):
-    python scripts/audit_legacy_wonder.py --world-id 1
+    DATABASE_URL=... python scripts/audit_legacy_wonder.py --world-id 1
 
-DATABASE_URL is read from the normal app environment; never pass credentials
-on the command line. A report does not authorize a conversion or deploy.
+Never pass credentials as CLI args. A report does not authorize conversion.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
-# Keep the tool runnable from the repository root without installing the
-# backend package into an operator's global Python environment.
+# Run from repository root without global backend-package installation.
 BACKEND_ROOT = Path(__file__).resolve().parents[1] / "batalla_medieval_backend"
 sys.path.insert(0, str(BACKEND_ROOT))
 
@@ -27,19 +26,60 @@ def main(argv: list[str] | None = None) -> int:
     if args.world_id < 1:
         parser.error("--world-id must be a positive integer")
 
-    from app.database import SessionLocal
-    from app.services.wonder_transition_audit import audit_legacy_wonder_transition
+    # Never use Settings' implicit development SQLite URL or create a new
+    # SQLite file while pretending to audit a real, existing world.
+    raw_url = os.environ.get("DATABASE_URL", "").strip()
+    if not raw_url:
+        print("Wonder audit refused: explicit DATABASE_URL is required", file=sys.stderr)
+        return 2
 
-    db = SessionLocal()
+    from sqlalchemy import inspect
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import SQLAlchemyError
+
     try:
-        report = audit_legacy_wonder_transition(db, args.world_id)
-        print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
+        url = make_url(raw_url)
+        if url.get_backend_name() == "sqlite":
+            database = url.database
+            if database in (None, "", ":memory:") or not Path(database).is_file():
+                print(
+                    "Wonder audit refused: existing SQLite database file required",
+                    file=sys.stderr,
+                )
+                return 2
+        from app.database import SessionLocal
+        from app.services.wonder_transition_audit import audit_legacy_wonder_transition
+
+        db = SessionLocal()
+        try:
+            inspector = inspect(db.get_bind())
+            required = {"wonder_funding", "wonder_contributions", "worlds", "player_world"}
+            if not all(inspector.has_table(table) for table in required) or (
+                "wonder_rules_version"
+                not in {column["name"] for column in inspector.get_columns("worlds")}
+            ):
+                print(
+                    "Wonder audit refused: database requires Alembic 0020 or later",
+                    file=sys.stderr,
+                )
+                return 2
+
+            report = audit_legacy_wonder_transition(db, args.world_id)
+            print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
+        finally:
+            # No commit: close and roll back any open read transaction.
+            db.close()
     except ValueError as exc:
+        # Only audit-level errors (e.g. unknown world) are surfaced verbatim.
         print(f"Wonder audit refused: {exc}", file=sys.stderr)
         return 2
-    finally:
-        # Close without commit; SQLAlchemy rolls back any read transaction.
-        db.close()
+    except SQLAlchemyError:
+        # Database exceptions may embed connection info or raw SQL parameters.
+        print(
+            "Wonder audit refused: database access, permissions or schema failed",
+            file=sys.stderr,
+        )
+        return 3
     return 0
 
 
