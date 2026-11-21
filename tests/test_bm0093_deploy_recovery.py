@@ -355,7 +355,9 @@ def test_orphaned_metadata_without_active_env_is_refused(deploy_lab, orphan_type
     if orphan_type == "previous_env":
         (root / ".release.env.previous").write_text(deploy_lab["active"], encoding="utf-8")
     if orphan_type == "manifest":
-        (root / ".ops-state" / "deployments" / ("a" * 40 + ".json")).write_text(
+        manifests = root / ".ops-state" / "deployments"
+        manifests.mkdir(parents=True, exist_ok=True)
+        (manifests / ("a" * 40 + ".json")).write_text(
             "{}", encoding="utf-8",
         )
     result = _run(deploy_lab)
