@@ -11,11 +11,16 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from probe_auth import build_probe_opener
 
-def request(url: str, timeout: float) -> tuple[int, bytes, float]:
+
+def request(
+    url: str, timeout: float, opener: urllib.request.OpenerDirector | None = None
+) -> tuple[int, bytes, float]:
     started = time.perf_counter()
+    open_url = urllib.request.urlopen if opener is None else opener.open
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        with open_url(url, timeout=timeout) as response:
             body = response.read()
             status = response.status
     except urllib.error.HTTPError as exc:
@@ -48,6 +53,11 @@ def main() -> int:
     if args.requests < 1:
         parser.error("--requests must be positive")
 
+    try:
+        opener = build_probe_opener(args.base_url)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     base = args.base_url.rstrip("/")
     failures: list[str] = []
 
@@ -58,7 +68,7 @@ def main() -> int:
         ("balance contract", "/api/economy/balance_preview", True),
     ]
     for name, path, expect_json in probes:
-        status, body, _ = request(base + path, args.timeout)
+        status, body, _ = request(base + path, args.timeout, opener=opener)
         if status != 200:
             failures.append(f"{name}: expected HTTP 200, got {status}")
             continue
@@ -76,7 +86,7 @@ def main() -> int:
     latencies: list[float] = []
     statuses: list[int] = []
     for _ in range(args.requests):
-        status, _, elapsed_ms = request(base + "/api/economy/balance_preview", args.timeout)
+        status, _, elapsed_ms = request(base + "/api/economy/balance_preview", args.timeout, opener=opener)
         statuses.append(status)
         latencies.append(elapsed_ms)
 
