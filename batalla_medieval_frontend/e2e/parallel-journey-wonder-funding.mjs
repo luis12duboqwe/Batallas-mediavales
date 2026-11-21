@@ -165,19 +165,29 @@ try {
     await loginFixture(strangerPage, 'wonder_stranger', 'Wonder-Stranger-Test-2026!');
     await strangerPage.goto(UI + '/buildings', { waitUntil: 'domcontentloaded' });
     await waitForBuildingsReady(strangerPage);
+    // Wait for the asynchronous world/alliance permission decision, not just
+    // the page heading; otherwise an absent panel could be a loading state.
+    await strangerPage.getByTestId('wonder-funding-unavailable').waitFor({ state: 'attached', timeout: 20000 });
     assert.equal(await strangerPage.getByTestId('wonder-funding-panel').count(), 0);
     assert.deepEqual(requested, []);
   });
 
   await checks.check('legacy world never exposes finance in buildings or mobile map', async () => {
+    const forbiddenGets = [];
+    legacyPage.on('request', request => {
+      if (request.url().includes('/building/wonder/funding')) forbiddenGets.push(request.url());
+    });
     await loginFixture(legacyPage, 'wonder_legacy', 'Wonder-Legacy-Test-2026!');
     await legacyPage.goto(UI + '/buildings', { waitUntil: 'domcontentloaded' });
     await waitForBuildingsReady(legacyPage);
+    await legacyPage.getByTestId('wonder-funding-unavailable').waitFor({ state: 'attached', timeout: 20000 });
     assert.equal(await legacyPage.getByTestId('wonder-funding-panel').count(), 0);
+    assert.deepEqual(forbiddenGets, []);
     await legacyPage.setViewportSize({ width: 390, height: 844 });
     const details = await selectCityFromMap(legacyPage, legacyOtherCity);
     await details.getByText('Wonder Legacy E2E Alliance', { exact: false }).waitFor({ timeout: 15000 });
     assert.equal(await details.getByRole('button', { name: 'Aportar a Maravilla' }).count(), 0);
+    assert.deepEqual(forbiddenGets, [], 'Legacy page must not fetch funding after map navigation');
   });
 
   await checks.check('alliance member replays accepted POST after lost response, with one debit', async () => {
@@ -225,8 +235,10 @@ try {
     const paidDonor = donor.cities.find(city => city.id === donorCityId);
     assert.ok(paidDonor.wood >= 39990 && paidDonor.wood <= 40020, 'Single donor debit only');
     await donorPage.reload({ waitUntil: 'domcontentloaded' });
-    await donorPage.getByTestId('wonder-funding-panel')
-      .getByText('5000/10000', { exact: false }).waitFor({ timeout: 20000 });
+    const persistedFund = donorPage.getByTestId('wonder-funding-panel')
+      .getByText('5000/10000', { exact: false });
+    await persistedFund.first().waitFor({ timeout: 20000 });
+    assert.equal(await persistedFund.count(), 3, 'Wood, stone and iron all persist after reload');
   });
 
   await checks.check('allied map offers finance action on desktop and mobile', async () => {
