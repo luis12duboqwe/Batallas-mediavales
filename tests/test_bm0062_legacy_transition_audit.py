@@ -222,6 +222,45 @@ def test_no_flush_or_commit_even_with_pending_session_changes(db_session, city):
     db_session.rollback()
 
 
+def test_unflushed_world_changes_cannot_forge_persisted_audit_state(db_session, user, city):
+    world = city.world
+    # The persisted world is open, active and legacy, with no winner.
+    db_session.refresh(world)
+    assert world.lifecycle_status == "open"
+    assert world.is_active is True
+    assert world.wonder_rules_version == "legacy-v1"
+    world.lifecycle_status = "paused"
+    world.is_active = False
+    world.wonder_rules_version = "alliance-v2"
+    world.winner_id = user.id
+    world.ended_at = utc_now()
+    events = []
+
+    def detect_flush(*_args):
+        events.append("flush")
+
+    event.listen(db_session, "before_flush", detect_flush)
+    try:
+        report = audit_legacy_wonder_transition(db_session, world.id)
+    finally:
+        event.remove(db_session, "before_flush", detect_flush)
+
+    assert events == []
+    assert report["rules_version"] == "legacy-v1"
+    assert report["lifecycle_status"] == "open"
+    assert report["is_active"] is True
+    assert "WORLD_NOT_PAUSED" in report["blockers"]
+    assert "WORLD_ACTIVE_FLAG" in report["blockers"]
+    assert "NOT_LEGACY_RULES" not in report["blockers"]
+    assert "WORLD_ALREADY_ENDED" not in report["blockers"]
+    assert report["can_auto_convert"] is False
+    # The audit must not overwrite or flush dirty values from the caller.
+    assert world.wonder_rules_version == "alliance-v2"
+    assert world.lifecycle_status == "paused"
+    assert world.winner_id == user.id
+    db_session.rollback()
+
+
 @pytest.mark.parametrize("invalid", [0, -1, True, False, 1.0, "1", None])
 def test_invalid_world_ids_rejected_without_db_effect(db_session, invalid):
     with pytest.raises(ValueError, match="positive integer"):
