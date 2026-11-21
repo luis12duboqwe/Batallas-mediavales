@@ -124,6 +124,33 @@ PY
 )"
 fi
 
+# A populated preview may predate this deployment manager. An absent
+# .release.env is NOT proof that the Docker project is a new/empty install:
+# rewriting an unmanaged application provides no trustworthy rollback images.
+# Refuse before touching active containers or moving release pointers.
+if [[ "$had_previous" -eq 0 ]]; then
+  refuse_unmanaged() {
+    echo "Deployment refused: $1. Inspect and adopt the existing deployment with a separately rehearsed recovery plan." >&2
+    rm -f -- "$NEXT_ENV"
+    exit 2
+  }
+  if [[ -e .release-sha || -L .release-sha || -e "$PREVIOUS_ENV" || -L "$PREVIOUS_ENV" ]]; then
+    refuse_unmanaged "orphaned release metadata without $CURRENT_ENV"
+  fi
+  if [[ -n "$(find "$DEPLOYMENTS_DIR" -maxdepth 1 -type f -name '*.json' -print -quit)" ]]; then
+    refuse_unmanaged "deployment manifests exist without $CURRENT_ENV"
+  fi
+  if [[ -n "$(find "$RELEASES_DIR" -maxdepth 1 -type f -name '*.env' -print -quit)" ]]; then
+    refuse_unmanaged "archived releases exist without $CURRENT_ENV"
+  fi
+  if ! existing_containers="$(docker compose --env-file "$NEXT_ENV" -f "$COMPOSE_FILE" ps -a -q)"; then
+    refuse_unmanaged "unable to inspect existing Docker Compose project"
+  fi
+  if [[ -n "${existing_containers//[[:space:]]/}" ]]; then
+    refuse_unmanaged "unmanaged Docker Compose containers exist"
+  fi
+fi
+
 # Persist the in-progress recovery guard BEFORE mutating the active release.
 # A process crash, disk exhaustion or failure inside the ERR trap must not
 # silently permit another deployment against an uncertain state.
@@ -230,6 +257,14 @@ if ! has_schema="$(docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" e
 fi
 case "$has_schema" in
   t)
+    # A first-install candidate must never silently adopt an existing schema.
+    # Without a previous immutable release, recovery could restore data but
+    # cannot restore the application's former images/configuration.
+    if [[ "$had_previous" -eq 0 ]]; then
+      schema_integrity_uncertain=1
+      echo "Existing users schema without managed release metadata; refusing first-install migration" >&2
+      false
+    fi
     backup_receipt="$(mktemp "$STATE_DIR/backup-receipt.XXXXXXXX")"
     BACKUP_RECEIPT_FILE="$backup_receipt" bash ops/backup_postgres.sh "$CURRENT_ENV"
     if [[ ! -s "$backup_receipt" ]]; then

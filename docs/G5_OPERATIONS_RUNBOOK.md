@@ -108,6 +108,14 @@ El workflow `.github/workflows/deploy.yml` se ejecuta manualmente.
 
 El workflow rechaza producción si el dispatch no parte de `main`. Antes de habilitar la beta debe existir aprobación explícita del propietario y, preferiblemente, protección de aprobación en el ambiente `production` de GitHub.
 
+### 5.1. Primera release en un host que ya contiene datos (NO-GO hasta adopción controlada)
+
+Un entorno existente sin `.release.env` y `.release-sha` **no es una instalación nueva**, aunque su checkout contenga el mismo código. `ops/deploy_remote.sh` ahora rechaza **antes de arrancar servicios o cambiar punteros** si encuentra contenedores (activos o detenidos) del proyecto Compose, errores al consultar Docker, metadatos huérfanos o manifiestos de despliegue sin release activa. También rechaza una base que ya contiene `public.users` cuando no existe release anterior administrada, antes de lanzar migraciones.
+
+**Para adoptar una vista previa histórica:** registrar por separado las imágenes y configuración activas, SHA real del código, versiones de esquema, volumen PostgreSQL, red/proxy y datos de recuperación; obtener snapshot con hash y **copia recuperable fuera del host**, probar restauración y migración/reversión **en un clon aislado**. Definir exactamente cómo capturar una release anterior inmutable y su manifiesto de recuperación, incluyendo rollback de aplicación y base. Comprobar que la futura release usa la misma identidad PostgreSQL y que ninguna credencial ni archivo se reemplaza a ciegas. Solo entonces autorizar una operación de adopción administrada, con aprobación de propietario y mantenimiento previsto.
+
+**Prohibido** crear a mano un archivo `.release-sha` o renombrar `.env` para eludir las protecciones. Tampoco ejecutar un `docker compose up` del nuevo bundle directamente sobre el stack antiguo. Si la primera release detecta una base poblada, queda marcada como incidente de recuperación para inspección, sin aplicar migraciones ni imágenes nuevas. No certificar G5 únicamente por superar pruebas con Docker simulado.
+
 ## 6. Rollback automático
 
 `ops/deploy_remote.sh` mantiene un trap de error durante backup, migración, arranque, TLS, smoke y carga.
