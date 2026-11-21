@@ -46,6 +46,10 @@ def list_cities(
     cities = (
         db.query(models.City)
         .filter(models.City.owner_id == current_user.id, models.City.world_id == world_id)
+        # Frontend's default active city is the first returned city. SQLite
+        # and PostgreSQL must agree: never let an unordered index scan select
+        # a newer, empty city instead of the established starting capital.
+        .order_by(models.City.id.asc())
         .all()
     )
     for city in cities:
