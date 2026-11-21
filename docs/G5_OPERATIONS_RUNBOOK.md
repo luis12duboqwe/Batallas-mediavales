@@ -36,9 +36,18 @@ Secretos requeridos por ambiente:
 - `REGISTRY_PASSWORD`: opcional si `github.token` puede acceder a GHCR;
 - `ALERT_WEBHOOK_URL`: opcional para alertas externas de staging.
 
-Variable de GitHub del ambiente `staging`:
+Variable de **repositorio** de GitHub necesaria para que el job programado no se omita antes de asignar el ambiente `staging`:
 
-- `STAGING_BASE_URL`: URL HTTPS pública usada por `.github/workflows/staging-health.yml`.
+- `STAGING_BASE_URL`: URL HTTPS pública del staging para `.github/workflows/staging-health.yml`. La condición `jobs.smoke.if` se evalúa antes de que el job cargue las variables específicas del ambiente. Configurarla solo como variable del ambiente puede dejar el monitor en `skipped`.
+
+Si el preview/staging está protegido por HTTP Basic, configurar además:
+
+- Variable `STAGING_BASIC_AUTH_USERNAME` (repositorio o ambiente `staging`).
+- Secreto `STAGING_BASIC_AUTH_PASSWORD` (ambiente `staging`; nunca en Git ni en argumentos del proceso).
+- Ambas credenciales deben estar presentes o el probe falla sin efectuar peticiones. Sin ambas, el probe sigue funcionando para un staging sin Basic auth.
+- `ops/smoke_http.py` y `ops/load_smoke.py` usan un desafío Basic únicamente sobre el mismo origen HTTPS. Rechazan URL con credenciales, HTTP con autenticación, redirecciones a otro origen y degradación HTTP para no divulgar el secreto.
+- Configurar estas variables **no aprueba G5 ni activa usuarios externos**; se exige un entorno de staging delimitado, su release comprobada y la evidencia de la puerta completa.
+
 
 El archivo de entorno puede prepararse tomando `ops/staging.env.example`, reemplazando todos los placeholders y codificándolo en base64. El texto plano no se debe almacenar en el repositorio.
 
