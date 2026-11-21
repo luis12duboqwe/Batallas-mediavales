@@ -61,3 +61,83 @@ def test_owned_city_list_does_not_include_another_world(
     )
     assert response.status_code == 200, response.text
     assert [item["id"] for item in response.json()] == [city.id]
+
+
+def test_starting_capital_precedes_older_owned_city_id_after_conquest(
+    client, db_session, user, city,
+):
+    # A barbarian may have been seeded before a player's capital and later
+    # conquered: lower numeric IDs do not identify the starting capital.
+    city.name = "Earlier conquered city"
+    city.wood = 0.0
+    city.stone = 0.0
+    city.iron = 0.0
+    city.gold = 0.0
+    capital = models.City(
+        name="Registered starting capital",
+        owner_id=user.id, world_id=city.world_id,
+        x=56, y=57,
+        wood=45000.0, stone=45000.0, iron=45000.0, gold=45000.0,
+    )
+    db_session.add(capital)
+    db_session.flush()
+    assert city.id < capital.id
+    db_session.add(models.PlayerWorld(
+        user_id=user.id, world_id=city.world_id,
+        starting_city_id=capital.id,
+    ))
+    db_session.commit()
+
+    for _ in range(3):
+        response = client.get(
+            f"/city/?world_id={city.world_id}", headers=_headers(user),
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert [row["id"] for row in data] == [capital.id, city.id]
+        assert data[0]["name"] == "Registered starting capital"
+        assert data[0]["wood"] >= 45000
+
+
+def test_starting_capital_priority_is_scoped_to_requested_world(
+    client, db_session, user, city,
+):
+    first_world = city.world_id
+    old_city = city
+    later_capital = models.City(
+        name="World A capital", owner_id=user.id, world_id=first_world,
+        x=64, y=65,
+    )
+    other_world = models.World(name="World B independent capital")
+    db_session.add_all((later_capital, other_world))
+    db_session.flush()
+    other_capital = models.City(
+        name="World B capital", owner_id=user.id, world_id=other_world.id,
+        x=34, y=35,
+    )
+    db_session.add(other_capital)
+    db_session.flush()
+    db_session.add_all((
+        models.PlayerWorld(
+            user_id=user.id, world_id=first_world,
+            starting_city_id=later_capital.id,
+        ),
+        models.PlayerWorld(
+            user_id=user.id, world_id=other_world.id,
+            starting_city_id=other_capital.id,
+        ),
+    ))
+    db_session.commit()
+
+    response_a = client.get(
+        f"/city/?world_id={first_world}", headers=_headers(user),
+    )
+    response_b = client.get(
+        f"/city/?world_id={other_world.id}", headers=_headers(user),
+    )
+    assert response_a.status_code == 200, response_a.text
+    assert response_b.status_code == 200, response_b.text
+    assert [row["id"] for row in response_a.json()] == [
+        later_capital.id, old_city.id,
+    ]
+    assert [row["id"] for row in response_b.json()] == [other_capital.id]
