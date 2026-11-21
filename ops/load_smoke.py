@@ -18,6 +18,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from probe_auth import build_probe_opener
+
 
 def percentile(values: list[float], fraction: float) -> float:
     ordered = sorted(values)
@@ -25,10 +27,13 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[index]
 
 
-def one_request(url: str, timeout: float) -> tuple[int, float]:
+def one_request(
+    url: str, timeout: float, opener: urllib.request.OpenerDirector | None = None
+) -> tuple[int, float]:
     started = time.perf_counter()
+    open_url = urllib.request.urlopen if opener is None else opener.open
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        with open_url(url, timeout=timeout) as response:
             response.read()
             status = response.status
     except urllib.error.HTTPError as exc:
@@ -61,6 +66,11 @@ def main() -> int:
     if not 0 <= args.max_error_rate <= 1:
         parser.error("--max-error-rate must be between 0 and 1")
 
+    try:
+        build_probe_opener(args.base_url)  # fail closed on partial/unsafe config
+    except ValueError as exc:
+        parser.error(str(exc))
+
     url = args.base_url.rstrip("/") + "/" + args.path.lstrip("/")
     deadline = time.monotonic() + args.duration_seconds
     lock = threading.Lock()
@@ -68,8 +78,10 @@ def main() -> int:
     latencies: list[float] = []
 
     def worker() -> None:
+        # One opener per thread: urllib's challenge/retry state is not shared.
+        opener = build_probe_opener(args.base_url)
         while time.monotonic() < deadline:
-            status, latency = one_request(url, args.timeout)
+            status, latency = one_request(url, args.timeout, opener=opener)
             with lock:
                 statuses.append(status)
                 latencies.append(latency)
