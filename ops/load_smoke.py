@@ -27,6 +27,32 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[index]
 
 
+class RequestPacer:
+    """Reserve one shared request slot across all worker threads.
+
+    A concurrency bound alone does not bound requests per second: a fast GET
+    loop can overwhelm nginx's per-client rate limit and produce false 5xx
+    alarms instead of meaningful G5 measurements.
+    """
+
+    def __init__(self, target_rps: float, *, started_at: float) -> None:
+        if not math.isfinite(target_rps) or target_rps <= 0:
+            raise ValueError("target_rps must be finite and positive")
+        self._interval = 1.0 / target_rps
+        self._next_at = started_at
+        self._lock = threading.Lock()
+
+    def reserve(self, deadline: float, *, now: float | None = None) -> float | None:
+        """Return a scheduled monotonic timestamp or None past the deadline."""
+        current = time.monotonic() if now is None else now
+        with self._lock:
+            scheduled = max(current, self._next_at)
+            if scheduled >= deadline:
+                return None
+            self._next_at = scheduled + self._interval
+            return scheduled
+
+
 def one_request(
     url: str, timeout: float, opener: urllib.request.OpenerDirector | None = None
 ) -> tuple[int, float]:
@@ -50,6 +76,8 @@ def main() -> int:
     parser.add_argument("--path", default="/api/economy/balance_preview")
     parser.add_argument("--duration-seconds", type=float, default=10.0)
     parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--target-rps", type=float, default=6.0,
+                        help="Total requests per second across all clients (G5 safe default: 6)")
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--max-p95-ms", type=float, default=750.0)
     parser.add_argument("--max-error-rate", type=float, default=0.005)
@@ -61,8 +89,10 @@ def main() -> int:
         parser.error("protected load tests require an https:// base URL")
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         parser.error("--base-url must be an absolute http(s) URL")
-    if args.duration_seconds <= 0 or args.concurrency < 1:
+    if not math.isfinite(args.duration_seconds) or args.duration_seconds <= 0 or args.concurrency < 1:
         parser.error("duration and concurrency must be positive")
+    if not math.isfinite(args.target_rps) or args.target_rps <= 0:
+        parser.error("--target-rps must be finite and positive")
     if not 0 <= args.max_error_rate <= 1:
         parser.error("--max-error-rate must be between 0 and 1")
 
@@ -72,7 +102,9 @@ def main() -> int:
         parser.error(str(exc))
 
     url = args.base_url.rstrip("/") + "/" + args.path.lstrip("/")
-    deadline = time.monotonic() + args.duration_seconds
+    started_at = time.monotonic()
+    deadline = started_at + args.duration_seconds
+    pacer = RequestPacer(args.target_rps, started_at=started_at)
     lock = threading.Lock()
     statuses: list[int] = []
     latencies: list[float] = []
@@ -80,7 +112,11 @@ def main() -> int:
     def worker() -> None:
         # One opener per thread: urllib's challenge/retry state is not shared.
         opener = build_probe_opener(args.base_url)
-        while time.monotonic() < deadline:
+        while True:
+            scheduled = pacer.reserve(deadline)
+            if scheduled is None:
+                break
+            time.sleep(max(0.0, scheduled - time.monotonic()))
             status, latency = one_request(url, args.timeout, opener=opener)
             with lock:
                 statuses.append(status)
@@ -103,6 +139,8 @@ def main() -> int:
         "requests": len(statuses),
         "duration_seconds": args.duration_seconds,
         "concurrency": args.concurrency,
+        "target_rps": args.target_rps,
+        "status_counts": {str(code): statuses.count(code) for code in sorted(set(statuses))},
         "requests_per_second": round(len(statuses) / args.duration_seconds, 2),
         "errors": errors,
         "server_errors": server_errors,
