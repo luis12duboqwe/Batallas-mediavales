@@ -9,6 +9,7 @@ HTTPS origin being probed. The password is read from an environment secret.
 from __future__ import annotations
 
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Mapping
@@ -38,6 +39,32 @@ class _HTTPSOriginPasswordManager(urllib.request.HTTPPasswordMgrWithDefaultRealm
         return super().find_user_password(realm, authuri)
 
 
+class _HTTPSOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Do not forward Authorization on redirects to another origin."""
+
+    def __init__(self, origin: str) -> None:
+        self._origin = self._destination(origin)
+
+    @staticmethod
+    def _destination(url: str) -> tuple[str, str | None, int | None] | None:
+        try:
+            parsed = urllib.parse.urlsplit(url)
+            if parsed.scheme.lower() != "https" or not parsed.hostname:
+                return None
+            if parsed.username is not None or parsed.password is not None:
+                return None
+            return ("https", parsed.hostname, parsed.port or 443)
+        except ValueError:
+            return None
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if self._destination(newurl) != self._origin:
+            raise urllib.error.HTTPError(
+                req.full_url, code, "cross-origin staging redirect denied", headers, fp
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def build_probe_opener(
     base_url: str, environ: Mapping[str, str] | None = None
 ) -> urllib.request.OpenerDirector:
@@ -63,4 +90,6 @@ def build_probe_opener(
     origin = f"https://{parsed.netloc}/"
     manager = _HTTPSOriginPasswordManager(origin)
     manager.add_password(None, origin, username, password)
-    return urllib.request.build_opener(urllib.request.HTTPBasicAuthHandler(manager))
+    return urllib.request.build_opener(
+        urllib.request.HTTPBasicAuthHandler(manager), _HTTPSOriginRedirectHandler(origin)
+    )
