@@ -277,14 +277,22 @@ def test_cli_prints_only_read_only_json_and_requires_world_id(db_session, city):
     repo = Path(__file__).resolve().parents[1]
     backend = repo / "batalla_medieval_backend"
     command = [sys.executable, str(repo / "scripts/audit_legacy_wonder.py")]
+    # A relative SQLite URL resolves from the process cwd. The subprocess
+    # deliberately runs from /backend; point it to the exact test database
+    # regardless of the CI runner's working directory.
+    db_path = Path(db_session.get_bind().url.database)
+    if not db_path.is_absolute():
+        db_path = (Path.cwd() / db_path).resolve()
+    child_env = os.environ.copy()
+    child_env["DATABASE_URL"] = "sqlite:///" + str(db_path)
     missing = subprocess.run(command, cwd=backend, capture_output=True, text=True,
-                             env=os.environ.copy(), timeout=15, check=False)
+                             env=child_env, timeout=15, check=False)
     assert missing.returncode != 0
     assert "--world-id" in missing.stderr
     process = subprocess.run(
         command + ["--world-id", str(city.world_id)],
         cwd=backend, capture_output=True, text=True,
-        env=os.environ.copy(), timeout=15, check=False,
+        env=child_env, timeout=15, check=False,
     )
     assert process.returncode == 0, process.stderr
     report = json.loads(process.stdout)
