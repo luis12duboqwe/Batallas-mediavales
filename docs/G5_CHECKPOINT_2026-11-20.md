@@ -35,6 +35,17 @@ No se accedió a contraseñas, tokens, buzones ni datos de usuarios. No se modif
 
 Este PASS prueba **compatibilidad básica y reversibilidad sobre SQLite aislado**, **no** certifica migración, backup, restauración o rollback de **PostgreSQL real en staging**.
 
+### Ensayo de seguimiento 21-11-2026: migración reversible con PostgreSQL 15 aislado (PASS)
+
+- Código evaluado: `main@332da2f7adc5a895de627fc040efead791572f93` (el mismo código ya fusionado en el PR #158).
+- PostgreSQL **15-alpine** nuevo en contenedor efímero, volumen `tmpfs` y red Docker interna exclusiva, sin puertos publicados; backend de prueba con código montado en **solo lectura** y `APP_ENV=test`. Datos/credenciales **sintéticos**.
+- Se migró una base limpia hasta `0019_privacy_active_unique` y se insertó un mundo histórico sintético.
+- Se ejecutó **`0019 → 0020_wonder_funding`**; se comprobó que ese mundo conservó `wonder_rules_version='legacy-v1'` y que ambas tablas `wonder_funding` y `wonder_contributions` fueron creadas.
+- Se ejecutó **`0020 → 0019`**; se verificó la revisión Alembic, conservación del mundo histórico y desaparición de las dos tablas nuevas.
+- **Resultado:** `SUCCESS`, código de salida **0**, duración aproximada 16 s. Limpieza automática de contenedor, red y directorio temporal. No se accedió a PostgreSQL del preview ni se alteraron servicios instalados.
+
+**Limitación:** este ensayo demuestra reversibilidad de esquema y datos sintéticos en PostgreSQL real **aislado**. Aún falta el ensayo de backup/restore y recuperación sobre **staging** con datos y versión controlados, así como CI y certificación G5 completos.
+
 ## 2. Seguimiento canónico por puertas
 
 | Puerta | Estado verificable en este corte | Siguiente acción |
