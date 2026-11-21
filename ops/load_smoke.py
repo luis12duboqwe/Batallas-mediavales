@@ -93,8 +93,12 @@ def main() -> int:
         parser.error("duration and concurrency must be positive")
     if not math.isfinite(args.target_rps) or args.target_rps <= 0:
         parser.error("--target-rps must be finite and positive")
-    if not 0 <= args.max_error_rate <= 1:
-        parser.error("--max-error-rate must be between 0 and 1")
+    if not math.isfinite(args.max_error_rate) or not 0 <= args.max_error_rate <= 1:
+        parser.error("--max-error-rate must be finite and between 0 and 1")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout must be finite and positive")
+    if not math.isfinite(args.max_p95_ms) or args.max_p95_ms <= 0:
+        parser.error("--max-p95-ms must be finite and positive")
 
     try:
         build_probe_opener(args.base_url)  # fail closed on partial/unsafe config

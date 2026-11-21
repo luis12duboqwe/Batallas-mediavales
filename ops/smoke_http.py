@@ -52,6 +52,10 @@ def main() -> int:
         parser.error("--base-url must be an absolute http(s) URL")
     if args.requests < 1:
         parser.error("--requests must be positive")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout must be finite and positive")
+    if not math.isfinite(args.max_p95_ms) or args.max_p95_ms <= 0:
+        parser.error("--max-p95-ms must be finite and positive")
 
     try:
         opener = build_probe_opener(args.base_url)

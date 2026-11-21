@@ -8,6 +8,7 @@ can run on a clean deployment host before images or Python dependencies exist.
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import sys
 from pathlib import Path
@@ -106,8 +107,8 @@ def validate_positive_number(
     except ValueError:
         errors.append(f"{key} must be numeric")
         return None
-    if value <= 0:
-        errors.append(f"{key} must be positive")
+    if not math.isfinite(value) or value <= 0:
+        errors.append(f"{key} must be a finite positive number")
         return None
     return value
 
@@ -212,11 +213,12 @@ def validate(values: dict[str, str]) -> list[str]:
 
     load_duration = validate_positive_number(values, "LOAD_DURATION_SECONDS", "15", errors)
     load_concurrency = validate_positive_number(values, "LOAD_CONCURRENCY", "8", errors)
+    load_target_rps = validate_positive_number(values, "LOAD_TARGET_RPS", "6", errors)
     max_p95 = validate_positive_number(values, "MAX_P95_MS", "750", errors)
     max_error_raw = values.get("MAX_ERROR_RATE", "0.005").strip()
     try:
         max_error_rate = float(max_error_raw)
-        if not 0 <= max_error_rate <= 1:
+        if not math.isfinite(max_error_rate) or not 0 <= max_error_rate <= 1:
             raise ValueError
     except ValueError:
         errors.append("MAX_ERROR_RATE must be between 0 and 1")
@@ -229,6 +231,8 @@ def validate(values: dict[str, str]) -> list[str]:
         errors.append("LOAD_CONCURRENCY must be a positive integer")
     if max_p95 is not None and max_p95 > 10000:
         errors.append("MAX_P95_MS cannot exceed 10000")
+    if load_target_rps is not None and load_target_rps > 10:
+        errors.append("LOAD_TARGET_RPS must not exceed the protected proxy limit of 10 requests/s")
 
     return errors
 
