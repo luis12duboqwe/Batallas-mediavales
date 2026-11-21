@@ -19,7 +19,7 @@ for (const page of pages) page.on('pageerror', error => jsErrors.push(error.mess
 
 const partial = { wood: 5000, stone: 5000, iron: 5000, gold: 1250 };
 let ownerToken, donorToken, strangerToken, enemyToken, legacyToken;
-let worldId, legacyWorldId, targetId, donorCityId, poorCityId, enemyCityId, legacyOtherCity;
+let worldId, legacyWorldId, targetId, donorCityId, poorCityId, enemyCityId, legacyOtherCity, legacyHomeCity;
 
 const fundingPath = (world, city) =>
   '/building/wonder/funding?world_id=' + world + '&city_id=' + city;
@@ -89,11 +89,17 @@ async function fundInBrowser(page, target, values = partial) {
   await panel.getByText('Aportación registrada.', { exact: false }).waitFor({ timeout: 20000 });
 }
 
-async function selectCityFromMap(page, city) {
+async function selectCityFromMap(page, city, homeCity) {
   await page.goto(UI + '/map', { waitUntil: 'domcontentloaded' });
+  // Loading the player's city may recenter the map after initial page mount.
+  // Wait for its first authoritative tile before requesting a faraway target.
+  await page.getByTestId('map-tile-' + homeCity.x + '-' + homeCity.y)
+    .waitFor({ state: 'visible', timeout: 20000 });
   await page.getByRole('spinbutton', { name: 'Coordenada X' }).fill(String(city.x));
   await page.getByRole('spinbutton', { name: 'Coordenada Y' }).fill(String(city.y));
   await page.getByRole('button', { name: 'Ir', exact: true }).click();
+  await page.getByTestId('map-center').getByText('Centro: (' + city.x + ', ' + city.y + ')')
+    .waitFor({ state: 'visible', timeout: 15000 });
   const tile = page.getByTestId('map-tile-' + city.x + '-' + city.y);
   await tile.waitFor({ state: 'visible', timeout: 20000 });
   await tile.click();
@@ -130,6 +136,7 @@ try {
     poorCityId = donor.cities.find(city => city.name === 'Wonder Empty Test City')?.id;
     enemyCityId = enemy.cities[0].id;
     legacyOtherCity = legacyAlly.cities[0];
+    legacyHomeCity = legacy.cities[0];
     assert.ok(targetId && donorCityId && poorCityId && enemyCityId && legacyOtherCity?.id);
     assert.notEqual(targetId, donorCityId);
     const fund = await call(fundingPath(worldId, targetId), { token: donorToken });
@@ -209,7 +216,7 @@ try {
     assert.equal(await legacyPage.getByTestId('wonder-funding-panel').count(), 0);
     assert.deepEqual(forbiddenGets, []);
     await legacyPage.setViewportSize({ width: 390, height: 844 });
-    const details = await selectCityFromMap(legacyPage, legacyOtherCity);
+    const details = await selectCityFromMap(legacyPage, legacyOtherCity, legacyHomeCity);
     await details.getByText('Wonder Legacy E2E Alliance', { exact: false }).waitFor({ timeout: 15000 });
     assert.equal(await details.getByRole('button', { name: 'Aportar a Maravilla' }).count(), 0);
     assert.deepEqual(forbiddenGets, [], 'Legacy page must not fetch funding after map navigation');
@@ -231,7 +238,10 @@ try {
       if (!dropped) {
         dropped = true;
         const response = await route.fetch();
-        assert.equal(response.status(), 200, 'Backend must accept before simulated disconnect');
+        if (response.status() !== 200) {
+          const message = (await response.text()).slice(0, 500);
+          throw new Error('POST was rejected before simulated disconnect: HTTP ' + response.status() + ' ' + message);
+        }
         await route.abort('failed');
       } else {
         await route.continue();
@@ -271,7 +281,9 @@ try {
     const city = owner.cities.find(entry => entry.id === targetId);
     for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 }]) {
       await donorPage.setViewportSize(viewport);
-      const details = await selectCityFromMap(donorPage, city);
+      const donor = await playerSnapshot(donorToken);
+      const homeCity = donor.cities.find(entry => entry.id === donorCityId);
+      const details = await selectCityFromMap(donorPage, city, homeCity);
       const action = details.getByRole('button', { name: 'Aportar a Maravilla' });
       await action.waitFor({ state: 'visible', timeout: 15000 });
       assert.equal(await action.isEnabled(), true);
