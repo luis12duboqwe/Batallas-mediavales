@@ -28,6 +28,23 @@ const contribution = (sourceId, target, values, key) => ({
   target_city_id: target, source_city_id: sourceId, idempotency_key: key,
   wood: 0, stone: 0, iron: 0, gold: 0, ...values,
 });
+function isolatedBarbarianId(world) {
+  const sqlitePath = assertIsolated();
+  const script = [
+    'import sqlite3, sys',
+    'db=sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True)',
+    'rows=db.execute("SELECT id FROM cities WHERE world_id=? AND name=? AND owner_id IS NULL", (int(sys.argv[2]), "G9 Auditable Barbarian")).fetchall()',
+    'assert len(rows)==1, "Expected one isolated G9 barbarian"',
+    'print(rows[0][0])',
+  ].join('\\n');
+  const rawId = execFileSync('python3', ['-c', script, sqlitePath, String(world)], {
+    cwd: resolve('..'), encoding: 'utf8', timeout: 5000,
+  }).trim();
+  const id = Number(rawId);
+  assert.ok(Number.isSafeInteger(id) && id > 0, 'Bad neutral fixture city');
+  return id;
+}
+
 const nonzero = (values) => Object.values(values).some(value => Number(value) !== 0);
 const resourceKeys = ['wood', 'stone', 'iron', 'gold'];
 function assertNoLiquidRefundOrDoubleCharge(before, after, label) {
@@ -137,12 +154,12 @@ try {
       token: legacyToken, method: 'POST', expected: 400,
       body: contribution(legacyOtherCity.id, legacyOtherCity.id, { wood: 100 }, 'legacy-denied-e2e-01'),
     });
-    const map = await call('/map/tiles?world_id=' + worldId + '&x=0&y=0&radius=0', { token: ownerToken });
-    const barbarian = map.tiles.find(tile => tile.city_id && !tile.owner_id);
-    assert.ok(barbarian?.city_id, 'Isolated G9 barbarian is missing');
+    // Spawn coordinates are randomized; query the named neutral fixture
+    // read-only instead of assuming it always appears near map (0, 0).
+    const barbarianCityId = isolatedBarbarianId(worldId);
     await call(contributionPath(worldId), {
       token: donorToken, method: 'POST', expected: 400,
-      body: contribution(donorCityId, barbarian.city_id, { wood: 100 }, 'barbarian-denied-01'),
+      body: contribution(donorCityId, barbarianCityId, { wood: 100 }, 'barbarian-denied-01'),
     });
     await call(contributionPath(worldId), {
       token: donorToken, method: 'POST', expected: 400,
