@@ -94,6 +94,17 @@ for i in $(seq 1 40); do
 done
 curl --fail --silent http://127.0.0.1:4288/login >/dev/null
 
+# Wonder has its own disposable SQLite and no dependency on other journeys.
+# Fail early on full-browser escrow/authorization regressions instead of
+# spending minutes running unrelated suites first.
+create_db wonder
+python scripts/prepare_g2_e2e.py
+python scripts/prepare_g9_combat_e2e.py
+python scripts/prepare_wonder_funding_e2e.py
+start_api
+run_suite wonder wonder-funding
+stop_api
+
 create_db core
 python scripts/prepare_g2_e2e.py
 python scripts/prepare_g7_research_e2e.py
@@ -123,14 +134,5 @@ stop_api
 create_db singleplayer
 start_api
 run_suite singleplayer single-player
-stop_api
-# One more independent disposable database exercises the actual funded UI,
-# rather than relying on HTTP-only unit tests or mocks.
-create_db wonder
-python scripts/prepare_g2_e2e.py
-python scripts/prepare_g9_combat_e2e.py
-python scripts/prepare_wonder_funding_e2e.py
-start_api
-run_suite wonder wonder-funding
 stop_api
 echo "PARALLEL_JOURNEY_ALL_10_SUITES_PASS"
