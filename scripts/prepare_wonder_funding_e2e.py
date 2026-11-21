@@ -60,7 +60,7 @@ def main():
                 raise RuntimeError("Refusing to reuse Wonder E2E account")
             account = models.User(
                 username=username,
-                email=f"{username}@example.invalid",
+                email=f"{username}@example.com",
                 hashed_password=get_password_hash(password),
                 is_verified=True,
             )
