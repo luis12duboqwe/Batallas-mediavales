@@ -53,6 +53,7 @@ jobs:
           --base-url "$STAGING_BASE_URL"
           --duration-seconds "${{ steps.duration.outputs.seconds }}"
           --concurrency 8
+          --target-rps 6
           --max-p95-ms 750
           --max-error-rate 0.005
 
