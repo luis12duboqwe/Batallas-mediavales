@@ -28,9 +28,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # Never use Settings' implicit development SQLite URL or create a new
     # SQLite file while pretending to audit a real, existing world.
-    raw_url = os.environ.get("DATABASE_URL", "").strip()
+    raw_url = os.environ.get("DATABASE_URL", "")
     if not raw_url:
         print("Wonder audit refused: explicit DATABASE_URL is required", file=sys.stderr)
+        return 2
+    if raw_url != raw_url.strip():
+        print("Wonder audit refused: DATABASE_URL has surrounding whitespace", file=sys.stderr)
         return 2
 
     # Initialization failures (including Pydantic ValidationError, which
@@ -49,8 +52,17 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 return 2
-        from app.database import SessionLocal
+        from app.database import SessionLocal, engine
         from app.services.wonder_transition_audit import audit_legacy_wonder_transition
+
+        # Settings is case-insensitive and may also read a local .env. Never
+        # open any DB until the actual engine URL equals the vetted URL.
+        if engine.url != url:
+            print(
+                "Wonder audit refused: database configuration differs from validated URL",
+                file=sys.stderr,
+            )
+            return 2
 
         db = SessionLocal()
         try:
