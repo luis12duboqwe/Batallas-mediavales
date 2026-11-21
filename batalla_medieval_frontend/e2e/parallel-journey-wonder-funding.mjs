@@ -36,7 +36,7 @@ function isolatedBarbarianId(world) {
     'rows=db.execute("SELECT id FROM cities WHERE world_id=? AND name=? AND owner_id IS NULL", (int(sys.argv[2]), "G9 Auditable Barbarian")).fetchall()',
     'assert len(rows)==1, "Expected one isolated G9 barbarian"',
     'print(rows[0][0])',
-  ].join('\\n');
+  ].join('\n');
   const rawId = execFileSync('python3', ['-c', script, sqlitePath, String(world)], {
     cwd: resolve('..'), encoding: 'utf8', timeout: 5000,
   }).trim();
