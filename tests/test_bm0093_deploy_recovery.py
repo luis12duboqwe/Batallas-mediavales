@@ -86,6 +86,10 @@ fi
     docker.write_text(
         "#!/usr/bin/env bash\n"
         "printf 'docker:%s\\n' \"$*\" >> \"$BM_TRACE\"\n"
+        "if [[ \"$*\" == *'ps -a -q'* ]]; then\n"
+        "  if [[ \"${BM_COMPOSE_PS_EXIT:-0}\" != 0 ]]; then exit \"$BM_COMPOSE_PS_EXIT\"; fi\n"
+        "  printf '%s' \"${BM_COMPOSE_PS_OUTPUT:-}\"; exit 0\n"
+        "fi\n"
         "if [[ \"$*\" == *'up -d database'* ]]; then exit \"$BM_DATABASE_START_EXIT\"; fi\n"
         "if [[ \"$*\" == *'SELECT to_regclass'* ]]; then\n"
         "  if [[ \"$BM_SCHEMA_PROBE_EXIT\" != 0 ]]; then exit \"$BM_SCHEMA_PROBE_EXIT\"; fi\n"
@@ -309,6 +313,75 @@ def test_existing_release_with_missing_schema_is_refused(deploy_lab):
     assert not any("up -d --remove-orphans" in line for line in _trace(deploy_lab))
     assert not any(line.startswith("restore:") for line in _trace(deploy_lab))
     assert _marker(deploy_lab).is_file()
+
+
+@pytest.mark.parametrize("existing", ["running", "stopped"])
+def test_unmanaged_compose_containers_refused_before_services_change(deploy_lab, existing):
+    # A historical preview has no release pointers but has Compose containers.
+    root = deploy_lab["root"]
+    (root / ".release.env").unlink()
+    (root / ".release-sha").unlink()
+    result = _run(deploy_lab, {"BM_COMPOSE_PS_OUTPUT": "existing-preview-container-id"})
+    assert result.returncode == 2, result.stderr
+    assert "unmanaged Docker Compose containers exist" in result.stderr
+    assert not (root / ".release.env").exists()
+    assert not (root / ".release.env.next").exists()
+    assert not _marker(deploy_lab).exists()
+    trace = _trace(deploy_lab)
+    assert len(trace) == 1
+    assert "ps -a -q" in trace[0]
+    assert "up -d" not in trace[0]
+
+
+def test_unmanaged_compose_probe_failure_is_fail_closed(deploy_lab):
+    root = deploy_lab["root"]
+    (root / ".release.env").unlink()
+    (root / ".release-sha").unlink()
+    result = _run(deploy_lab, {"BM_COMPOSE_PS_EXIT": "47"})
+    assert result.returncode == 2, result.stderr
+    assert "unable to inspect existing Docker Compose project" in result.stderr
+    assert not (root / ".release.env").exists()
+    assert not (root / ".release.env.next").exists()
+    assert not _marker(deploy_lab).exists()
+    assert len(_trace(deploy_lab)) == 1
+
+
+@pytest.mark.parametrize("orphan_type", ["release_pointer", "previous_env", "manifest"])
+def test_orphaned_metadata_without_active_env_is_refused(deploy_lab, orphan_type):
+    root = deploy_lab["root"]
+    (root / ".release.env").unlink()
+    if orphan_type != "release_pointer":
+        (root / ".release-sha").unlink()
+    if orphan_type == "previous_env":
+        (root / ".release.env.previous").write_text(deploy_lab["active"], encoding="utf-8")
+    if orphan_type == "manifest":
+        (root / ".ops-state" / "deployments" / ("a" * 40 + ".json")).write_text(
+            "{}", encoding="utf-8",
+        )
+    result = _run(deploy_lab)
+    assert result.returncode == 2, result.stderr
+    assert "metadata" in result.stderr or "manifests exist" in result.stderr
+    assert _trace(deploy_lab) == []
+    assert not (root / ".release.env.next").exists()
+    assert not _marker(deploy_lab).exists()
+
+
+def test_populated_database_without_previous_release_never_runs_migrations(deploy_lab):
+    root = deploy_lab["root"]
+    (root / ".release.env").unlink()
+    (root / ".release-sha").unlink()
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0",
+        "BM_SCHEMA_PROBE_VALUE": "t",
+    })
+    assert result.returncode != 0
+    assert "Existing users schema without managed release metadata" in result.stderr
+    trace = _trace(deploy_lab)
+    assert any("SELECT to_regclass" in line for line in trace)
+    assert "backup" not in trace
+    assert not any("pull migrate seed" in line for line in trace)
+    assert not any("up -d --remove-orphans" in line for line in trace)
+    assert _marker(deploy_lab).exists()  # Unmanaged DB demands manual recovery review.
 
 
 def test_confirmed_empty_database_can_take_first_install_path(deploy_lab):
