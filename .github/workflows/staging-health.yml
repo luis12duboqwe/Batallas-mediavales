@@ -12,6 +12,19 @@ env:
   STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
 
 jobs:
+  readiness:
+    name: Staging monitor readiness
+    if: ${{ vars.STAGING_BASE_URL == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report scheduled monitor readiness
+        run: |
+          {
+            echo "## Staging monitor readiness: NOT READY"
+            echo "- Health probes are skipped because the repository variable \`STAGING_BASE_URL\` is not configured."
+            echo "- A readiness success does not provide staging health evidence."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   smoke:
     name: Staging smoke and latency budget
     if: ${{ vars.STAGING_BASE_URL != '' }}
