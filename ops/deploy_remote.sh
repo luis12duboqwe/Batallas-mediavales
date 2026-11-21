@@ -205,7 +205,8 @@ rollback() {
        chmod 600 "$recovery_env"; then
       if [[ -n "$rollback_backup" && -f "$rollback_backup" ]]; then
         echo "Restoring pre-deploy database snapshot and previous application release" >&2
-        if bash ops/restore_postgres.sh "$recovery_env" "$rollback_backup" "RESTORE:${POSTGRES_DB}"; then
+        if DEPLOY_LOCK_FD="$DEPLOY_LOCK_FD" \
+          bash ops/restore_postgres.sh "$recovery_env" "$rollback_backup" "RESTORE:${POSTGRES_DB}"; then
           recovered=1
         fi
       elif [[ -z "$rollback_backup" ]]; then

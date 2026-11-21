@@ -19,6 +19,27 @@ if [[ "$RESTORE_START_SERVICES" != "0" && "$RESTORE_START_SERVICES" != "1" ]]; t
   exit 2
 fi
 
+STATE_DIR=".ops-state"
+mkdir -p "$STATE_DIR"
+chmod 700 "$STATE_DIR"
+DEPLOY_LOCK_FILE="$STATE_DIR/deploy.lock"
+
+# Standalone restores must serialize with deploys and rollbacks. Those callers
+# pass their already-held descriptor so this nested operation shares the lock.
+if [[ "${DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] &&
+   [[ -e "/proc/$$/fd/$DEPLOY_LOCK_FD" ]] &&
+   [[ "/proc/$$/fd/$DEPLOY_LOCK_FD" -ef "$DEPLOY_LOCK_FILE" ]] &&
+   flock -n "$DEPLOY_LOCK_FD"; then
+  :
+else
+  umask 077
+  exec {RESTORE_LOCK_FD}>> "$DEPLOY_LOCK_FILE"
+  if ! flock -n "$RESTORE_LOCK_FD"; then
+    echo "Restore refused: another deploy, rollback or restore is already running" >&2
+    exit 2
+  fi
+fi
+
 python3 ops/preflight.py "$ENV_FILE"
 
 eval "$(python3 - "$ENV_FILE" <<'PY'

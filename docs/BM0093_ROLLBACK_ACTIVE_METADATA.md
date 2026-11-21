@@ -10,15 +10,17 @@ No ejecuta un rollback real, no cambia servicios externos y no publica producci�
 - Prepara la configuración y el SHA de la versión anterior en archivos temporales privados.
 - Ejecuta la restauración (o retorno de imágenes) con la configuración candidata.
 - Solo después de pasar el smoke HTTP publica `.release.env` y `.release-sha`.
-- Si el restore o el smoke falla, conserva los punteros originales y elimina los temporales.
-- Un fallo de restore **puede haber modificado servicios o datos** antes de fallar. Conservar metadatos no implica recuperación automática; requiere diagnóstico y restauración controlada.
+- Antes de restaurar o cambiar servicios, publica `.ops-state/recovery-required` para impedir nuevos despliegues mientras el estado es incierto.
+- Si el restore, el smoke o la publicación de metadatos falla, conserva el marcador y los punteros originales que no se hayan publicado.
+- Solo elimina el marcador tras completar restore, smoke y publicación de ambos punteros. Un fallo de restore **puede haber modificado servicios o datos** antes de fallar; requiere diagnóstico y recuperación controlada.
 
 ## Pruebas automáticas
 
 `tests/test_bm0093_rollback_atomic.py` reproduce en un directorio temporal:
 SHA obsoleto, snapshot ausente, fallo de restore, fallo de smoke,
-fallo de Docker y rollback satisfactorio. Reemplaza Docker y los scripts
-de recuperación y smoke por dobles locales, sin conexiones a producción.
+fallo de Docker, bloqueo de despliegue tras fallo y rollback satisfactorio.
+Reemplaza Docker y los scripts de recuperación y smoke por dobles locales,
+sin conexiones a producción.
 
 ## Pendiente para cerrar BM-0093
 
