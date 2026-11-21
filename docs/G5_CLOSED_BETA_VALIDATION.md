@@ -1,5 +1,7 @@
 # G5 — Evidencia de preparación para beta cerrada
 
+> **Actualización 2026-11-20:** consultar el [checkpoint G5 con evidencia del VPS y matriz G0–G10](G5_CHECKPOINT_2026-11-20.md). El estado **NO-GO** sigue vigente. El recuento histórico de incidencias de agosto ya no está actualizado: [P1 #149](https://github.com/luis12duboqwe/Batallas-mediavales/issues/149) está abierto. Esta actualización no aprueba staging, despliegue ni beta.
+
 Estado: **AUTOMATIZACIÓN PREPARADA / NO-GO PARA USUARIOS EXTERNOS**
 
 Fecha de evidencia automatizada más reciente: 2026-08-23 (America/Tegucigalpa).
