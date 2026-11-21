@@ -31,7 +31,9 @@ class StagingMonitorWorkflowContractTests(unittest.TestCase):
                 text = (WORKFLOWS / filename).read_text()
                 self.assertIn("NOT READY", text)
                 self.assertIn("does not provide", text)
-                self.assertNotIn("python3 ops/", text.split("Report scheduled", 1)[-1].split("  smoke:", 1)[0])
+                probe_job = "  smoke:" if filename == "staging-health.yml" else "  soak:"
+                readiness_block = text.split(probe_job, 1)[0]
+                self.assertNotIn("python3 ops/", readiness_block)
 
     def test_optional_basic_auth_contract_is_consistent_between_monitors(self):
         for filename in ("staging-health.yml", "staging-soak.yml"):

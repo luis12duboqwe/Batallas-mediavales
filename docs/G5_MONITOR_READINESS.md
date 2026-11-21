@@ -21,6 +21,7 @@ Este documento registra únicamente el contrato operativo de los workflows progr
    - variable `STAGING_BASIC_AUTH_USERNAME`;
    - secreto `STAGING_BASIC_AUTH_PASSWORD`;
    - mantener ambos ausentes en pares en un staging sin Basic auth.
+   - **No usar secretos** de usuario, contraseña o tokens como texto del workflow o de la documentación.
 5. Si se desea notificar fuera de Actions, configurar `ALERT_WEBHOOK_URL`; la ausencia del webhook no elimina el fallo visible en Actions.
 6. Ejecutar primero un dispatch manual y revisar el link del run, el summary de readiness y el resultado del probe.
 7. Solo una ejecución manual y su schedule posterior con todos los pasos verdes cuentan como evidence de monitoring real.

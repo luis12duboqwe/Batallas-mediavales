@@ -14,11 +14,11 @@ class StagingMonitorReadinessDocumentTests(unittest.TestCase):
     def test_readiness_document_distinguishes_skipped_from_health_success(self):
         text = DOC.read_text()
         self.assertIn("STAGING_BASE_URL", text)
-        self.assertIn("repo var", text)
+        self.assertIn("variable de repositorio", text)
         self.assertIn("NOT READY", text)
         self.assertIn("no es éxito de health", text)
-        self.assertNotIn("G5 aprobado", text)
-        self.assertNotIn("beta habilitada", text)
+        self.assertNotIn("**APROBADO**", text)
+        self.assertNotIn("beta habilitada con este monitor", text)
 
     def test_readiness_document_has_safe_operator_checklist(self):
         text = DOC.read_text()
