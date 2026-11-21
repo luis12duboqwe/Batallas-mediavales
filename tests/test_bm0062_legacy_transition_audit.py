@@ -315,6 +315,28 @@ def test_cli_refuses_pre_0020_schema_without_traceback(tmp_path):
     assert "Traceback" not in result.stderr
 
 
+def test_cli_invalid_protected_config_never_echoes_database_password(tmp_path):
+    repo = Path(__file__).resolve().parents[1]
+    secret = "DO-NOT-LEAK-AUDIT-PASSWORD-987654321"
+    env = os.environ.copy()
+    env.update({
+        "APP_ENV": "production",
+        "SECRET_KEY": "weak",
+        "DATABASE_URL": f"postgresql+psycopg://operator:{secret}@localhost:65432/unused",
+    })
+    result = subprocess.run(
+        [sys.executable, str(repo / "scripts/audit_legacy_wonder.py"), "--world-id", "1"],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+        timeout=15, check=False,
+    )
+    assert result.returncode == 3
+    assert result.stdout == ""
+    assert "invalid configuration" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert secret not in result.stderr
+    assert "postgresql+psycopg://" not in result.stderr
+
+
 def test_cli_prints_only_read_only_json_and_requires_world_id(db_session, city):
     _paused(city, db_session)
     repo = Path(__file__).resolve().parents[1]
