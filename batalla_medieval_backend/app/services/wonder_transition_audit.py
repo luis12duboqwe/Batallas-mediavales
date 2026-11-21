@@ -25,7 +25,22 @@ def audit_legacy_wonder_transition(db: Session, world_id: int) -> dict:
         raise ValueError("world_id must be a positive integer")
 
     with db.no_autoflush:
-        world = db.get(models.World, world_id)
+        # Select persisted columns, NOT an ORM World entity. db.get(World)
+        # may return a locally dirty identity-map object without SELECT and
+        # give contradictory evidence alongside DB-backed aggregate counts.
+        # A column Row does not overwrite the caller's pending World changes.
+        world = (
+            db.query(
+                models.World.wonder_rules_version,
+                models.World.lifecycle_status,
+                models.World.is_active,
+                models.World.ended_at,
+                models.World.winner_id,
+                models.World.winner_alliance_id,
+            )
+            .filter(models.World.id == world_id)
+            .one_or_none()
+        )
         if world is None:
             raise ValueError("World not found")
 
