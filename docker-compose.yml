@@ -109,7 +109,7 @@ services:
     image: ${FRONTEND_IMAGE:-batalla-medieval-frontend:local}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null && wget -qO- http://127.0.0.1/ >/dev/null"]
       interval: 30s
       timeout: 5s
       start_period: 10s
