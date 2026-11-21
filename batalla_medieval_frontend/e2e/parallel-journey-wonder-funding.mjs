@@ -140,6 +140,15 @@ try {
     legacyHomeCity = legacy.cities[0];
     assert.ok(targetId && donorCityId && poorCityId && enemyCityId && legacyOtherCity?.id);
     assert.notEqual(targetId, donorCityId);
+    // getCity() uses the first item of GET /city/ as the UI's contribution
+    // source. Explicitly guard the ordering contract with an empty second
+    // city so query-plan changes cannot make this E2E randomly underfunded.
+    assert.equal(donor.cities[0].id, donorCityId,
+      'GET /city/ must return the established donor city before the empty extra city');
+    for (const [resource, required] of Object.entries(partial)) {
+      assert.ok(donor.cities[0][resource] >= required,
+        'Default donor city lacks ' + resource + ' for positive browser funding');
+    }
     const fund = await call(fundingPath(worldId, targetId), { token: donorToken });
     assert.equal(fund.rules_version, 'alliance-v2');
     assert.deepEqual(fund.cost, { wood: 10000, stone: 10000, iron: 10000, gold: 2500 });
@@ -238,6 +247,9 @@ try {
     const dropAcceptedResponse = async route => {
       if (!dropped) {
         dropped = true;
+        const requestBody = route.request().postDataJSON();
+        assert.equal(requestBody.source_city_id, donorCityId,
+          'React default donor must be the funded city, never the empty fixture');
         const response = await route.fetch();
         if (response.status() !== 200) {
           const message = (await response.text()).slice(0, 500);
