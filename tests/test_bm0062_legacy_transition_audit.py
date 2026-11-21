@@ -297,7 +297,7 @@ def test_cli_refuses_implicit_or_nonexistent_sqlite_database(tmp_path):
     assert "Traceback" not in refused.stderr
 
 
-@pytest.mark.parametrize("surrounding", [" ", "\\n", "\\t"])
+@pytest.mark.parametrize("surrounding", [" ", "\n", "\t"])
 def test_cli_refuses_url_whitespace_without_creating_other_sqlite_file(tmp_path, surrounding):
     repo = Path(__file__).resolve().parents[1]
     existing = tmp_path / "known-audit.sqlite"
