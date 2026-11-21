@@ -47,7 +47,12 @@ export default function WonderFundingPanel({ currentCity, refreshCity }) {
             ? 'alliance-v2' : 'legacy-v1');
         })
         .catch(() => {
-          if (active) setError('No se pudieron verificar el mundo y la alianza.');
+          if (active) {
+            // Deny restricted calls on any failed eligibility check. Expose
+            // completion to browser tests without displaying a funding panel.
+            setRules('unavailable');
+            setError('No se pudieron verificar el mundo y la alianza.');
+          }
         });
     }
     return () => { active = false; };
@@ -71,7 +76,12 @@ export default function WonderFundingPanel({ currentCity, refreshCity }) {
     return () => { active = false; };
   }, [rules, targetId, currentCity?.world_id]);
 
-  if (!currentCity || rules !== 'alliance-v2') return null;
+  if (!currentCity || rules === null) return null;
+  if (rules !== 'alliance-v2') {
+    // Deterministic signal after world/alliance permissions finish resolving.
+    // A denied/legacy player must not render the panel or request its ledger.
+    return <span hidden aria-hidden="true" data-testid="wonder-funding-unavailable" />;
+  }
 
   const send = async (event) => {
     event.preventDefault();
