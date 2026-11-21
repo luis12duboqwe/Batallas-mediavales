@@ -122,11 +122,43 @@ def test_alliance_sponsor_and_consent_require_manual_policy(db_session, user, ci
     assert "PLAYER_CONSENT_NOT_VERIFIED" in report["blockers"]
     alliance = models.Alliance(name="Present alliance", world_id=city.world_id, leader_id=user.id)
     db_session.add(alliance)
+    db_session.flush()
+    db_session.add(models.AllianceMember(
+        alliance_id=alliance.id, user_id=user.id, rank=3,
+    ))
     db_session.commit()
     amended = audit_legacy_wonder_transition(db_session, city.world_id)
     assert "ALLIANCE_SPONSOR_POLICY_REQUIRED" not in amended["blockers"]
     assert "PLAYER_CONSENT_NOT_VERIFIED" in amended["blockers"]
     assert amended["counts"]["alliances"] == 1
+
+
+def test_legacy_user_link_without_membership_requires_consent(db_session, user, city):
+    _paused(city, db_session)
+    user.world_id = city.world_id
+    db_session.commit()
+    report = audit_legacy_wonder_transition(db_session, city.world_id)
+    assert report["counts"]["players"] == 0
+    assert report["counts"]["legacy_user_links"] == 1
+    assert report["counts"]["legacy_user_links_without_membership"] == 1
+    assert report["counts"]["owned_cities_without_membership"] == 1
+    assert "LEGACY_USER_LINK_WITHOUT_MEMBERSHIP" in report["blockers"]
+    assert "OWNED_CITIES_WITHOUT_MEMBERSHIP" in report["blockers"]
+    assert "PLAYER_CONSENT_NOT_VERIFIED" in report["blockers"]
+    assert "ALLIANCE_SPONSOR_POLICY_REQUIRED" in report["blockers"]
+
+
+def test_city_membership_in_another_world_does_not_satisfy_legacy_audit(db_session, user, city):
+    _paused(city, db_session)
+    other_world = models.World(name="Different membership", is_active=False, lifecycle_status="paused")
+    db_session.add(other_world)
+    db_session.flush()
+    db_session.add(models.PlayerWorld(user_id=user.id, world_id=other_world.id))
+    db_session.commit()
+    report = audit_legacy_wonder_transition(db_session, city.world_id)
+    assert report["counts"]["players"] == 0
+    assert report["counts"]["owned_cities_without_membership"] == 1
+    assert "OWNED_CITIES_WITHOUT_MEMBERSHIP" in report["blockers"]
 
 
 def test_paused_alliance_v2_is_not_accidentally_reclassified_as_legacy(db_session, city):
