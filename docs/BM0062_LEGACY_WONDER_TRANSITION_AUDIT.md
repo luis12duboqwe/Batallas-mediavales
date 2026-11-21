@@ -18,7 +18,7 @@ python scripts/audit_legacy_wonder.py --world-id 123
 
 Se usa la configuración normal `DATABASE_URL` del backend; **no poner contraseñas en argumentos, URLs ni repositorio**. La herramienta exige un ID de mundo positivo, abre una sesión SQLAlchemy, solo hace consultas agregadas sin autoflush ni commit y la cierra. No cuenta con opción `--apply`, no llama a la API administrativa y no ejecuta migraciones. La salida JSON no incluye nombres de usuario, email, coordenadas ni otros datos de identificación.
 
-El reporte incluye: versión de reglas, estado del mundo, jugadores registrados, ciudades y propietarios, alianzas y miembros, nivel máximo de Maravilla existente, colas pendientes, proyectos y aportaciones, costes legacy del nivel 10, techo de almacén, y códigos deterministas de bloqueo. Incluso si la lista de obstáculos está vacía, **`can_auto_convert=false` y `requires_product_approval=true`**.
+El reporte incluye: versión de reglas, estado del mundo, membresías de jugadores, enlaces históricos `users.world_id` (incluidas las filas sin membresía normalizada), ciudades con dueño sin membresía de ese mismo mundo, alianzas y miembros, nivel máximo de Maravilla existente, colas pendientes, proyectos y aportaciones, costes legacy del nivel 10, techo de almacén, y códigos deterministas de bloqueo. Incluso si la lista de obstáculos está vacía, **`can_auto_convert=false` y `requires_product_approval=true`**.
 
 La lectura es un **snapshot informativo**, no una barrera transaccional frente a escritores concurrentes. Para decidir cualquier operación, debe repetirse tras pausar el mundo y comprobarse otra vez bajo controles de concurrencia y copia recuperable.
 
