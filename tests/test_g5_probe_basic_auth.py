@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -85,6 +86,35 @@ class ProbeBasicAuthTests(unittest.TestCase):
         ):
             with self.subTest(wrong=wrong):
                 self.assertEqual(handler.passwd.find_user_password(None, wrong), (None, None))
+
+    def test_redirect_never_forwards_credentials_to_another_origin(self):
+        opener = build_probe_opener(
+            "https://preview.example:8443/",
+            {
+                "STAGING_BASIC_AUTH_USERNAME": "visitor",
+                "STAGING_BASIC_AUTH_PASSWORD": "private-value",
+            },
+        )
+        redirect = next(
+            handler for handler in opener.handlers
+            if isinstance(handler, urllib.request.HTTPRedirectHandler)
+        )
+        source = urllib.request.Request(
+            "https://preview.example:8443/", headers={"Authorization": "Basic redacted"}
+        )
+        safe = redirect.redirect_request(
+            source, None, 302, "Found", {}, "https://preview.example:8443/login"
+        )
+        self.assertEqual(safe.full_url, "https://preview.example:8443/login")
+        for target in (
+            "http://preview.example:8443/login",
+            "https://preview.example:443/login",
+            "https://other.example:8443/login",
+            "https://visitor:secret@preview.example:8443/login",
+        ):
+            with self.subTest(target=target):
+                with self.assertRaises(urllib.error.HTTPError):
+                    redirect.redirect_request(source, None, 302, "Found", {}, target)
 
     def test_invalid_credentials_fail_without_echoing_secret(self):
         for user, password in (("vis:itor", "abc"), ("visitor", "pw\r\nHeader:evil")):
