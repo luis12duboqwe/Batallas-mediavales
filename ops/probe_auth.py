@@ -14,6 +14,30 @@ import urllib.request
 from typing import Mapping
 
 
+class _HTTPSOriginPasswordManager(urllib.request.HTTPPasswordMgrWithDefaultRealm):
+    """Reject HTTP downgrade and cross-origin challenges, including port changes."""
+
+    def __init__(self, origin: str) -> None:
+        super().__init__()
+        parsed = urllib.parse.urlsplit(origin)
+        self._hostname = parsed.hostname
+        self._port = parsed.port or 443
+
+    def find_user_password(self, realm: str | None, authuri: str) -> tuple[str | None, str | None]:
+        try:
+            requested = urllib.parse.urlsplit(authuri)
+            allowed = (
+                requested.scheme.lower() == "https"
+                and requested.hostname == self._hostname
+                and (requested.port or 443) == self._port
+            )
+        except ValueError:
+            allowed = False
+        if not allowed:
+            return None, None
+        return super().find_user_password(realm, authuri)
+
+
 def build_probe_opener(
     base_url: str, environ: Mapping[str, str] | None = None
 ) -> urllib.request.OpenerDirector:
@@ -36,6 +60,7 @@ def build_probe_opener(
 
     # The password manager is scoped to this HTTPS origin, never to other hosts
     # reached via a redirect. Do not add Authorization as a global HTTP header.
-    manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-    manager.add_password(None, f"https://{parsed.netloc}/", username, password)
+    origin = f"https://{parsed.netloc}/"
+    manager = _HTTPSOriginPasswordManager(origin)
+    manager.add_password(None, origin, username, password)
     return urllib.request.build_opener(urllib.request.HTTPBasicAuthHandler(manager))
