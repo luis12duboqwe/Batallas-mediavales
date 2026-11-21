@@ -15,7 +15,7 @@ Este documento registra únicamente el contrato operativo de los workflows progr
 ## Checklist seguro del operador
 
 1. Confirmar que existe staging real con HTTPS y release identificable.
-2. Crear `STAGING_BASE_URL` como **Variable de repositorio**; no insertar una URL real en GitHub, archivos, logs o documentación.
+2. Guardar la URL únicamente en la **variable del repositorio** `STAGING_BASE_URL`; no hardcodearla en código, workflows ni logs.
 3. Confirmar el `environment: staging` y sus aprobaciones de acceso sin cambiar políticas desde este repositorio.
 4. Si staging usa Basic auth, configurar por separado:
    - variable `STAGING_BASIC_AUTH_USERNAME`;

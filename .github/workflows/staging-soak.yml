@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   readiness:
-    name: Staging soak readiness
+    name: NOT READY — no staging soak probe executed
     if: ${{ vars.STAGING_BASE_URL == '' }}
     runs-on: ubuntu-latest
     steps:

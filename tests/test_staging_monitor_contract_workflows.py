@@ -5,9 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
+
+def _workflow(filename: str) -> dict:
+    return yaml.safe_load((WORKFLOWS / filename).read_text())
 
 
 class StagingMonitorWorkflowContractTests(unittest.TestCase):
@@ -26,14 +31,33 @@ class StagingMonitorWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("STAGING_BASE_URL: ${{ secrets.", text)
 
     def test_readiness_jobs_are_honest_and_do_not_probe(self):
-        for filename in ("staging-health.yml", "staging-soak.yml"):
+        for filename, probe_id, probe_name in (
+            ("staging-health.yml", "smoke", "no staging health probe executed"),
+            ("staging-soak.yml", "soak", "no staging soak probe executed"),
+        ):
             with self.subTest(filename=filename):
-                text = (WORKFLOWS / filename).read_text()
-                self.assertIn("NOT READY", text)
-                self.assertIn("does not provide", text)
-                probe_job = "  smoke:" if filename == "staging-health.yml" else "  soak:"
-                readiness_block = text.split(probe_job, 1)[0]
-                self.assertNotIn("python3 ops/", readiness_block)
+                jobs = _workflow(filename)["jobs"]
+                readiness = jobs["readiness"]
+                probe = jobs[probe_id]
+
+                self.assertEqual(readiness["if"], "${{ vars.STAGING_BASE_URL == '' }}")
+                self.assertEqual(probe["if"], "${{ vars.STAGING_BASE_URL != '' }}")
+                self.assertIn("NOT READY", readiness["name"])
+                self.assertIn(probe_name, readiness["name"])
+
+                readiness_text = "\n".join(
+                    str(step.get("run", "")) for step in readiness["steps"]
+                )
+                self.assertIn("NOT READY", readiness_text)
+                self.assertIn("does not provide", readiness_text)
+                for step in readiness["steps"]:
+                    run_text = str(step.get("run", ""))
+                    self.assertNotIn("python3 ops/", run_text)
+
+                probe_text = "\n".join(
+                    str(step.get("run", "")) for step in probe["steps"]
+                )
+                self.assertIn("python3 ops/", probe_text)
 
     def test_optional_basic_auth_contract_is_consistent_between_monitors(self):
         for filename in ("staging-health.yml", "staging-soak.yml"):

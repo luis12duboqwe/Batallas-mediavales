@@ -23,7 +23,7 @@ class StagingMonitorReadinessDocumentTests(unittest.TestCase):
     def test_readiness_document_has_safe_operator_checklist(self):
         text = DOC.read_text()
         for required in (
-            "Variable de repositorio",
+            "variable del repositorio",
             "environment",
             "Basic",
             "ALERT_WEBHOOK_URL",
