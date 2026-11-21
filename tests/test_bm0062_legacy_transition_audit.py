@@ -297,6 +297,28 @@ def test_cli_refuses_implicit_or_nonexistent_sqlite_database(tmp_path):
     assert "Traceback" not in refused.stderr
 
 
+@pytest.mark.parametrize("surrounding", [" ", "\\n", "\\t"])
+def test_cli_refuses_url_whitespace_without_creating_other_sqlite_file(tmp_path, surrounding):
+    repo = Path(__file__).resolve().parents[1]
+    existing = tmp_path / "known-audit.sqlite"
+    with sqlite3.connect(existing) as connection:
+        connection.execute("CREATE TABLE worlds (id INTEGER PRIMARY KEY)")
+    unintended = Path(str(existing) + surrounding)
+    env = os.environ.copy()
+    env["DATABASE_URL"] = "sqlite:///" + str(existing) + surrounding
+    result = subprocess.run(
+        [sys.executable, str(repo / "scripts/audit_legacy_wonder.py"), "--world-id", "1"],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+        timeout=15, check=False,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "surrounding whitespace" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not unintended.exists()
+    assert existing.exists()
+
+
 def test_cli_refuses_pre_0020_schema_without_traceback(tmp_path):
     repo = Path(__file__).resolve().parents[1]
     legacy_db = tmp_path / "pre-0020.sqlite"
