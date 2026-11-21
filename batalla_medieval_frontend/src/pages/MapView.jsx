@@ -26,6 +26,8 @@ const MapView = () => {
   const [tiles, setTiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [myAllianceName, setMyAllianceName] = useState(null);
+  const [wonderFinancingEnabled, setWonderFinancingEnabled] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   const [selectedTile, setSelectedTile] = useState(null);
   const [focusedTileKey, setFocusedTileKey] = useState(null);
@@ -34,6 +36,28 @@ const MapView = () => {
   const mapGridRef = useRef(null);
   const worldId = user?.world_id;
   const loadedWorldRef = useRef(worldId);
+
+  useEffect(() => {
+    let active = true;
+    setMyAllianceName(null);
+    setWonderFinancingEnabled(false);
+    if (worldId) {
+      Promise.all([api.getAlliance(worldId), api.getWorlds()])
+        .then(([allianceResponse, worldsResponse]) => {
+          if (!active) return;
+          setMyAllianceName(allianceResponse.data?.name || null);
+          setWonderFinancingEnabled(
+            worldsResponse.data.find((world) => world.id === worldId)?.wonder_rules_version === 'alliance-v2',
+          );
+        }).catch(() => {
+          if (active) {
+            setMyAllianceName(null);
+            setWonderFinancingEnabled(false);
+          }
+        });
+    }
+    return () => { active = false; };
+  }, [worldId]);
 
   // A fresh city selection changes the origin. Resource refreshes of the same
   // city must not snap the player's manually explored map back to home.
@@ -260,6 +284,7 @@ const MapView = () => {
                         <>
                           <button type="button" disabled={loading} className="btn btn-sm btn-success w-full" onClick={() => navigate('/market?targetCityId=' + selectedTile.city_id + '&worldId=' + worldId)}>Comerciar</button>
                           <button type="button" disabled={loading} className="btn btn-sm btn-warning w-full" onClick={() => navigate('/messages?targetCityId=' + selectedTile.city_id + '&worldId=' + worldId)}>Mensaje</button>
+                          {wonderFinancingEnabled && myAllianceName && selectedTile.settlement_type !== 'camp' && selectedTile.alliance_name === myAllianceName && <button type="button" disabled={loading} className="btn btn-sm btn-primary col-span-2 w-full" onClick={() => navigate('/buildings?targetCityId=' + selectedTile.city_id)}>Aportar a Maravilla</button>}
                         </>
                       ) : (
                         <p className="col-span-2 text-xs text-gray-200">

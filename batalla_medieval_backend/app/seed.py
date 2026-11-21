@@ -60,6 +60,7 @@ def _get_or_create_world(db: Session) -> tuple[models.World, bool]:
         map_size=DEFAULT_WORLD_MAP_SIZE,
         special_rules="",
         is_active=True,
+        wonder_rules_version="alliance-v2",
     )
     db.add(world)
     db.flush()

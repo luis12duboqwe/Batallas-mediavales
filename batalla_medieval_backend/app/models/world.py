@@ -16,6 +16,8 @@ class World(Base):
     resource_modifier = Column(Float, default=1.0)
     map_size = Column(Integer, default=100)
     special_rules = Column(Text, default="")
+    # Every world keeps its originally agreed rules; old rows migrate to legacy-v1.
+    wonder_rules_version = Column(String(24), nullable=False, default="legacy-v1", server_default="legacy-v1")
     created_at = Column(DateTime, default=get_utc_now)
     # Legacy compatibility flag. BM-0072 makes lifecycle_status authoritative.
     is_active = Column(Boolean, default=True)

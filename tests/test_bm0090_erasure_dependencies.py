@@ -25,6 +25,8 @@ REQUIRED_SHARED_REFERENCES = frozenset({
     "messages.sender_id",
     "season_results.user_id",
     "support_cases.requester_id",
+    "wonder_funding.owner_id",
+    "wonder_contributions.contributor_id",
 })
 
 # Potentially separable references to a user from shared world/history rows.
@@ -212,6 +214,8 @@ INDIRECT_CITY_HERO_REFERENCES = {
     "spy_reports.defender_city_id": "cities.id",
     "troop_queue.city_id": "cities.id",
     "troops.city_id": "cities.id",
+    "wonder_funding.city_id": "cities.id",
+    "wonder_contributions.source_city_id": "cities.id",
 }
 
 
