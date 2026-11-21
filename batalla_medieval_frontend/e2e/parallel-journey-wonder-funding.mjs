@@ -29,6 +29,14 @@ const contribution = (sourceId, target, values, key) => ({
   wood: 0, stone: 0, iron: 0, gold: 0, ...values,
 });
 const nonzero = (values) => Object.values(values).some(value => Number(value) !== 0);
+const resourceKeys = ['wood', 'stone', 'iron', 'gold'];
+function assertNoLiquidRefundOrDoubleCharge(before, after, label) {
+  for (const resource of resourceKeys) {
+    const change = after[resource] - before[resource];
+    assert.ok(Math.abs(change) < 20,
+      label + ' ' + resource + ': unexpected liquid debit/refund ' + change);
+  }
+}
 
 async function loginFixture(page, username, password) {
   await page.goto(UI + '/login', { waitUntil: 'domcontentloaded' });
@@ -288,6 +296,8 @@ try {
   });
 
   await checks.check('cancel, re-queue from UI, worker completion and persistence', async () => {
+    const ownerBeforeCancel = (await playerSnapshot(ownerToken)).cities.find(city => city.id === targetId);
+    const donorBeforeCancel = (await playerSnapshot(donorToken)).cities.find(city => city.id === donorCityId);
     const status = await call('/city/' + targetId + '/status?world_id=' + worldId, { token: ownerToken });
     const queued = (status.building_queue || []).find(item => item.building_type === 'world_wonder');
     assert.ok(queued?.id, 'Wonder building queue was not persisted');
@@ -296,7 +306,10 @@ try {
     assert.equal(restored.status, 'ready');
     assert.equal(restored.can_queue, true);
     assert.deepEqual(restored.funded, { wood: 10000, stone: 10000, iron: 10000, gold: 2500 });
-    const balanceBefore = (await playerSnapshot(ownerToken)).cities.find(city => city.id === targetId).wood;
+    const ownerAfterCancel = (await playerSnapshot(ownerToken)).cities.find(city => city.id === targetId);
+    const donorAfterCancel = (await playerSnapshot(donorToken)).cities.find(city => city.id === donorCityId);
+    assertNoLiquidRefundOrDoubleCharge(ownerBeforeCancel, ownerAfterCancel, 'Owner cancel');
+    assertNoLiquidRefundOrDoubleCharge(donorBeforeCancel, donorAfterCancel, 'Donor cancel');
     await ownerPage.goto(UI + '/buildings', { waitUntil: 'domcontentloaded' });
     await ownerPage.getByTestId('intro-animation').waitFor({ state: 'hidden', timeout: 12000 });
     await ownerPage.getByTestId('loading-screen').waitFor({ state: 'hidden', timeout: 12000 });
@@ -305,8 +318,10 @@ try {
     await button.waitFor({ state: 'visible', timeout: 18000 });
     await button.click();
     await ownerPage.getByText('Mejora añadida a la cola.').waitFor({ timeout: 18000 });
-    const balanceAfter = (await playerSnapshot(ownerToken)).cities.find(city => city.id === targetId).wood;
-    assert.ok(Math.abs(balanceAfter - balanceBefore) < 20, 'Requeue must not charge Wonder resources');
+    const ownerAfterRequeue = (await playerSnapshot(ownerToken)).cities.find(city => city.id === targetId);
+    const donorAfterRequeue = (await playerSnapshot(donorToken)).cities.find(city => city.id === donorCityId);
+    assertNoLiquidRefundOrDoubleCharge(ownerBeforeCancel, ownerAfterRequeue, 'Owner requeue');
+    assertNoLiquidRefundOrDoubleCharge(donorBeforeCancel, donorAfterRequeue, 'Donor requeue');
     assert.equal((await call(fundingPath(worldId, targetId), { token: ownerToken })).status, 'queued');
 
     const workerResult = execFileSync(
