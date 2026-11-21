@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
@@ -43,13 +44,26 @@ def list_cities(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    # The frontend defaults to cities[0] when there is no explicit active
+    # city selection. The oldest owned city might be a captured barbarian whose
+    # ID predates the capital. Prefer this world's canonical starting capital,
+    # then use a stable ID order for every remaining/fallback city. A scalar
+    # subquery avoids a separate membership query per request.
+    starting_city_id = (
+        db.query(models.PlayerWorld.starting_city_id)
+        .filter(
+            models.PlayerWorld.user_id == current_user.id,
+            models.PlayerWorld.world_id == world_id,
+        )
+        .scalar_subquery()
+    )
     cities = (
         db.query(models.City)
         .filter(models.City.owner_id == current_user.id, models.City.world_id == world_id)
-        # Frontend's default active city is the first returned city. SQLite
-        # and PostgreSQL must agree: never let an unordered index scan select
-        # a newer, empty city instead of the established starting capital.
-        .order_by(models.City.id.asc())
+        .order_by(
+            case((models.City.id == starting_city_id, 0), else_=1),
+            models.City.id.asc(),
+        )
         .all()
     )
     for city in cities:
