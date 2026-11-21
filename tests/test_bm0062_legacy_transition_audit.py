@@ -6,6 +6,7 @@ from datetime import timedelta
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 
@@ -270,6 +271,48 @@ def test_invalid_world_ids_rejected_without_db_effect(db_session, invalid):
 def test_unknown_world_fails_closed(db_session):
     with pytest.raises(ValueError, match="World not found"):
         audit_legacy_wonder_transition(db_session, 2_000_000_000)
+
+
+def test_cli_refuses_implicit_or_nonexistent_sqlite_database(tmp_path):
+    repo = Path(__file__).resolve().parents[1]
+    command = [sys.executable, str(repo / "scripts/audit_legacy_wonder.py"), "--world-id", "1"]
+    missing_env = os.environ.copy()
+    missing_env.pop("DATABASE_URL", None)
+    absent = subprocess.run(
+        command, cwd=tmp_path, env=missing_env,
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    assert absent.returncode == 2
+    assert "explicit DATABASE_URL" in absent.stderr
+    assert not (tmp_path / "batalla_medieval.db").exists()
+    missing = tmp_path / "missing-db.sqlite"
+    missing_env["DATABASE_URL"] = "sqlite:///" + str(missing)
+    refused = subprocess.run(
+        command, cwd=tmp_path, env=missing_env,
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    assert refused.returncode == 2
+    assert "existing SQLite database file required" in refused.stderr
+    assert not missing.exists()
+    assert "Traceback" not in refused.stderr
+
+
+def test_cli_refuses_pre_0020_schema_without_traceback(tmp_path):
+    repo = Path(__file__).resolve().parents[1]
+    legacy_db = tmp_path / "pre-0020.sqlite"
+    with sqlite3.connect(legacy_db) as connection:
+        connection.execute("CREATE TABLE worlds (id INTEGER PRIMARY KEY, name TEXT)")
+    env = os.environ.copy()
+    env["DATABASE_URL"] = "sqlite:///" + str(legacy_db)
+    result = subprocess.run(
+        [sys.executable, str(repo / "scripts/audit_legacy_wonder.py"), "--world-id", "1"],
+        cwd=repo / "batalla_medieval_backend",
+        env=env, capture_output=True, text=True, timeout=15, check=False,
+    )
+    assert result.returncode == 2
+    assert "requires Alembic 0020 or later" in result.stderr
+    assert result.stdout == ""
+    assert "Traceback" not in result.stderr
 
 
 def test_cli_prints_only_read_only_json_and_requires_world_id(db_session, city):
