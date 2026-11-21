@@ -87,3 +87,19 @@ La duración real de la temporada depende de producción, velocidad,
 economía PvP y tamaño de alianzas; requerirá simulación y aprobación
 antes de lanzamiento. Los mundos legados conservan sus limitaciones hasta
 una migración explícita. Esta implementación no autoriza producción ni G10.
+
+## Regresión real de navegador en aislamiento
+
+`parallel-journey-wonder-funding.mjs` utiliza dos cuentas distintas, una alianza
+real, recursos de ciudades reales en SQLite desechable y llamadas a la API
+verdadera. Comprueba financiación en dos aportaciones, cuenta de recursos,
+cola de la obra, cancelación sin devolución, y ausencia de errores JS. Se
+inyecta mediante `scripts/run_parallel_journey_ci.sh` después de detener el
+servidor del escenario anterior, y el script rechaza un backend preexistente
+que pudiera responder contra otra base de datos. El panel flotante de
+edificios es decorativo y no puede capturar clics. Los callbacks de intro y
+carga son estables para que re-renderizados no reinicien timers de ocultación.
+
+**Resultado de la ejecución focalizada sobre test SQLite independiente:**
+5 escenarios de navegador aprobados, incluyendo el clic físico de
+«Construir» y la devolución a estado financiado tras cancelar.

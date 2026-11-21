@@ -52,6 +52,12 @@ stop_api() {
 }
 
 start_api() {
+  # Old services can be healthy but attached to another disposable database.
+  # Do not mistake their HTTP 200 for this run's newly spawned backend.
+  if curl --fail --silent --max-time 2 http://127.0.0.1:8188/health >/dev/null; then
+    echo "Refusing to reuse a backend still listening on test port 8188" >&2
+    return 1
+  fi
   python -m uvicorn app.main:socket_app --app-dir batalla_medieval_backend \
     --host 127.0.0.1 --port 8188 >"$LOG_DIR/backend.log" 2>&1 &
   API_PID=$!
@@ -117,4 +123,14 @@ stop_api
 create_db singleplayer
 start_api
 run_suite singleplayer single-player
-echo "PARALLEL_JOURNEY_ALL_9_SUITES_PASS"
+stop_api
+# One more independent disposable database exercises the actual funded UI,
+# rather than relying on HTTP-only unit tests or mocks.
+create_db wonder
+python scripts/prepare_g2_e2e.py
+python scripts/prepare_g9_combat_e2e.py
+python scripts/prepare_wonder_funding_e2e.py
+start_api
+run_suite wonder wonder-funding
+stop_api
+echo "PARALLEL_JOURNEY_ALL_10_SUITES_PASS"

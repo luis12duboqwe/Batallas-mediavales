@@ -92,7 +92,7 @@ const BuildingCard = ({ building, onUpgrade }) => {
         <div className="text-xs text-red-300 mt-2" role="status">Requisitos: {Object.entries(building.requirements || {}).map(([name, level]) => `${name} ${level}`).join(', ')}</div>
       )}
 
-      <div className="floating-panel">
+      <div className="floating-panel" aria-hidden="true">
         <span className="text-yellow-200">{isMaxLevel ? 'Completado' : 'Próximo nivel'}</span>
         <span className="font-semibold">{isMaxLevel ? `Nivel ${building.level}` : `Nivel ${building.level + 1}`}</span>
       </div>

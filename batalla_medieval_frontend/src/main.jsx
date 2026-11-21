@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
@@ -21,14 +21,16 @@ const ExperienceShell = () => {
   const [introFinished, setIntroFinished] = useState(false);
   const [showLoading, setShowLoading] = useState(false);
 
-  const handleIntroComplete = () => {
+  // Stable callbacks prevent socket/context rerenders from restarting the
+  // intro/loading timers indefinitely and trapping player input behind overlays.
+  const handleIntroComplete = useCallback(() => {
     setIntroFinished(true);
     setShowLoading(true);
-  };
+  }, []);
 
-  const handleLoadingComplete = () => {
+  const handleLoadingComplete = useCallback(() => {
     setShowLoading(false);
-  };
+  }, []);
 
   return (
     <>

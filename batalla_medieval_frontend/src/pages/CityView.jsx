@@ -74,7 +74,7 @@ const CityView = () => {
             </div>
             <h3 className="text-lg">{building.display_name || t(building.name)}</h3>
             <p className="text-sm text-gray-400">Nivel {building.level}</p>
-            <div className="floating-panel">
+            <div className="floating-panel" aria-hidden="true">
               <span className="text-yellow-200">Estructura</span>
               <span className="text-[11px] text-gray-200">{building.level > 0 ? 'Construida' : 'Disponible'}</span>
             </div>
