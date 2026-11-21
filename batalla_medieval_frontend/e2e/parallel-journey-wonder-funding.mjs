@@ -98,7 +98,8 @@ async function selectCityFromMap(page, city, homeCity) {
   await page.getByRole('spinbutton', { name: 'Coordenada X' }).fill(String(city.x));
   await page.getByRole('spinbutton', { name: 'Coordenada Y' }).fill(String(city.y));
   await page.getByRole('button', { name: 'Ir', exact: true }).click();
-  await page.getByTestId('map-center').getByText('Centro: (' + city.x + ', ' + city.y + ')')
+  await page.getByTestId('map-center')
+    .filter({ hasText: 'Centro: (' + city.x + ', ' + city.y + ')' })
     .waitFor({ state: 'visible', timeout: 15000 });
   const tile = page.getByTestId('map-tile-' + city.x + '-' + city.y);
   await tile.waitFor({ state: 'visible', timeout: 20000 });
