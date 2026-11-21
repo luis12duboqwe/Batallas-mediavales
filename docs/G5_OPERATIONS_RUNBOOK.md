@@ -181,9 +181,14 @@ python3 ops/load_smoke.py \
   --base-url https://staging.example.com \
   --duration-seconds 15 \
   --concurrency 8 \
+  --target-rps 6 \
   --max-p95-ms 750 \
   --max-error-rate 0.005
 ```
+
+**Ritmo y protección:** el proxy limita la API a **10 solicitudes por segundo por cliente**, con ráfaga de 20. La concurrencia controla conexiones simultáneas, **no** las solicitudes por segundo. Una versión anterior del probe generó aproximadamente 204 solicitudes/s desde una sola IP y Nginx respondió 503 en 1926 de 2043 peticiones: fue un rechazo por `limit_req`, no una caída del backend. El probe G5 ahora reserva un máximo agregado de 6 solicitudes/s entre todos los hilos y Nginx devuelve **429** cuando la limitación antiabuso se activa. `ops/deploy_remote.sh` admite `LOAD_TARGET_RPS` con valor por defecto 6; el monitor horario y el soak usan `--target-rps 6` explícito.
+
+Estos probes acotados **no demuestran capacidad máxima de la plataforma** ni sustituyen un ensayo de carga con clientes distribuidos y métricas del servidor en un entorno aprobado. No subir el límite del proxy para forzar un resultado verde.
 
 Presupuesto inicial G5:
 
