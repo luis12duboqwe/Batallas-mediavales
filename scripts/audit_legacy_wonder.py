@@ -33,9 +33,11 @@ def main(argv: list[str] | None = None) -> int:
         print("Wonder audit refused: explicit DATABASE_URL is required", file=sys.stderr)
         return 2
 
+    # Initialization failures (including Pydantic ValidationError, which
+    # subclasses ValueError) can echo DATABASE_URL and other secrets.
+    # Only deliberate ValueErrors from the audit service may be printed.
     from sqlalchemy import inspect
     from sqlalchemy.engine import make_url
-    from sqlalchemy.exc import SQLAlchemyError
 
     try:
         url = make_url(raw_url)
@@ -64,19 +66,21 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 2
 
-            report = audit_legacy_wonder_transition(db, args.world_id)
+            try:
+                report = audit_legacy_wonder_transition(db, args.world_id)
+            except ValueError as exc:
+                # This is the sole trustworthy, human-readable error source.
+                print(f"Wonder audit refused: {exc}", file=sys.stderr)
+                return 2
             print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
         finally:
             # No commit: close and roll back any open read transaction.
             db.close()
-    except ValueError as exc:
-        # Only audit-level errors (e.g. unknown world) are surfaced verbatim.
-        print(f"Wonder audit refused: {exc}", file=sys.stderr)
-        return 2
-    except SQLAlchemyError:
-        # Database exceptions may embed connection info or raw SQL parameters.
+    except Exception:
+        # Do not surface raw DB exceptions, Settings ValidationError, SQL
+        # parameters, passwords or malformed connection strings.
         print(
-            "Wonder audit refused: database access, permissions or schema failed",
+            "Wonder audit refused: invalid configuration, permissions or database connection",
             file=sys.stderr,
         )
         return 3
