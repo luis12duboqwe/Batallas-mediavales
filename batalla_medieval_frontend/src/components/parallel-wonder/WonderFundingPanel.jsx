@@ -14,7 +14,10 @@ export default function WonderFundingPanel({ currentCity, refreshCity }) {
   const location = useLocation();
   const deepLink = Number(new URLSearchParams(location.search).get('targetCityId'));
   const [targetId, setTargetId] = useState(currentCity?.id ?? '');
-  const [rules, setRules] = useState(null);
+  const [eligibility, setEligibility] = useState({ worldId: null, rules: null });
+  // A world switch must not reuse the previous world's alliance permission
+  // for even one render/effect before asynchronous eligibility resolves.
+  const rules = eligibility.worldId === currentCity?.world_id ? eligibility.rules : null;
   const [fund, setFund] = useState(null);
   const [amounts, setAmounts] = useState(EMPTY);
   const [busy, setBusy] = useState(false);
@@ -33,7 +36,7 @@ export default function WonderFundingPanel({ currentCity, refreshCity }) {
 
   useEffect(() => {
     let active = true;
-    setRules(null);
+    setEligibility({ worldId: currentCity?.world_id ?? null, rules: null });
     if (currentCity?.world_id) {
       // Normal players without an alliance cannot finance a Wonder. Avoid
       // issuing a forbidden funding request during routine Buildings visits.
@@ -43,14 +46,17 @@ export default function WonderFundingPanel({ currentCity, refreshCity }) {
           const pinned = worldResponse.data.find(
             (world) => world.id === currentCity.world_id,
           )?.wonder_rules_version;
-          setRules(pinned === 'alliance-v2' && allianceResponse.data?.id
-            ? 'alliance-v2' : 'legacy-v1');
+          setEligibility({
+            worldId: currentCity.world_id,
+            rules: pinned === 'alliance-v2' && allianceResponse.data?.id
+              ? 'alliance-v2' : 'legacy-v1',
+          });
         })
         .catch(() => {
           if (active) {
             // Deny restricted calls on any failed eligibility check. Expose
             // completion to browser tests without displaying a funding panel.
-            setRules('unavailable');
+            setEligibility({ worldId: currentCity.world_id, rules: 'unavailable' });
             setError('No se pudieron verificar el mundo y la alianza.');
           }
         });
