@@ -346,7 +346,7 @@ def test_unmanaged_compose_probe_failure_is_fail_closed(deploy_lab):
     assert len(_trace(deploy_lab)) == 1
 
 
-@pytest.mark.parametrize("orphan_type", ["release_pointer", "previous_env", "manifest"])
+@pytest.mark.parametrize("orphan_type", ["release_pointer", "previous_env", "manifest", "archive"])
 def test_orphaned_metadata_without_active_env_is_refused(deploy_lab, orphan_type):
     root = deploy_lab["root"]
     (root / ".release.env").unlink()
@@ -360,9 +360,17 @@ def test_orphaned_metadata_without_active_env_is_refused(deploy_lab, orphan_type
         (manifests / ("a" * 40 + ".json")).write_text(
             "{}", encoding="utf-8",
         )
+    if orphan_type == "archive":
+        releases = root / ".ops-state" / "releases"
+        releases.mkdir(parents=True, exist_ok=True)
+        (releases / ("a" * 40 + ".env")).write_text(
+            deploy_lab["active"], encoding="utf-8",
+        )
     result = _run(deploy_lab)
     assert result.returncode == 2, result.stderr
-    assert "metadata" in result.stderr or "manifests exist" in result.stderr
+    assert any(fragment in result.stderr for fragment in (
+        "metadata", "manifests exist", "archived releases exist"
+    ))
     assert _trace(deploy_lab) == []
     assert not (root / ".release.env.next").exists()
     assert not _marker(deploy_lab).exists()
