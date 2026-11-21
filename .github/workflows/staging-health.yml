@@ -17,6 +17,9 @@ jobs:
     if: ${{ vars.STAGING_BASE_URL != '' }}
     runs-on: ubuntu-latest
     environment: staging
+    env:
+      STAGING_BASIC_AUTH_USERNAME: ${{ vars.STAGING_BASIC_AUTH_USERNAME }}
+      STAGING_BASIC_AUTH_PASSWORD: ${{ secrets.STAGING_BASIC_AUTH_PASSWORD }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
