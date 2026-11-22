@@ -30,6 +30,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r batalla_medieval_backend/requirements.txt
+      - name: Install Nginx for mandatory G5 edge checks
+        run: |
+          if ! command -v nginx >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y nginx
+          fi
+      - name: Verify G5 edge maintenance with real Nginx (no skips)
+        env:
+          CI: "true"
+        run: pytest -q -o addopts= tests/test_g5_edge_maintenance.py
       - name: Compile backend
         run: python -m compileall -q batalla_medieval_backend/app tests scripts ops
       - name: Validate migrations and canonical seed
