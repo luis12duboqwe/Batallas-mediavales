@@ -1,0 +1,7 @@
+# Opt-in only after G5 writer drain and cutover orchestration are certified.
+# Do not pass this overlay to live deployment scripts until issue #174 is closed.
+services:
+  nginx:
+    volumes:
+      - ./nginx.g5.conf:/etc/nginx/nginx.conf:ro
+      - ./.ops-state/edge-maintenance:/etc/nginx/edge-maintenance:ro

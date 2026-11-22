@@ -203,10 +203,6 @@ def validate(values: dict[str, str]) -> list[str]:
     if backup_dir and not backup_dir.startswith("/"):
         errors.append("BACKUP_DIR must be an absolute host path")
 
-    g5_nginx_config = values.get("G5_NGINX_CONFIG_FILE", "nginx.conf").strip()
-    if g5_nginx_config not in {"nginx.conf", "nginx.g5.conf"}:
-        errors.append("G5_NGINX_CONFIG_FILE must be nginx.conf or nginx.g5.conf")
-
     retention = require(values, "BACKUP_RETENTION_DAYS", errors)
     if retention:
         try:

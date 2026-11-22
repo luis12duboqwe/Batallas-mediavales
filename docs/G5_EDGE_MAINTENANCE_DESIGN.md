@@ -1,92 +1,95 @@
-# G5 Nginx edge maintenance gate
+# BM-0093 / G5 — barrera de admisión Nginx (opt-in)
 
-## Activación controlada y compatibilidad (no se activa por defecto)
+**Estado: preparada, no activada ni certificada para staging/producción.**
+La barrera no es una **barrera transaccional** completa: es solo una pieza
+de la solución del P1 #174; no sustituye el drenaje
+de escritores, la coordinación PostgreSQL ni la máquina de estados de cutover.
 
-La configuración de despliegue conserva `nginx.conf` como valor por defecto,
-sin cambiar el comportamiento de `docker-compose.yml` para desarrollo local.
-La barrera vive exclusivamente en `nginx.g5.conf` y puede seleccionarse en
-el archivo de configuración de una release protegida con
-`G5_NGINX_CONFIG_FILE=nginx.g5.conf`. `ops/preflight.py` permite únicamente
-`nginx.conf` o `nginx.g5.conf`, no rutas arbitrarias ni interpolaciones.
-La variable debe formar parte de la configuración inmutable de la release
-probada, no cambiarse durante un despliegue activo.
+## Activación explícita y compatibilidad
 
-**NO habilitar esa opción todavía en staging o producción.** El orquestador
-actual no cierra, drena, verifica ni reabre el gate durante el backup/rollback.
-Activarlo ahora provocaría fallos de smoke y recuperación; el issue #174 exige
-una integración adicional que proteja escrituras confirmadas. La inclusión
-de este archivo en main no equivale a activarlo ni a certificar G5.
+`docker-compose.yml` (desarrollo) y `docker-compose.deploy.yml` (protegido)
+continúan utilizando el `nginx.conf` normal, sin cambio de comportamiento.
+La configuración protegida adicional vive en `nginx.g5.conf`, aplicada
+mediante el overlay oficial `docker-compose.g5.yml`. Ningún script actual
+de despliegue, rollback o restore incluye ese overlay: **está inactivo**.
 
-El `limit_req` de Nginx sigue protegiendo contra ráfagas **después**
-de comprobar la admisión mediante `auth_request`. Para la configuración
-G5 activa, una puerta cerrada responde `503` y las cabeceras de
-mantenimiento incluso ante ráfagas; una puerta abierta conserva `429`
-al superar el límite sin dejar pasar las peticiones rechazadas.
+Cuando el orquestador G5 esté desarrollado y certificado, será quien seleccione
+ambos archivos con `docker compose -f docker-compose.deploy.yml
+-f docker-compose.g5.yml`. No activar manualmente este overlay todavía:
+el flujo vigente realiza smoke público, no mantiene cerrado el gate durante
+migración/backup y no puede garantizar RPO=0. La automatización del overlay
+queda bajo #174. No se usa variable de selección de configuración desde la
+sesión: evita que el shell prevalezca sobre el env validado.
 
+El workflow de despliegue incluye ambos archivos G5 en el bundle, pero
+**no los usa** para iniciar o alterar el stack actual.
 
-## Scope and behavior
+## Contrato de admisión
 
-Caddy remains the public TLS edge and continues to proxy to internal Nginx.
-Nginx checks the local `./.ops-state/edge-maintenance/open` marker on every
-request to `/api`, `/api/`, `/socket.io`, and `/socket.io/`. The control
-directory is mounted read-only in the Nginx container. The only open signal is
-a readable, regular, non-symlink file named `open`; its contents are ignored.
-A missing marker, unreadable file, directory in its place, or symlink is
-closed. Closed requests receive `503`, `Retry-After: 60`, and
-`Cache-Control: no-store`. The check is local and
-does not depend on request headers, cookies, client IPs, or URL parameters.
+Con overlay activado, el control está en
+`./.ops-state/edge-maintenance/open/`, un **directorio vacío y real**
+de propiedad del operador, nunca un archivo o un enlace simbólico.
 
-The internal `/health` endpoint remains a `200` liveness probe in either mode.
-Requests to the slashless API and Socket.IO paths are gated before their
-redirects, so a closed edge does not redirect clients around the maintenance
-response. An open edge retains the existing routes, rate limit, and WebSocket
-upgrade proxying.
+- Directorio `open/` ausente: todas las solicitudes a `/api`,
+  `/api/` y `/socket.io` (incluidos polling y upgrade) reciben **HTTP 503**,
+  `Retry-After: 60` y `Cache-Control: no-store`.
+- Directorio `open/` existente, accesible y sin symlink: la admisión se
+  autoriza. El limitador ordinario sigue devolviendo `429` bajo abuso;
+  se ejecuta **después** de comprobar el gate.
+- Archivo normal, FIFO, socket, enlace simbólico, ruta ilegible o marcador
+  ausente: **cerrado**. La condición Nginx comprueba exclusivamente
+  directorios con `try_files /open/` y `disable_symlinks on`; un
+  `empty_gif` interno devuelve 200 a `auth_request` sin abrir archivos
+  especiales que pudieran bloquear el worker.
+- `/health` responde 200 solo como liveness del edge, NO como prueba de
+  conectividad a PostgreSQL ni autorización para reabrir.
+- No hay bypass mediante cabeceras, cookies, IP, query ni ruta sin barra.
+  Las redirecciones permitidas preservan los parámetros `$is_args$args`.
 
-## Local operation
+El directorio completo se monta `:ro` dentro del contenedor Nginx; solo
+el operador en el host puede publicar o retirar la señal. Su directorio
+padre debe tener owner controlado, permisos de escritura restringidos y
+permiso de traversal para el usuario del Nginx.
 
-The Compose bind mount is `./.ops-state/edge-maintenance` on the host. A missing
-directory or marker starts closed. Close admission by removing the marker:
+## Operación local futura (solo durante ensayo de integración)
 
-```sh
-rm -f .ops-state/edge-maintenance/open
-```
-
-Only recreate it after the responsible recovery process has established that
-reopening is safe. Create it atomically on the same filesystem so Nginx sees
-either the closed state or the complete regular file:
-
+**Cerrar admisión** eliminando la señal:
 ```sh
 dir=.ops-state/edge-maintenance
-mkdir -p "$dir"
-# The deployment manager uses umask 077. Nginx workers need read/traverse
-# access to this host-controlled bind-mounted directory, never write access.
-chmod 0755 "$dir"
-tmp="$(mktemp "$dir/.open.XXXXXX")"
-chmod 0644 "$tmp"
-mv -f "$tmp" "$dir/open"
+rmdir -- "$dir/open"
 ```
+`rmdir` es atómico para un directorio vacío. Si falla porque falta, ya
+está cerrado; si falla por contenido inesperado, abortar la operación y
+verificar con peticiones reales 503 antes de tomar backup. No continuar
+migraciones hasta confirmar que no entra tráfico.
 
-The directory is host-controlled; the read-only mount prevents Nginx from
-changing the control state. Nginx evaluates the marker for each new request, so
-changing it does not reload Nginx or restart Compose services. A failed
-configuration reload is not part of this control path. If Nginx is unavailable
-or cannot read a valid marker, it cannot admit requests; a service restart
-starts closed whenever the marker is absent or invalid. An intentionally
-present marker remains an explicit open signal across a restart, so recovery
-operations must remove it before rebooting/restarting the edge.
+**Abrir admisión** únicamente cuando el orquestador haya invalidado el
+derecho de rollback al dump histórico y validado readiness:
+```sh
+dir=.ops-state/edge-maintenance
+mkdir -p -- "$dir"
+chmod 0755 "$dir"
+mkdir -- "$dir/open"
+chmod 0755 "$dir/open"
+```
+Si el host usa `umask 077`, la carpeta aparece cerrada/inaccesible hasta
+el `chmod` explícito. No se necesita `nginx -s reload`, reinicio de
+Compose ni nuevas APIs. No crear el directorio abierto durante un reboot
+por defecto.
 
-## Limits and recovery integration
+## Límites y controles de seguridad
 
-This is an admission gate, not a transactional maintenance barrier (no
-constituye una barrera transaccional). Requests that passed the check before it
-closes may still be executing. A `503` during a WebSocket handshake prevents a
-new connection, but does not terminate an already-established WebSocket; close
-those sessions by stopping the backend and worker as part of maintenance and
-recovery.
+- Una solicitud que pasó el gate antes del cierre puede terminar y hacer
+  commit después. Una sesión WebSocket establecida también puede permanecer.
+  Es obligatorio bloquear nuevas admisiones, drenar solicitudes y parar
+  **backend, worker, migrate, seed y escritores externos** antes de capturar
+  el backup, verificando ausencia de transacciones pendientes en PostgreSQL.
+- Antes de volver a permitir escritores, el sistema debe marcar durablemente
+  que el dump anterior **ya no se puede restaurar automáticamente**.
+  Si falla después de ese punto, recuperar hacia delante.
+- El componente solo ha sido probado en procesos Nginx aislados con
+  backends mock y en CI; **no** se desplegó ni se certificó staging.
+  Tampoco sustituye monitoreo, ensayos de rollback, SMTP o aprobación G5.
 
-The gate alone does not establish that database writers are stopped or that a
-durable recovery state is clear. The deployment/recovery orchestrator must
-close the gate, stop backend and worker writers, verify the database and
-durable recovery state, and only then recreate the marker. Until that
-integration exists and is verified, this does not enable staging or production
-and issue #174 remains P1.
+Referencia: issues #174 y #161, PR #180 (reproducción de pérdida de
+escrituras) y PR #175 (recuperación protegida existente).

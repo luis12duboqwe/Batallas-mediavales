@@ -159,7 +159,7 @@ def _request(edge, path: str, method="GET", headers=None, body=None, redirects=T
 @pytest.fixture()
 def closed_edge(edge):
     marker = edge["control"] / "open"
-    if marker.is_symlink() or marker.is_file():
+    if marker.is_symlink() or (marker.exists() and not marker.is_dir()):
         marker.unlink()
     elif marker.is_dir():
         shutil.rmtree(marker)
@@ -218,10 +218,10 @@ def test_closed_by_default_blocks_api_writes_and_socket_io(closed_edge):
     assert body == b"ok\n"
 
 
-def test_local_regular_file_opens_routes_without_reload_and_health_stays_live(closed_edge):
+def test_local_directory_opens_routes_without_reload_and_health_stays_live(closed_edge):
     edge = closed_edge
-    (edge["control"] / "open").write_text("local marker\n", encoding="utf-8")
-    (edge["control"] / "open").chmod(0o644)
+    (edge["control"] / "open").mkdir()
+    (edge["control"] / "open").chmod(0o755)
 
     status, _, body = _request(edge, "/api/write?operation=get")
     assert status == 200
@@ -246,25 +246,28 @@ def test_local_regular_file_opens_routes_without_reload_and_health_stays_live(cl
     assert body == b"ok\n"
 
 
-def test_missing_directory_and_symlink_signals_fail_closed(closed_edge):
+def test_missing_invalid_file_and_symlink_signals_fail_closed(closed_edge):
     edge = closed_edge
     marker = edge["control"] / "open"
-
-    _assert_maintenance_response(_request(edge, "/api/write"))
-    marker.mkdir()
     _assert_maintenance_response(_request(edge, "/api/write"))
 
-    marker.rmdir()
-    target = edge["control"] / "target"
-    target.write_text("local marker\n", encoding="utf-8")
-    marker.symlink_to(target)
+    # A regular file is not the authorized directory.
+    marker.write_text("invalid signal", encoding="utf-8")
     _assert_maintenance_response(_request(edge, "/api/write"))
-
     marker.unlink()
-    marker.write_text("local marker\n", encoding="utf-8")
-    marker.chmod(0)
-    _assert_maintenance_response(_request(edge, "/api/write"))
 
+    # Even a symlink to a valid directory must be rejected.
+    target = edge["control"] / "target"
+    target.mkdir()
+    marker.symlink_to(target, target_is_directory=True)
+    _assert_maintenance_response(_request(edge, "/api/write"))
+    marker.unlink()
+
+    marker.mkdir()
+    marker.chmod(0o755)
+    assert _request(edge, "/api/write")[0] == 200
+    marker.rmdir()
+    _assert_maintenance_response(_request(edge, "/api/write"))
 
 def test_client_supplied_headers_cannot_open_the_edge(closed_edge):
     edge = closed_edge
@@ -280,9 +283,11 @@ def test_client_supplied_headers_cannot_open_the_edge(closed_edge):
 
 def test_deploy_compose_mounts_control_read_only_and_design_documents_limits():
     compose = (ROOT / "docker-compose.deploy.yml").read_text(encoding="utf-8")
+    overlay = (ROOT / "docker-compose.g5.yml").read_text(encoding="utf-8")
     nginx_service = compose.split("  nginx:\n", 1)[1].split("  caddy:\n", 1)[0]
-    assert "./.ops-state/edge-maintenance:/etc/nginx/edge-maintenance:ro" in nginx_service
-    assert "./${G5_NGINX_CONFIG_FILE:-nginx.conf}:/etc/nginx/nginx.conf:ro" in nginx_service
+    assert "./nginx.conf:/etc/nginx/nginx.conf:ro" in nginx_service
+    assert "./nginx.g5.conf:/etc/nginx/nginx.conf:ro" in overlay
+    assert "./.ops-state/edge-maintenance:/etc/nginx/edge-maintenance:ro" in overlay
     assert (ROOT / "nginx.conf").is_file()
     assert (ROOT / "nginx.g5.conf").is_file()
 
@@ -294,30 +299,26 @@ def test_deploy_compose_mounts_control_read_only_and_design_documents_limits():
 
 
 def test_restrictive_umask_directory_is_normalized_before_open(closed_edge):
-    """Absent marker stays closed; normalization opens across worker UID setups."""
+    """An inaccessible directory fails closed until its traversal mode is fixed."""
     edge = closed_edge
     control = edge["control"]
     marker = control / "open"
     control.chmod(0o700)
     try:
-        assert control.stat().st_mode & 0o777 == 0o700
         _assert_maintenance_response(_request(edge, "/api/write"))
-        marker.write_text("open\n", encoding="utf-8")
-        marker.chmod(0o600)
-        # A worker sharing the owner's UID can still read a 0600 file.
-        # Do not rely on chmod for closing: only removing the marker closes.
-        assert marker.stat().st_mode & 0o777 == 0o600
+        marker.mkdir(mode=0o700)
+        marker.chmod(0o700)
+        assert marker.stat().st_mode & 0o777 == 0o700
     finally:
         control.chmod(0o755)
 
-    marker.chmod(0o644)
+    # The directory used for opening is host-owned and intentionally 0755.
+    marker.chmod(0o755)
     assert _request(edge, "/api/write")[0] == 200
     assert _request(edge, "/socket.io/?transport=polling")[0] == 200
 
-    marker.unlink()
+    marker.rmdir()
     _assert_maintenance_response(_request(edge, "/api/write"))
-    _assert_maintenance_response(_request(edge, "/socket.io/?transport=polling"))
-
 
 def test_burst_closed_edge_never_returns_rate_limit_instead_of_maintenance(closed_edge):
     """Admission close has priority over API rate limiting for every request."""
@@ -335,8 +336,8 @@ def test_burst_closed_edge_never_returns_rate_limit_instead_of_maintenance(close
 def test_burst_open_edge_still_enforces_api_rate_limit(closed_edge):
     """The normal 429 anti-abuse budget is retained after explicit opening."""
     marker = closed_edge["control"] / "open"
-    marker.write_text("open\n", encoding="utf-8")
-    marker.chmod(0o644)
+    marker.mkdir()
+    marker.chmod(0o755)
     statuses = [
         _request(
             closed_edge, "/api/write?check=rate",
@@ -357,11 +358,12 @@ def test_default_compose_remains_ungated_until_recovery_is_integrated():
     assert "auth_request /_edge_maintenance_check" not in base
     assert "auth_request /_edge_maintenance_check" in gated
     assert "./nginx.conf:/etc/nginx/nginx.conf:ro" in local
-    assert "G5_NGINX_CONFIG_FILE:-nginx.conf" in protected
+    assert "./nginx.conf:/etc/nginx/nginx.conf:ro" in protected
+    assert "docker-compose.g5.yml" not in protected
 
 
 def test_rate_limit_during_closed_gate_never_forwards_to_backend(closed_edge):
-    """Rate limiting may emit 429 in a flood, but no request reaches a writer."""
+    """A closed gate must always return 503 before any rate limiting."""
     edge = closed_edge
     before = len(edge["records"])
     statuses = []
@@ -371,6 +373,33 @@ def test_rate_limit_during_closed_gate_never_forwards_to_backend(closed_edge):
         if status == 503:
             assert headers["Retry-After"] == "60"
             assert headers["Cache-Control"] == "no-store"
-    assert set(statuses) <= {429, 503}, statuses
+    assert set(statuses) == {503}, statuses
     assert 503 in statuses
     assert len(edge["records"]) == before
+
+
+def test_special_fifo_marker_must_not_be_treated_as_an_open_signal(closed_edge):
+    """A special file is not a valid operator authorization to admit writes."""
+    marker = closed_edge["control"] / "open"
+    os.mkfifo(marker, mode=0o644)
+    _assert_maintenance_response(_request(closed_edge, "/api/write"))
+    _assert_maintenance_response(_request(closed_edge, "/socket.io/?transport=polling"))
+    marker.unlink()
+
+
+def test_slashless_redirects_preserve_original_query_parameters(closed_edge):
+    """Socket.IO EIO/transport parameters must survive redirects when open."""
+    marker = closed_edge["control"] / "open"
+    marker.mkdir()
+    marker.chmod(0o755)
+
+    status, headers, _ = _request(
+        closed_edge, "/socket.io?EIO=4&transport=polling", redirects=False,
+    )
+    assert status == 308
+    assert headers["Location"].endswith("/socket.io/?EIO=4&transport=polling")
+
+    status, headers, _ = _request(closed_edge, "/api?sort=resources", redirects=False)
+    assert status == 308
+    assert headers["Location"].endswith("/api/?sort=resources")
+
