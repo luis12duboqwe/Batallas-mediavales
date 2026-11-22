@@ -5,6 +5,7 @@ are stubs. These tests never touch a staging or production deployment.
 """
 
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -46,12 +47,24 @@ BACKUP_RETENTION_DAYS=14
 @pytest.fixture
 def rollback_lab(tmp_path):
     (tmp_path / "ops").mkdir()
-    for filename in ("rollback_remote.sh", "preflight.py"):
+    for filename in ("rollback_remote.sh", "deploy_remote.sh", "preflight.py"):
         shutil.copy2(PROJECT_ROOT / "ops" / filename, tmp_path / "ops" / filename)
 
     ops = tmp_path / "ops"
     (ops / "restore_postgres.sh").write_text(
         "#!/usr/bin/env bash\n"
+        "if [[ \"${RESTORE_PREPARE_ONLY:-0}\" == 1 ]]; then\n"
+        "  backup=\"$2\"\n"
+        "  if [[ ! -s \"${backup}.sha256\" ]] || ! sha256sum --check \"${backup}.sha256\" >/dev/null 2>&1; then\n"
+        "    echo 'Restore preflight checksum mismatch' >&2\n"
+        "    exit 2\n"
+        "  fi\n"
+        '  [[ "$3" == PREPARE:batalla_ci && "$RESTORE_START_SERVICES" == 0 ]] || exit 98\n'
+        '  cp -- "$backup" "$4/archive.dump"\n'
+        '  hash="$(sha256sum < "$4/archive.dump" | cut -d" " -f1)"\n'
+        '  printf "%s:%s\\n" "$hash" "$(stat -c %d:%i "$4/archive.dump")"\n'
+        "  exit 0\n"
+        "fi\n"
         "printf 'restore:%s\\n' \"$1\" >> \"$BM_TRACE\"\n"
         "exit \"${BM_RESTORE_EXIT:-0}\"\n",
         encoding="utf-8",
@@ -81,6 +94,8 @@ def rollback_lab(tmp_path):
     backups.mkdir()
     active = _deployment_env(backups, "active@example.invalid")
     previous = _deployment_env(backups, "previous@example.invalid")
+    base_env = tmp_path / "base.env"
+    base_env.write_text(active, encoding="utf-8")
     (tmp_path / ".release.env").write_text(active, encoding="utf-8")
     (tmp_path / ".release-sha").write_text(CURRENT_SHA + "\n", encoding="utf-8")
     (tmp_path / ".ops-state" / "releases" / (PREVIOUS_SHA + ".env")).write_text(
@@ -89,6 +104,10 @@ def rollback_lab(tmp_path):
 
     backup = backups / "sample.dump"
     backup.write_bytes(b"test-only-data")
+    (backups / "sample.dump.sha256").write_text(
+        f"{hashlib.sha256(backup.read_bytes()).hexdigest()}  {backup}\n",
+        encoding="utf-8",
+    )
     manifest = tmp_path / ".ops-state" / "deployments" / (CURRENT_SHA + ".json")
     manifest.write_text(
         json.dumps({"previous_release_sha": PREVIOUS_SHA, "rollback_backup": str(backup)}),
@@ -103,6 +122,7 @@ def rollback_lab(tmp_path):
         "trace": trace,
         "active": active,
         "previous": previous,
+        "base_env": base_env,
         "manifest": manifest,
         "backup": backup,
     }
@@ -115,6 +135,25 @@ def _run(lab, *, current=CURRENT_SHA, extra_env=None):
         ["bash", "ops/rollback_remote.sh", current, "ROLLBACK:" + current],
         cwd=lab["root"],
         env=env,
+        text=True,
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+
+
+def _run_deploy(lab):
+    return subprocess.run(
+        [
+            "bash",
+            "ops/deploy_remote.sh",
+            str(lab["base_env"]),
+            "c" * 40,
+            "registry.example.invalid/game/backend",
+            "registry.example.invalid/game/frontend",
+        ],
+        cwd=lab["root"],
+        env=lab["env"],
         text=True,
         capture_output=True,
         timeout=20,
@@ -159,6 +198,15 @@ def test_failed_recovery_preserves_active_release_pointers(rollback_lab, failed_
     assert trace[0].startswith("restore:./.release.env.rollback.")
     assert ("smoke" in trace) == (failed_step == "smoke")
     _assert_active_unchanged(rollback_lab)
+    marker = rollback_lab["root"] / ".ops-state" / "recovery-required"
+    assert marker.is_file()
+    assert "reason=manual_rollback_in_progress" in marker.read_text(encoding="utf-8")
+
+    before_retry = _trace(rollback_lab)
+    deploy = _run_deploy(rollback_lab)
+    assert deploy.returncode == 2
+    assert "unresolved recovery incident" in deploy.stderr
+    assert _trace(rollback_lab) == before_retry
 
 
 def test_failed_application_only_rollback_keeps_metadata(rollback_lab):
@@ -172,6 +220,7 @@ def test_failed_application_only_rollback_keeps_metadata(rollback_lab):
                for line in _trace(rollback_lab))
     assert "smoke" not in _trace(rollback_lab)
     _assert_active_unchanged(rollback_lab)
+    assert (rollback_lab["root"] / ".ops-state" / "recovery-required").is_file()
 
 
 def test_success_commits_both_release_pointers_after_smoke(rollback_lab):
@@ -180,8 +229,38 @@ def test_success_commits_both_release_pointers_after_smoke(rollback_lab):
     assert _trace(rollback_lab)[-1] == "smoke"
     assert (rollback_lab["root"] / ".release.env").read_text(encoding="utf-8") == rollback_lab["previous"]
     assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == PREVIOUS_SHA + "\n"
+    assert not (rollback_lab["root"] / ".ops-state" / "recovery-required").exists()
     assert not list(rollback_lab["root"].glob(".release.env.rollback.*"))
     assert not list(rollback_lab["root"].glob(".release-sha.rollback.*"))
+
+
+def test_successful_application_only_rollback_preserves_existing_recovery_marker(rollback_lab):
+    rollback_lab["manifest"].write_text(
+        json.dumps({"previous_release_sha": PREVIOUS_SHA, "rollback_backup": None}),
+        encoding="utf-8",
+    )
+    marker = rollback_lab["root"] / ".ops-state" / "recovery-required"
+    marker.write_text("reason=database_recovery_still_pending\n", encoding="utf-8")
+
+    result = _run(rollback_lab)
+
+    assert result.returncode == 0, result.stderr
+    assert _trace(rollback_lab)[-1] == "smoke"
+    assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == PREVIOUS_SHA + "\n"
+    assert marker.read_text(encoding="utf-8") == "reason=database_recovery_still_pending\n"
+
+
+def test_invalid_snapshot_is_rejected_before_rollback_marker_or_docker(rollback_lab):
+    sidecar = rollback_lab["backup"].with_name(rollback_lab["backup"].name + ".sha256")
+    sidecar.write_text(f'{"0" * 64}  {rollback_lab["backup"]}\n', encoding="utf-8")
+
+    result = _run(rollback_lab)
+
+    assert result.returncode == 2
+    assert "Restore preflight checksum mismatch" in result.stderr
+    assert not (rollback_lab["root"] / ".ops-state" / "recovery-required").exists()
+    assert _trace(rollback_lab) == []
+    assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == CURRENT_SHA + "\n"
 
 
 def test_manual_rollback_refused_if_release_operation_lock_is_held(rollback_lab):

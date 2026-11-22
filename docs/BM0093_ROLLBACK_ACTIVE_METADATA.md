@@ -10,18 +10,35 @@ No ejecuta un rollback real, no cambia servicios externos y no publica producci�
 - Prepara la configuración y el SHA de la versión anterior en archivos temporales privados.
 - Ejecuta la restauración (o retorno de imágenes) con la configuración candidata.
 - Solo después de pasar el smoke HTTP publica `.release.env` y `.release-sha`.
-- Si el restore o el smoke falla, conserva los punteros originales y elimina los temporales.
-- Un fallo de restore **puede haber modificado servicios o datos** antes de fallar. Conservar metadatos no implica recuperación automática; requiere diagnóstico y restauración controlada.
+- Antes de restaurar o cambiar servicios, publica `.ops-state/recovery-required` para impedir nuevos despliegues mientras el estado es incierto.
+- Si el restore, el smoke o la publicación de metadatos falla, conserva el marcador y los punteros originales que no se hayan publicado.
+- Solo elimina el marcador creado por este rollback tras completar restore, smoke y publicación de ambos punteros. Un marcador preexistente nunca se borra con el rollback, incluso si solo cambian imágenes y el smoke pasa; requiere certificación explícita independiente.
+- Una restauración directa crea el mismo marcador tras validar el snapshot y la identidad de la base, antes de detener escritores. Persiste incluso si el comando termina correctamente; la recuperación aún necesita verificación y certificación del operador.
+- Antes de crear un marcador nuevo, el rollback valida checksum e identidad del snapshot y congela sus bytes en una copia privada. Si esa validación read-only falla, no se detienen servicios ni aparece un marcador nuevo.
+- Un fallo de restore **puede haber modificado servicios o datos** antes de fallar; requiere diagnóstico y recuperación controlada.
 
 ## Pruebas automáticas
 
 `tests/test_bm0093_rollback_atomic.py` reproduce en un directorio temporal:
 SHA obsoleto, snapshot ausente, fallo de restore, fallo de smoke,
-fallo de Docker y rollback satisfactorio. Reemplaza Docker y los scripts
-de recuperación y smoke por dobles locales, sin conexiones a producción.
+fallo de Docker, bloqueo de despliegue tras fallo, rechazo preflight sin
+marcador, preservación de marcador preexistente en rollback app-only y rollback
+satisfactorio.
+Reemplaza Docker y los scripts de recuperación y smoke por dobles locales,
+sin conexiones a producción.
 
 ## Pendiente para cerrar BM-0093
 
 Ensayo real aislado en staging con copia externa verificable, pérdida
 simulada de un servicio, restauración end-to-end y medición de RPO/RTO.
 El CI no acredita por sí solo recuperación ante pérdida del servidor.
+
+## Contrato de modos: preparación y recuperación real
+
+- La fase de preparación exige `PREPARE:<base>`, el directorio privado reservado por el padre y el lock heredado. Usa `RESTORE_PREPARE_ONLY=1` y `RESTORE_START_SERVICES=0`.
+- El padre fija el digest devuelto al verificar la copia y su identidad de archivo. La fase final compara ambos valores antes de detener escritores y reutiliza la copia sin leer un sidecar de preparación.
+- Ante errores como falta de espacio, datos sustituidos o una respuesta de preparación inválida, el padre limpia el directorio que reservó. Un marcador ya publicado permanece hasta la certificación.
+- La fase de restauración real fija explícitamente `RESTORE_PREPARE_ONLY=0` y `RESTORE_START_SERVICES=1`, también en rollback automático, sin aceptar valores heredados del entorno operativo.
+- Un manifiesto de despliegue malformado aborta antes de utilizar variables `PREVIOUS_RELEASE_SHA` o `ROLLBACK_BACKUP` heredadas.
+- Si HTTPS no llega a estar listo tras iniciar la mutación, el error debe ejecutar el mismo rollback controlado que fallos de arranque o smoke, no salir sin ejecutar recuperación.
+- Las regresiones adversariales con dobles locales protegen las cuatro variantes y el orden restore, reanudación, smoke y publicación de metadatos.

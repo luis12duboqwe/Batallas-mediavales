@@ -4,13 +4,16 @@ set -euo pipefail
 ENV_FILE="${1:-.env}"
 BACKUP_FILE="${2:-}"
 CONFIRMATION="${3:-}"
+PREPARED_DIR="${4:-}"
+PREPARED_RECEIPT="${5:-}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.deploy.yml}"
 RESTORE_START_SERVICES="${RESTORE_START_SERVICES:-1}"
+RESTORE_PREPARE_ONLY="${RESTORE_PREPARE_ONLY:-0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_DIR"
 
-if [[ -z "$BACKUP_FILE" ]]; then
+if [[ -z "$BACKUP_FILE" || $# -gt 5 ]]; then
   echo "Usage: $0 <env-file> <backup.dump> RESTORE:<database>" >&2
   exit 2
 fi
@@ -18,10 +21,71 @@ if [[ "$RESTORE_START_SERVICES" != "0" && "$RESTORE_START_SERVICES" != "1" ]]; t
   echo "RESTORE_START_SERVICES must be 0 or 1" >&2
   exit 2
 fi
+if [[ "$RESTORE_PREPARE_ONLY" != "0" && "$RESTORE_PREPARE_ONLY" != "1" ]]; then
+  echo "RESTORE_PREPARE_ONLY must be 0 or 1" >&2
+  exit 2
+fi
 
-python3 ops/preflight.py "$ENV_FILE"
+STATE_DIR=".ops-state"
+mkdir -p "$STATE_DIR"
+chmod 700 "$STATE_DIR"
+DEPLOY_LOCK_FILE="$STATE_DIR/deploy.lock"
+NESTED_RESTORE=0
 
-eval "$(python3 - "$ENV_FILE" <<'PY'
+# Standalone restores must serialize with deploys and rollbacks. Those callers
+# pass their already-held descriptor so this nested operation shares the lock.
+if [[ "${DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] &&
+   [[ -e "/proc/$$/fd/$DEPLOY_LOCK_FD" ]] &&
+   [[ "/proc/$$/fd/$DEPLOY_LOCK_FD" -ef "$DEPLOY_LOCK_FILE" ]]; then
+  exec {RESTORE_PROBE_FD}>> "$DEPLOY_LOCK_FILE"
+  if flock -n "$RESTORE_PROBE_FD"; then
+    RESTORE_LOCK_FD="$RESTORE_PROBE_FD"
+  else
+    exec {RESTORE_PROBE_FD}>&-
+    if flock -n "$DEPLOY_LOCK_FD"; then
+      NESTED_RESTORE=1
+    else
+      echo "Restore refused: another deploy, rollback or restore is already running" >&2
+      exit 2
+    fi
+  fi
+else
+  umask 077
+  exec {RESTORE_LOCK_FD}>> "$DEPLOY_LOCK_FILE"
+  if ! flock -n "$RESTORE_LOCK_FD"; then
+    echo "Restore refused: another deploy, rollback or restore is already running" >&2
+    exit 2
+  fi
+fi
+
+RECOVERY_REQUIRED="$STATE_DIR/recovery-required"
+validate_recovery_marker() {
+  if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
+    if [[ -L "$RECOVERY_REQUIRED" || ! -f "$RECOVERY_REQUIRED" ||
+          ! -O "$RECOVERY_REQUIRED" || ! -s "$RECOVERY_REQUIRED" ]]; then
+      echo "Restore refused: invalid recovery marker at $RECOVERY_REQUIRED" >&2
+      return 2
+    fi
+  fi
+}
+validate_recovery_marker
+
+RESTORE_TMP_DIR=""
+RESTORE_MARKER_TMP=""
+cleanup_restore() {
+  if [[ -n "$RESTORE_TMP_DIR" ]]; then
+    rm -rf -- "$RESTORE_TMP_DIR"
+  fi
+  rm -f -- "$RESTORE_MARKER_TMP"
+}
+trap cleanup_restore EXIT
+
+if [[ "$RESTORE_PREPARE_ONLY" == 1 ]]; then
+  python3 ops/preflight.py "$ENV_FILE" >&2
+else
+  python3 ops/preflight.py "$ENV_FILE"
+fi
+ENV_VALUES="$(python3 - "$ENV_FILE" <<'PYENV'
 import shlex
 import sys
 from pathlib import Path
@@ -30,44 +94,121 @@ from preflight import read_env
 values = read_env(Path(sys.argv[1]))
 for key in ('POSTGRES_USER', 'POSTGRES_DB'):
     print(f'{key}={shlex.quote(values[key])}')
-PY
+PYENV
 )"
+eval "$ENV_VALUES"
 
-if [[ "$CONFIRMATION" != "RESTORE:${POSTGRES_DB}" ]]; then
+if [[ "$RESTORE_PREPARE_ONLY" == 1 ]]; then
+  if [[ "$CONFIRMATION" != "PREPARE:${POSTGRES_DB}" || "$RESTORE_START_SERVICES" != 0 ||
+        -z "$PREPARED_DIR" || -n "$PREPARED_RECEIPT" ]]; then
+    echo "Preparation requires PREPARE:${POSTGRES_DB}, a private rollback directory and RESTORE_START_SERVICES=0" >&2
+    exit 2
+  fi
+elif [[ "$CONFIRMATION" != "RESTORE:${POSTGRES_DB}" ]]; then
   echo "Restore refused. Re-run with confirmation: RESTORE:${POSTGRES_DB}" >&2
   exit 2
 fi
 
-if [[ ! -s "$BACKUP_FILE" ]]; then
-  echo "Restore refused: backup is missing or empty: $BACKUP_FILE" >&2
-  exit 2
+umask 077
+EXPECTED_ID=""
+if [[ -n "$PREPARED_DIR" ]]; then
+  if [[ "$NESTED_RESTORE" != 1 || ! "$PREPARED_DIR" =~ ^\.ops-state/restore\.[[:alnum:]]{8}$ ||
+        -L "$PREPARED_DIR" || ! -d "$PREPARED_DIR" || ! -O "$PREPARED_DIR" ||
+        "$(stat -c %a -- "$PREPARED_DIR")" != 700 ]]; then
+    echo "Restore refused: invalid private rollback directory or missing parent lock" >&2
+    exit 2
+  fi
+  RESTORE_SNAPSHOT="$PREPARED_DIR/archive.dump"
+else
+  if [[ -n "$PREPARED_RECEIPT" ]]; then
+    echo "Restore refused: prepared receipt requires a private rollback directory" >&2
+    exit 2
+  fi
+  RESTORE_TMP_DIR="$(mktemp -d "$STATE_DIR/restore.XXXXXXXX")"
+  RESTORE_SNAPSHOT="$RESTORE_TMP_DIR/archive.dump"
 fi
 
-CHECKSUM_FILE="${BACKUP_FILE}.sha256"
-if [[ ! -f "$CHECKSUM_FILE" ]]; then
-  echo "Restore refused: checksum file missing: $CHECKSUM_FILE" >&2
-  exit 2
+if [[ "$RESTORE_PREPARE_ONLY" == 0 && -n "$PREPARED_DIR" ]]; then
+  if [[ "$BACKUP_FILE" != "$RESTORE_SNAPSHOT" ||
+        ! "$PREPARED_RECEIPT" =~ ^([0-9a-f]{64}):([0-9]+:[0-9]+)$ ]]; then
+    echo "Restore refused: invalid prepared archive path or receipt" >&2
+    exit 2
+  fi
+  EXPECTED_HASH="${BASH_REMATCH[1]}"
+  EXPECTED_ID="${BASH_REMATCH[2]}"
+else
+  if [[ ! -s "$BACKUP_FILE" ]]; then
+    echo "Restore refused: backup is missing or empty: $BACKUP_FILE" >&2
+    exit 2
+  fi
+  CHECKSUM_FILE="${BACKUP_FILE}.sha256"
+  if [[ ! -f "$CHECKSUM_FILE" ]]; then
+    echo "Restore refused: checksum file missing: $CHECKSUM_FILE" >&2
+    exit 2
+  fi
+  # The checksum filename field is informational. Hash the selected bytes.
+  EXPECTED_HASH="$(awk 'NR == 1 {print $1}' "$CHECKSUM_FILE")"
+  if [[ ! "$EXPECTED_HASH" =~ ^[[:xdigit:]]{64}$ ]] || [[ "$(wc -l < "$CHECKSUM_FILE")" -ne 1 ]]; then
+    echo "Restore refused: invalid backup checksum format" >&2
+    exit 2
+  fi
+  # The rollback parent owns its directory and cleans up even a partial copy.
+  (set -o noclobber; cat -- "$BACKUP_FILE" > "$RESTORE_SNAPSHOT")
+  chmod 400 "$RESTORE_SNAPSHOT"
 fi
-# Verify the *selected* archive, not a different filename embedded in .sha256.
-EXPECTED_HASH="$(awk 'NR == 1 {print $1}' "$CHECKSUM_FILE")"
-if [[ ! "$EXPECTED_HASH" =~ ^[[:xdigit:]]{64}$ ]] || [[ "$(wc -l < "$CHECKSUM_FILE")" -ne 1 ]]; then
-  echo "Restore refused: invalid backup checksum format" >&2
-  exit 2
-fi
-ACTUAL_HASH="$(sha256sum "$BACKUP_FILE" | cut -d' ' -f1)"
-if [[ "${EXPECTED_HASH,,}" != "$ACTUAL_HASH" ]]; then
-  echo "Restore refused: checksum mismatch for requested archive" >&2
-  exit 2
-fi
-echo "Backup checksum verified for requested archive"
 
-# pg_restore --create uses the database name embedded in the archive, NOT the
-# -d connection database. Refuse a wrong-database archive *before* stopping
-# writers or terminating PostgreSQL sessions.
+if [[ -L "$RESTORE_SNAPSHOT" || ! -f "$RESTORE_SNAPSHOT" || ! -s "$RESTORE_SNAPSHOT" ||
+      ! -O "$RESTORE_SNAPSHOT" || "$(stat -c '%a:%h' -- "$RESTORE_SNAPSHOT")" != 400:1 ]]; then
+  echo "Restore refused: invalid private archive" >&2
+  exit 2
+fi
+# Pin the inode for checksum, identity inspection and restore. Opening via
+# procfs gives each reader its own offset, even after a pathname replacement.
+exec {SNAPSHOT_FD}< "$RESTORE_SNAPSHOT"
+SNAPSHOT_INPUT="/proc/$$/fd/$SNAPSHOT_FD"
+SNAPSHOT_ID="$(stat -Lc '%d:%i' -- "$SNAPSHOT_INPUT")"
+SNAPSHOT_CTIME="$(stat -Lc %z -- "$SNAPSHOT_INPUT")"
+SNAPSHOT_HASH="$(sha256sum < "$SNAPSHOT_INPUT" | cut -d' ' -f1)"
+if [[ "$SNAPSHOT_HASH" != "${EXPECTED_HASH,,}" || "$SNAPSHOT_ID" != "${EXPECTED_ID:-$SNAPSHOT_ID}" ]]; then
+  echo "Restore refused: archive checksum mismatch or prepared archive replaced" >&2
+  exit 2
+fi
+if [[ "$RESTORE_PREPARE_ONLY" == 1 ]]; then
+  echo "Backup checksum verified for requested archive" >&2
+else
+  echo "Backup checksum verified for requested archive"
+fi
+
+# pg_restore --create uses the database name embedded in the archive.
 ARCHIVE_DATABASE="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
-  pg_restore --list < "$BACKUP_FILE" | sed -n 's/^;[[:space:]]*dbname: //p')"
+  pg_restore --list < "$SNAPSHOT_INPUT" | sed -n 's/^;[[:space:]]*dbname: //p')"
 if [[ "$ARCHIVE_DATABASE" != "$POSTGRES_DB" ]]; then
   echo "Restore refused: backup database '${ARCHIVE_DATABASE:-unknown}' does not match configured '${POSTGRES_DB}'" >&2
+  exit 2
+fi
+
+if [[ -L "$RESTORE_SNAPSHOT" || ! "$RESTORE_SNAPSHOT" -ef "$SNAPSHOT_INPUT" ||
+      "$SNAPSHOT_CTIME" != "$(stat -Lc %z -- "$SNAPSHOT_INPUT")" ]]; then
+  echo "Restore refused: private archive changed during validation" >&2
+  exit 2
+fi
+
+if [[ "$RESTORE_PREPARE_ONLY" == 1 ]]; then
+  printf '%s:%s\n' "$SNAPSHOT_HASH" "$SNAPSHOT_ID"
+  exit 0
+fi
+
+# A lock descriptor alone does not prove that a parent published a marker.
+# Publish our own when absent, and retain it for operator certification.
+validate_recovery_marker
+if [[ ! -e "$RECOVERY_REQUIRED" && ! -L "$RECOVERY_REQUIRED" ]]; then
+  RESTORE_MARKER_TMP="$(mktemp "$STATE_DIR/recovery-required.XXXXXXXX")"
+  printf 'reason=standalone_restore_requires_operator_certification\n' > "$RESTORE_MARKER_TMP"
+  ln -T -- "$RESTORE_MARKER_TMP" "$RECOVERY_REQUIRED"
+fi
+validate_recovery_marker
+if [[ ! -f "$RECOVERY_REQUIRED" ]]; then
+  echo "Restore refused: recovery marker disappeared" >&2
   exit 2
 fi
 
@@ -82,7 +223,7 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
 echo "Restoring $BACKUP_FILE into $POSTGRES_DB"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
   pg_restore --clean --if-exists --create --no-owner --no-privileges --exit-on-error \
-  -U "$POSTGRES_USER" -d postgres < "$BACKUP_FILE"
+  -U "$POSTGRES_USER" -d postgres < "$SNAPSHOT_INPUT"
 
 if [[ "$RESTORE_START_SERVICES" == "1" ]]; then
   echo "Starting selected release, migration chain and HTTPS edge"
