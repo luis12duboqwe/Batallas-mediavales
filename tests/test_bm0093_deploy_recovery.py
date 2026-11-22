@@ -183,7 +183,7 @@ exec /usr/bin/mv "$@"
         "PATH": str(bin_dir) + os.pathsep + env.get("PATH", ""),
         "BM_TRACE": str(trace),
         "BM_TEST_BACKUP_DIR": str(backups),
-        "BM_DATABASE_START_EXIT": "41",
+        "BM_DATABASE_START_EXIT": "0",
         "BM_SCHEMA_PROBE_EXIT": "0",
         "BM_SCHEMA_PROBE_VALUE": "t",
         "BM_RELEASE_PULL_EXIT": "0",
@@ -248,7 +248,7 @@ exec /usr/bin/cat "$@"
 def test_database_start_failure_does_not_start_migration_dependencies(deploy_lab):
     (deploy_lab["root"] / ".release.env").unlink()
     (deploy_lab["root"] / ".release-sha").unlink()
-    result = _run(deploy_lab)
+    result = _run(deploy_lab, {"BM_DATABASE_START_EXIT": "41"})
     assert result.returncode == 41, result.stderr
     assert _marker(deploy_lab).exists()
     assert not any("up -d --remove-orphans" in line for line in _trace(deploy_lab))
@@ -494,7 +494,7 @@ def test_deploy_restores_exact_new_backup_not_newest_directory_file(deploy_lab):
     trace = _trace(deploy_lab)
     prepared, = [line for line in trace if line.startswith("prepare:")]
     restored, = [line for line in trace if line.startswith("restore:")]
-    candidate_up, = [line for line in trace if " up -d " in line]
+    candidate_up, = [line for line in trace if " up -d --remove-orphans" in line]
     assert prepared.endswith("/batalla_ci-20261120T123456Z-A1b2C3d4.dump")
     assert restored.endswith("/archive.dump")
     assert trace.index(prepared) < trace.index(candidate_up) < trace.index(restored)
@@ -525,7 +525,7 @@ def test_prepare_failure_preserves_active_release_without_starting_services(
     assert not any(
         fragment in line
         for line in trace
-        for fragment in (" up ", "migrate", "seed", "restore:", "pg_restore --clean", " stop ")
+        for fragment in (" up -d --remove-orphans", "migrate", "seed", "restore:", "pg_restore --clean", " stop ")
     )
     root = deploy_lab["root"]
     assert (root / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
@@ -542,7 +542,7 @@ def test_real_auto_restore_reuses_prepared_copy_after_source_disappears(deploy_l
     trace = _trace(deploy_lab)
     copy, = [i for i, line in enumerate(trace) if line.startswith("copy:")]
     prepare_list, restore_list = [i for i, line in enumerate(trace) if "pg_restore --list" in line]
-    candidate_up, previous_up = [i for i, line in enumerate(trace) if " up -d " in line]
+    candidate_up, previous_up = [i for i, line in enumerate(trace) if " up -d --remove-orphans" in line]
     restore, = [i for i, line in enumerate(trace) if "pg_restore --clean" in line]
     assert copy < prepare_list < candidate_up < restore_list < restore < previous_up
     assert "--env-file .release.env.previous " in trace[prepare_list]
@@ -569,7 +569,7 @@ def test_successful_deploy_cleans_private_copy_and_keeps_original_backup_in_mani
     assert result.returncode == 0, result.stderr
     trace = _trace(deploy_lab)
     prepared, = [i for i, line in enumerate(trace) if line.startswith("prepare:")]
-    candidate_up, = [i for i, line in enumerate(trace) if " up -d " in line]
+    candidate_up, = [i for i, line in enumerate(trace) if " up -d --remove-orphans" in line]
     assert prepared < candidate_up
     assert not any(line.startswith("restore:") for line in trace)
     root = deploy_lab["root"]
@@ -731,4 +731,59 @@ def test_marker_symlink_always_blocks_deploy(deploy_lab, dangling):
         assert not target.exists()
     else:
         assert target.read_text() == "original incident\n"
+    assert _trace(deploy_lab) == []
+
+
+def test_compose_project_change_is_refused_before_database_access(deploy_lab):
+    """A same-named database in a different Compose project is not the old database."""
+    active_path = deploy_lab["root"] / ".release.env"
+    active_path.write_text(active_path.read_text(encoding="utf-8") +
+                           "COMPOSE_PROJECT_NAME=historical_world\n", encoding="utf-8")
+    candidate = deploy_lab["base"]
+    candidate.write_text(candidate.read_text(encoding="utf-8") +
+                         "COMPOSE_PROJECT_NAME=different_project\n", encoding="utf-8")
+    result = _run(deploy_lab)
+    assert result.returncode == 2
+    assert "PostgreSQL connection changed" in result.stderr
+    assert _trace(deploy_lab) == []
+    assert not _marker(deploy_lab).exists()
+    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
+    assert not (deploy_lab["root"] / ".release.env.next").exists()
+
+
+def test_managed_database_start_failure_is_retryable(deploy_lab):
+    """A stopped DB may be restarted with the old environment, without migrate/seed."""
+    failed = _run(deploy_lab, {"BM_DATABASE_START_EXIT": "41"})
+    assert failed.returncode == 41
+    assert not _marker(deploy_lab).exists()
+    assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+    assert not any("migrate seed" in line or "up -d --remove-orphans" in line
+                   for line in _trace(deploy_lab))
+    retry = _run(deploy_lab, {"BM_DATABASE_START_EXIT": "0", "BM_RELEASE_PULL_EXIT": "55"})
+    assert retry.returncode == 55, retry.stderr
+    trace = _trace(deploy_lab)
+    assert any("up -d database" in line for line in trace)
+    assert not any("up -d --remove-orphans" in line for line in trace)
+    assert not _marker(deploy_lab).exists()
+    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
+    _assert_temporary_files_cleaned(deploy_lab)
+
+
+def test_base_env_alias_to_next_candidate_is_rejected_without_removing_input(deploy_lab):
+    candidate = deploy_lab["root"] / ".release.env.next"
+    source = deploy_lab["base"].read_bytes()
+    candidate.write_bytes(source)
+    result = subprocess.run(
+        ["bash", "ops/deploy_remote.sh", str(candidate), NEW_SHA,
+         "registry.example.invalid/game/backend",
+         "registry.example.invalid/game/frontend"],
+        cwd=deploy_lab["root"], capture_output=True, text=True,
+        env=deploy_lab["env"], timeout=20, check=False,
+    )
+    assert result.returncode == 2
+    assert "aliases a temporary candidate" in result.stderr
+    assert candidate.read_bytes() == source
+    assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
+    assert not _marker(deploy_lab).exists()
     assert _trace(deploy_lab) == []

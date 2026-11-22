@@ -51,6 +51,12 @@ if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
   exit 2
 fi
 
+# Never install EXIT cleanup against a caller-owned input file or symlink.
+if [[ -L "$NEXT_ENV" || ( -e "$NEXT_ENV" && "$BASE_ENV" -ef "$NEXT_ENV" ) ]]; then
+  echo "Deployment refused: base env aliases a temporary candidate or candidate is a symlink" >&2
+  exit 2
+fi
+
 marker_tmp=""
 backup_receipt=""
 prepared_dir=""
@@ -129,7 +135,7 @@ from preflight import read_env
 
 previous = read_env(Path(sys.argv[1]))
 next_release = read_env(Path(sys.argv[2]))
-keys = ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "DB_URL")
+keys = ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "DB_URL", "COMPOSE_PROJECT_NAME")
 if any(previous.get(key) != next_release.get(key) for key in keys):
     print("Deployment refused: PostgreSQL connection changed; manual migration required", file=sys.stderr)
     raise SystemExit(2)
@@ -247,9 +253,12 @@ if [[ "$had_previous" -eq 0 ]]; then
   mv -T -- "$NEXT_ENV" "$CURRENT_ENV"
   candidate_env="$CURRENT_ENV"
   database_env="$CURRENT_ENV"
-  echo "Starting PostgreSQL for the initial deployment"
-  docker compose --env-file "$database_env" -f "$COMPOSE_FILE" up -d database
 fi
+
+# Use the previous release identity for managed deployments. Starting only
+# database cannot run migrate/seed, and recovers a stopped database safely.
+echo "Ensuring PostgreSQL is healthy before backup"
+docker compose --env-file "$database_env" -f "$COMPOSE_FILE" up -d database
 
 # Fail closed on a missing or failed database probe. A network or credential
 # error must never be mistaken for an empty first-install database.

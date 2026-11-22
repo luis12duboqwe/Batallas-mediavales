@@ -36,3 +36,23 @@ utilizar únicamente el snapshot validado y vinculado a esa ejecución.
 ## Riesgos restantes
 
 La recuperación completa ante caída del host, aislamiento frente a ejecuciones de despliegue simultáneas, retención externa, observabilidad y RPO/RTO reales deben validarse en staging antes de abrir beta.
+
+## Identidad de Compose y recuperación de base detenida
+
+El preflight de una release gestionada compara también `COMPOSE_PROJECT_NAME`
+entre configuración activa y candidata, además de la identidad PostgreSQL.
+Dos proyectos Compose pueden tener el mismo nombre y credenciales de base
+pero volúmenes y datos distintos. No se permite cruzar ese límite mediante
+un despliegue normal: requiere una adopción o migración autorizada.
+
+Antes del backup, el gestor inicia **únicamente** el servicio PostgreSQL con
+la configuración de la release anterior. Esto permite recuperarlo de una
+parada ordinaria sin ejecutar dependencias de migración/seed. Si falla, el
+despliegue termina antes de mutar la release y conserva la configuración
+anterior; una vez corregida la disponibilidad de la base, puede reintentarse.
+
+Se rechaza antes de instalar traps de limpieza un fichero de entrada que
+coincida con `.release.env.next`, así como un enlace simbólico en esa ruta.
+Esto impide que la limpieza de una operación fallida borre el fichero
+proporcionado por el operador. Las regresiones cubren proyecto cambiado,
+fallo y reintento de PostgreSQL detenido y archivo de entrada coincidente.
