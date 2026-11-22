@@ -290,21 +290,27 @@ def test_deploy_compose_mounts_control_read_only_and_design_documents_limits():
     assert "transaccional" in design
 
 
-def test_restrictive_umask_permissions_fail_closed_until_fixed(closed_edge):
-    """A regular marker is not usable until the Nginx worker can traverse/read."""
+def test_restrictive_umask_directory_is_normalized_before_open(closed_edge):
+    """Absent marker stays closed; normalization opens across worker UID setups."""
     edge = closed_edge
     control = edge["control"]
     marker = control / "open"
-    marker.write_text("open\n", encoding="utf-8")
-    marker.chmod(0o644)
     control.chmod(0o700)
     try:
+        assert control.stat().st_mode & 0o777 == 0o700
         _assert_maintenance_response(_request(edge, "/api/write"))
+        marker.write_text("open\n", encoding="utf-8")
+        marker.chmod(0o600)
+        # A worker sharing the owner's UID can still read a 0600 file.
+        # Do not rely on chmod for closing: only removing the marker closes.
+        assert marker.stat().st_mode & 0o777 == 0o600
     finally:
         control.chmod(0o755)
-    assert _request(edge, "/api/write")[0] == 200
 
-    marker.chmod(0o600)
-    _assert_maintenance_response(_request(edge, "/socket.io/?transport=polling"))
     marker.chmod(0o644)
+    assert _request(edge, "/api/write")[0] == 200
     assert _request(edge, "/socket.io/?transport=polling")[0] == 200
+
+    marker.unlink()
+    _assert_maintenance_response(_request(edge, "/api/write"))
+    _assert_maintenance_response(_request(edge, "/socket.io/?transport=polling"))
