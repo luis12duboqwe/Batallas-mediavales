@@ -44,7 +44,9 @@ de propiedad del operador, nunca un archivo o un enlace simbólico.
 - `/health` responde 200 solo como liveness del edge, NO como prueba de
   conectividad a PostgreSQL ni autorización para reabrir.
 - No hay bypass mediante cabeceras, cookies, IP, query ni ruta sin barra.
-  Las redirecciones permitidas preservan los parámetros `$is_args$args`.
+  Las redirecciones permitidas preservan los parámetros `$is_args$args` y
+  son **relativas** (`absolute_redirect off`), para no degradar HTTPS en Caddy
+  al seguir un `308` que conserva método y cuerpo.
 
 El directorio completo se monta `:ro` dentro del contenedor Nginx; solo
 el operador en el host puede publicar o retirar la señal. Su directorio
@@ -72,8 +74,11 @@ chmod 0755 "$dir"
 mkdir -- "$dir/open"
 chmod 0755 "$dir/open"
 ```
-Si el host usa `umask 077`, la carpeta aparece cerrada/inaccesible hasta
-el `chmod` explícito. No se necesita `nginx -s reload`, reinicio de
+Con `umask 077` hay que normalizar los permisos para que un worker con
+UID diferente pueda atravesar el directorio. **Los permisos no son el
+mecanismo de cierre**: un worker con el mismo UID puede acceder antes del
+`chmod`. Solo la ausencia de `open/`, comprobada mediante HTTP 503, acredita
+el cierre. No se necesita `nginx -s reload`, reinicio de
 Compose ni nuevas APIs. No crear el directorio abierto durante un reboot
 por defecto.
 

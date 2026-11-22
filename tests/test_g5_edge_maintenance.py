@@ -397,9 +397,17 @@ def test_slashless_redirects_preserve_original_query_parameters(closed_edge):
         closed_edge, "/socket.io?EIO=4&transport=polling", redirects=False,
     )
     assert status == 308
-    assert headers["Location"].endswith("/socket.io/?EIO=4&transport=polling")
+    assert headers["Location"] == "/socket.io/?EIO=4&transport=polling"
 
     status, headers, _ = _request(closed_edge, "/api?sort=resources", redirects=False)
     assert status == 308
-    assert headers["Location"].endswith("/api/?sort=resources")
+    assert headers["Location"] == "/api/?sort=resources"
+
+    # 308 preserves POST and its body. Only a relative Location may be
+    # followed safely through the public HTTPS Caddy origin.
+    status, headers, _ = _request(
+        closed_edge, "/api?intent=write", method="POST", body=b"mutate", redirects=False,
+    )
+    assert status == 308
+    assert headers["Location"] == "/api/?intent=write"
 
