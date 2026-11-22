@@ -56,3 +56,20 @@ coincida con `.release.env.next`, así como un enlace simbólico en esa ruta.
 Esto impide que la limpieza de una operación fallida borre el fichero
 proporcionado por el operador. Las regresiones cubren proyecto cambiado,
 fallo y reintento de PostgreSQL detenido y archivo de entrada coincidente.
+
+## Blindaje adicional de interpolación y disponibilidad inicial
+
+La identidad `COMPOSE_PROJECT_NAME` entre una release administrada y la nueva
+debe ser un **literal** compatible con los nombres de proyecto Compose
+(minúsculas, números, guiones y guiones bajos). Se rechazan referencias
+`${VARIABLE}` incluso si los dos archivos contienen la misma expresión:
+Compose podría resolverla desde variables externas diferentes y apuntar a
+volúmenes PostgreSQL distintos. Toda adopción entre proyectos requiere un
+procedimiento de migración separado y ensayado.
+
+El arranque limitado al servicio `database` usa `docker compose up -d
+--wait --wait-timeout 120 database` para esperar el estado saludable antes de
+consultar el esquema. Si no alcanza health, aborta antes de ejecutar
+migraciones o seed. El fallo de arranque de una base gestionada es reintentable
+sin modificar los punteros de release; una consulta SQL fallida **después**
+de confirmar health sigue tratándose como incidente de integridad.

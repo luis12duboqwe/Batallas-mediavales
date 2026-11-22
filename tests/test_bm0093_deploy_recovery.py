@@ -120,7 +120,7 @@ fi
         "  if [[ \"${BM_COMPOSE_PS_EXIT:-0}\" != 0 ]]; then exit \"$BM_COMPOSE_PS_EXIT\"; fi\n"
         "  printf '%s' \"${BM_COMPOSE_PS_OUTPUT:-}\"; exit 0\n"
         "fi\n"
-        "if [[ \"$*\" == *'up -d database'* ]]; then exit \"$BM_DATABASE_START_EXIT\"; fi\n"
+        "if [[ \"$*\" == *'up -d --wait --wait-timeout 120 database'* ]]; then exit \"$BM_DATABASE_START_EXIT\"; fi\n"
         "if [[ \"$*\" == *'SELECT to_regclass'* ]]; then\n"
         "  if [[ \"$BM_SCHEMA_PROBE_EXIT\" != 0 ]]; then exit \"$BM_SCHEMA_PROBE_EXIT\"; fi\n"
         "  printf '%s\\n' \"$BM_SCHEMA_PROBE_VALUE\"; exit 0\n"
@@ -762,7 +762,7 @@ def test_managed_database_start_failure_is_retryable(deploy_lab):
     retry = _run(deploy_lab, {"BM_DATABASE_START_EXIT": "0", "BM_RELEASE_PULL_EXIT": "55"})
     assert retry.returncode == 55, retry.stderr
     trace = _trace(deploy_lab)
-    assert any("up -d database" in line for line in trace)
+    assert any("up -d --wait --wait-timeout 120 database" in line for line in trace)
     assert not any("up -d --remove-orphans" in line for line in trace)
     assert not _marker(deploy_lab).exists()
     assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
@@ -787,3 +787,49 @@ def test_base_env_alias_to_next_candidate_is_rejected_without_removing_input(dep
     assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
     assert not _marker(deploy_lab).exists()
     assert _trace(deploy_lab) == []
+
+
+def test_interpolated_compose_project_identity_is_rejected_before_any_docker(deploy_lab):
+    """Identical raw ${WORLD_PROJECT} must not hide different effective projects."""
+    for path in (deploy_lab["root"] / ".release.env", deploy_lab["base"]):
+        path.write_text(
+            path.read_text(encoding="utf-8") + "COMPOSE_PROJECT_NAME=${WORLD_PROJECT}\n",
+            encoding="utf-8",
+        )
+    result = _run(deploy_lab, {"WORLD_PROJECT": "world_old"})
+    assert result.returncode == 2, result.stderr
+    assert "COMPOSE_PROJECT_NAME must not contain variable interpolation" in result.stderr
+    assert _trace(deploy_lab) == []
+    assert not _marker(deploy_lab).exists()
+    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
+
+
+def test_managed_database_waits_for_health_before_schema_probe(deploy_lab):
+    """A start-success is not readiness: database startup must wait for health."""
+    result = _run(deploy_lab, {"BM_RELEASE_PULL_EXIT": "55"})
+    assert result.returncode == 55, result.stderr
+    trace = _trace(deploy_lab)
+    start = next(i for i, value in enumerate(trace)
+                 if "up -d --wait --wait-timeout 120 database" in value)
+    probe = next(i for i, value in enumerate(trace)
+                 if "SELECT to_regclass" in value)
+    assert start < probe
+    assert not _marker(deploy_lab).exists()
+
+
+@pytest.mark.parametrize("key,value", [
+    ("COMPOSE_PROJECT_NAME", "${WORLD_PROJECT}"),
+    ("POSTGRES_USER", "${DB_USER_NAME}"),
+    ("POSTGRES_PASSWORD", "${DB_SECRET}"),
+    ("DB_URL", "postgresql://${DB_ENDPOINT}/batalla_ci"),
+])
+def test_interpolated_postgres_identity_cannot_change_volume_silently(deploy_lab, key, value):
+    """Literal comparisons are unsafe if Compose expands config-file variables."""
+    for path in (deploy_lab["root"] / ".release.env", deploy_lab["base"]):
+        path.write_text(path.read_text(encoding="utf-8") +
+                        f"{key}={value}\n", encoding="utf-8")
+    result = _run(deploy_lab)
+    assert result.returncode == 2
+    assert "must not contain variable interpolation" in result.stderr
+    assert _trace(deploy_lab) == []
+    assert not _marker(deploy_lab).exists()

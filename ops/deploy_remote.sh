@@ -128,6 +128,7 @@ if [[ "$had_previous" -eq 1 ]]; then
   # A database switch requires a separately rehearsed migration and recovery
   # plan; the automatic rollback can only restore the same PostgreSQL identity.
   previous_public_base_url="$(python3 - "$PREVIOUS_ENV" "$NEXT_ENV" <<'PY'
+import re
 import sys
 from pathlib import Path
 sys.path.insert(0, 'ops')
@@ -136,6 +137,21 @@ from preflight import read_env
 previous = read_env(Path(sys.argv[1]))
 next_release = read_env(Path(sys.argv[2]))
 keys = ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "DB_URL", "COMPOSE_PROJECT_NAME")
+# The two env files may interpolate the same raw expression differently from
+# file-local definitions. Compare only literal connection identities to avoid
+# backing up one PostgreSQL volume and restoring into another.
+for key in keys:
+    for value in (previous.get(key, ""), next_release.get(key, "")):
+        if re.search(r"\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*)", value):
+            print(f"Deployment refused: {key} must not contain variable interpolation", file=sys.stderr)
+            raise SystemExit(2)
+# Compose interpolates ${VAR} from the external shell environment, so two
+# identical raw dotenv values can still target distinct projects. Fail closed
+# on nonliteral project names before probing/backup/restoring any database.
+for value in (previous.get("COMPOSE_PROJECT_NAME", ""), next_release.get("COMPOSE_PROJECT_NAME", "")):
+    if value and not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", value):
+        print("Deployment refused: COMPOSE_PROJECT_NAME must be a literal lowercase project name", file=sys.stderr)
+        raise SystemExit(2)
 if any(previous.get(key) != next_release.get(key) for key in keys):
     print("Deployment refused: PostgreSQL connection changed; manual migration required", file=sys.stderr)
     raise SystemExit(2)
@@ -258,7 +274,7 @@ fi
 # Use the previous release identity for managed deployments. Starting only
 # database cannot run migrate/seed, and recovers a stopped database safely.
 echo "Ensuring PostgreSQL is healthy before backup"
-docker compose --env-file "$database_env" -f "$COMPOSE_FILE" up -d database
+docker compose --env-file "$database_env" -f "$COMPOSE_FILE" up -d --wait --wait-timeout 120 database
 
 # Fail closed on a missing or failed database probe. A network or credential
 # error must never be mistaken for an empty first-install database.
