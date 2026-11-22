@@ -93,7 +93,7 @@ BACKUP_RETENTION_DAYS=14
     }
 
 
-def _run(lab, *, backup=None, extra_env=None, pass_fds=()):
+def _run(lab, *, backup=None, confirmation="RESTORE:batalla_ci", args=(), extra_env=None, pass_fds=()):
     env = dict(lab["env"])
     env.update(extra_env or {})
     return subprocess.run(
@@ -102,7 +102,8 @@ def _run(lab, *, backup=None, extra_env=None, pass_fds=()):
             "ops/restore_postgres.sh",
             str(lab["env_file"]),
             str(backup or lab["backup"]),
-            "RESTORE:batalla_ci",
+            confirmation,
+            *args,
         ],
         cwd=lab["root"],
         env=env,
@@ -218,6 +219,7 @@ def test_restore_inherits_lock_through_bash_descriptor(restore_lab):
     )
 
     assert result.returncode == 0, result.stderr
+    assert restore_lab["marker"].read_text().startswith("reason=standalone_restore")
     trace = restore_lab["trace"].read_text(encoding="utf-8").splitlines()
     assert any(line.endswith("stop backend worker") for line in trace)
     assert any("pg_restore --clean --if-exists --create" in line for line in trace)
@@ -266,23 +268,31 @@ def test_restore_uses_verified_snapshot_after_original_path_is_replaced(restore_
 
 
 def test_prepared_snapshot_can_be_restored_by_the_real_restore_script(restore_lab):
-    prepared = _run(
-        restore_lab,
-        extra_env={"RESTORE_PREPARE_ONLY": "1", "RESTORE_START_SERVICES": "0"},
-    )
-    assert prepared.returncode == 0, prepared.stderr
-    snapshot = restore_lab["root"] / prepared.stdout.strip()
-    assert snapshot.is_file()
-    assert Path(f"{snapshot}.sha256").is_file()
-    assert hashlib.sha256(snapshot.read_bytes()).hexdigest() in Path(
-        f"{snapshot}.sha256"
-    ).read_text(encoding="utf-8")
-
-    restored = _run(
-        restore_lab,
-        backup=snapshot,
-        extra_env={"RESTORE_START_SERVICES": "0"},
-    )
+    directory = ".ops-state/restore.A1b2C3d4"
+    (restore_lab["root"] / directory).mkdir(mode=0o700)
+    snapshot = restore_lab["root"] / directory / "archive.dump"
+    with restore_lab["lock"].open("a+", encoding="utf-8") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        env = {"DEPLOY_LOCK_FD": str(holder.fileno()), "RESTORE_START_SERVICES": "0"}
+        prepared = _run(
+            restore_lab,
+            confirmation="PREPARE:batalla_ci",
+            args=(directory,),
+            extra_env={**env, "RESTORE_PREPARE_ONLY": "1"},
+            pass_fds=(holder.fileno(),),
+        )
+        assert prepared.returncode == 0, prepared.stderr
+        assert not restore_lab["marker"].exists()
+        digest, device, inode = prepared.stdout.strip().split(":")
+        assert digest == hashlib.sha256(snapshot.read_bytes()).hexdigest()
+        assert (int(device), int(inode)) == (snapshot.stat().st_dev, snapshot.stat().st_ino)
+        restored = _run(
+            restore_lab,
+            backup=f"{directory}/archive.dump",
+            args=(directory, prepared.stdout.strip()),
+            extra_env=env,
+            pass_fds=(holder.fileno(),),
+        )
     assert restored.returncode == 0, restored.stderr
     assert any(
         "pg_restore --clean --if-exists --create" in line
@@ -483,3 +493,187 @@ def test_manifest_parse_failure_never_trusts_inherited_rollback_values(restore_l
         "Malformed manifest unexpectedly fell back to inherited PREVIOUS_RELEASE_SHA and "
         "ROLLBACK_BACKUP. stdout=" + result.stdout + " stderr=" + result.stderr
     )
+
+
+@pytest.mark.parametrize("confirmation", ["RESTORE:batalla_ci", "PREPARE:other_db"])
+def test_prepare_requires_explicit_database_confirmation(restore_lab, confirmation):
+    directory = ".ops-state/restore.A1b2C3d4"
+    (restore_lab["root"] / directory).mkdir(mode=0o700)
+    with restore_lab["lock"].open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = _run(
+            restore_lab, confirmation=confirmation, args=(directory,),
+            extra_env={
+                "DEPLOY_LOCK_FD": str(holder.fileno()),
+                "RESTORE_PREPARE_ONLY": "1", "RESTORE_START_SERVICES": "0",
+            },
+            pass_fds=(holder.fileno(),),
+        )
+    assert result.returncode == 2
+    assert "Preparation requires PREPARE:batalla_ci" in result.stderr
+    assert not restore_lab["trace"].exists()
+    assert not restore_lab["marker"].exists()
+    assert not list((restore_lab["root"] / directory).iterdir())
+
+
+def _run_rollback(lab, **extra_env):
+    current, _ = _configure_rollback_lab(lab)
+    return subprocess.run(
+        ["bash", "ops/rollback_remote.sh", current, f"ROLLBACK:{current}"],
+        cwd=lab["root"], env={**lab["env"], **extra_env}, text=True,
+        capture_output=True, timeout=20, check=False,
+    )
+
+
+@pytest.mark.parametrize("command", ["restore", "rollback"])
+@pytest.mark.parametrize("kind", ["dangling", "symlink", "directory", "fifo"])
+def test_restore_and_rollback_reject_invalid_marker(restore_lab, command, kind):
+    marker = restore_lab["marker"]
+    target = restore_lab["root"] / "target"
+    if kind == "directory":
+        marker.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(marker)
+    else:
+        if kind == "symlink":
+            target.write_text("sentinel\n")
+        marker.symlink_to(target)
+    result = _run(restore_lab) if command == "restore" else _run_rollback(restore_lab)
+    assert result.returncode == 2, result.stderr
+    assert "invalid recovery marker" in result.stderr
+    assert not restore_lab["trace"].exists()
+    if kind in {"dangling", "symlink"}:
+        assert marker.is_symlink()
+        if kind == "symlink":
+            assert target.read_text() == "sentinel\n"
+        else:
+            assert not target.exists()
+
+
+def _wrap_restore(lab, script):
+    ops = lab["root"] / "ops"
+    (ops / "restore_postgres.sh").rename(ops / "restore_real.sh")
+    (ops / "restore_postgres.sh").write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + script)
+
+
+@pytest.mark.parametrize("replacement", ["new_inode", "same_bytes", "same_inode"])
+def test_rollback_rejects_prepared_archive_replacement(restore_lab, replacement):
+    _wrap_restore(restore_lab, """
+if [[ "$RESTORE_PREPARE_ONLY" == 0 ]]; then
+  if [[ "$BM_REPLACEMENT" == same_inode ]]; then
+    chmod 600 "$2"
+    printf 'different archive for the same database' > "$2"
+  else
+    if [[ "$BM_REPLACEMENT" == same_bytes ]]; then
+      cp -- "$2" "$2.other"
+    else
+      printf 'different archive for the same database' > "$2.other"
+    fi
+    mv -T -- "$2.other" "$2"
+  fi
+  chmod 400 "$2"
+  sha256sum "$2" > "$2.sha256"
+fi
+exec bash ops/restore_real.sh "$@"
+""")
+    result = _run_rollback(restore_lab, BM_REPLACEMENT=replacement)
+    assert result.returncode == 2, result.stderr
+    assert "checksum mismatch or prepared archive replaced" in result.stderr
+    trace = restore_lab["trace"].read_text()
+    assert trace.count("pg_restore --list") == 1
+    assert "stop backend worker" not in trace
+    assert "pg_restore --clean" not in trace
+    assert restore_lab["marker"].is_file()
+    assert not list(restore_lab["marker"].parent.glob("restore.*"))
+    assert (restore_lab["root"] / ".release-sha").read_text().strip() == "d" * 40
+
+
+@pytest.mark.parametrize("copy_failure", ["first", "second"])
+def test_rollback_copies_large_archive_once_and_cleans_partial_enospc(restore_lab, copy_failure):
+    backup = restore_lab["backup"]
+    backup.write_bytes(b"A" * (4 * 1024 * 1024))
+    backup.with_suffix(".dump.sha256").write_text(
+        f"{hashlib.sha256(backup.read_bytes()).hexdigest()}  {backup}\n"
+    )
+    copy_log = restore_lab["root"] / "copies"
+    shim = restore_lab["root"] / "bin" / "cat"
+    shim.write_text("""#!/usr/bin/env bash
+if [[ "${1:-}" == -- && "${2:-}" == *.dump ]]; then
+  if [[ "$BM_COPY_FAILURE" == first || -e "$BM_COPY_LOG" ]]; then
+    printf partial
+    echo 'No space left on device' >&2
+    exit 28
+  fi
+  printf 'copy\\n' >> "$BM_COPY_LOG"
+fi
+exec /bin/cat "$@"
+""")
+    shim.chmod(0o755)
+    result = _run_rollback(
+        restore_lab, BM_COPY_FAILURE=copy_failure, BM_COPY_LOG=str(copy_log),
+    )
+    if copy_failure == "first":
+        assert result.returncode == 28, result.stderr
+        assert "No space left on device" in result.stderr
+        assert not restore_lab["trace"].exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert copy_log.read_text() == "copy\n"
+        assert "pg_restore --clean" in restore_lab["trace"].read_text()
+    assert not restore_lab["marker"].exists()
+    assert not list(restore_lab["marker"].parent.glob("restore.*"))
+    assert not list(restore_lab["root"].glob(".release*.rollback.*"))
+
+
+def test_malicious_prepare_stdout_cannot_redirect_rollback_cleanup(restore_lab):
+    sentinel = restore_lab["root"] / "keep" / "archive.dump"
+    sentinel.parent.mkdir()
+    sentinel.write_bytes(b"keep")
+    _wrap_restore(restore_lab, """
+bash ops/restore_real.sh "$@" >/dev/null
+printf '%s\\n' "$BM_SENTINEL"
+""")
+    result = _run_rollback(restore_lab, BM_SENTINEL=str(sentinel))
+    assert result.returncode == 2, result.stderr
+    assert "invalid prepared archive receipt" in result.stderr
+    assert sentinel.read_bytes() == b"keep"
+    assert not restore_lab["marker"].exists()
+    assert not list(restore_lab["marker"].parent.glob("restore.*"))
+    assert not list(restore_lab["root"].glob(".release*.rollback.*"))
+
+
+def test_nested_restore_refuses_marker_symlink_inserted_during_publication(restore_lab):
+    target = restore_lab["root"] / "missing-target"
+    shim = restore_lab["root"] / "bin" / "ln"
+    shim.write_text("""#!/usr/bin/env bash
+/bin/ln -s -- "$BM_MARKER_TARGET" "${@: -1}"
+exec /bin/ln "$@"
+""")
+    shim.chmod(0o755)
+    with restore_lab["lock"].open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = _run(
+            restore_lab,
+            extra_env={
+                "DEPLOY_LOCK_FD": str(holder.fileno()), "BM_MARKER_TARGET": str(target),
+            },
+            pass_fds=(holder.fileno(),),
+        )
+
+    assert result.returncode != 0
+    assert restore_lab["marker"].is_symlink()
+    assert not target.exists()
+    trace = restore_lab["trace"].read_text()
+    assert "pg_restore --list" in trace
+    assert "stop backend worker" not in trace
+    assert not list(restore_lab["marker"].parent.glob("recovery-required.*"))
+    assert not list(restore_lab["marker"].parent.glob("restore.*"))
+
+
+def test_standalone_restore_with_inherited_prepare_flag_fails_closed(restore_lab):
+    result = _run(restore_lab, extra_env={"RESTORE_PREPARE_ONLY": "1"})
+    assert result.returncode == 2, result.stderr
+    assert "Preparation requires PREPARE:batalla_ci" in result.stderr
+    assert not restore_lab["trace"].exists()
+    assert not restore_lab["marker"].exists()
+    assert not list(restore_lab["marker"].parent.glob("restore.*"))

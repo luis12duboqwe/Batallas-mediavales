@@ -17,21 +17,25 @@ para conservar la exclusión mutua sin bloquearse a sí mismo. Comprueba el lock
 con un descriptor independiente antes de confiar en el descriptor heredado,
 para que un descriptor abierto pero desbloqueado no se confunda con un restore
 anidado.
-El script copia el dump a un directorio privado y verifica de nuevo el hash;
-la consulta de identidad y el restore destructivo usan esa misma copia, no
-reabren el pathname seleccionado.
-Tras validar checksum e identidad de la base, un restore directo crea
-`.ops-state/recovery-required` antes de detener escritores. El script no
-elimina este marcador, ni siquiera si el comando termina sin error: un operador
-debe verificar servicios, datos y smoke y certificar la recuperación antes de
-limpiarlo. El protocolo de recuperación del invocador sigue controlando los
-restores anidados.
+El script copia el dump a un directorio privado y verifica el hash de la
+copia. La comprobación de identidad y el restore destructivo leen el mismo
+inodo a través de un descriptor abierto.
 
-El rollback manual solicita al restore una preparación read-only del snapshot:
-checksum, copia privada e identidad de la base se validan antes de publicar un
-marcador nuevo. Si el preflight falla, no se detienen escritores ni se crea un
-marcador. El rollback consume la copia preparada para que la validación y la
-restauración refieran los mismos bytes.
+Antes de detener escritores, todo restore real necesita un marcador de
+recuperación regular, no vacío y del usuario que ejecuta la operación.
+Cuando falta, el restore lo publica de forma exclusiva, incluso con un
+descriptor de lock heredado. El operador debe certificar la recuperación para
+retirar ese marcador. Deploy bloquea cualquier entrada en la ruta del
+marcador, incluidos los enlaces simbólicos colgantes. Restore y rollback
+rechazan los enlaces y demás tipos no regulares.
+
+El rollback manual reserva un directorio privado bajo el lock y solicita
+preparación con `PREPARE:<base>`, `RESTORE_PREPARE_ONLY=1` y
+`RESTORE_START_SERVICES=0`. La preparación comprueba el checksum y la identidad
+de la base antes de publicar un marcador nuevo, y devuelve el digest SHA-256
+y la identidad del archivo. El padre pasa esos valores a la fase
+`RESTORE:<base>`, que verifica la misma copia sin crear una segunda. El
+directorio que creó el padre es la única ruta que usa para limpiar la copia.
 
 El archivo del lock no es un marcador de incidente: se conserva entre
 ejecuciones y el kernel libera el bloqueo al terminar el proceso. No es

@@ -102,22 +102,30 @@ fi
 # Keep the active configuration and release pointer unchanged until the restore
 # and smoke check have BOTH succeeded. The candidates live on the same filesystem
 # as their destinations so each final rename is atomic.
-STAGED_ENV="$(mktemp ./.release.env.rollback.XXXXXXXX)"
-STAGED_SHA="$(mktemp ./.release-sha.rollback.XXXXXXXX)"
+STAGED_ENV=""
+STAGED_SHA=""
+PREPARED_DIR=""
 RECOVERY_REQUIRED="$STATE_DIR/recovery-required"
-VALIDATED_BACKUP=""
-RECOVERY_MARKER_PREEXISTED=0
-if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
-  RECOVERY_MARKER_PREEXISTED=1
-fi
+validate_recovery_marker() {
+  if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
+    if [[ -L "$RECOVERY_REQUIRED" || ! -f "$RECOVERY_REQUIRED" ||
+          ! -O "$RECOVERY_REQUIRED" || ! -s "$RECOVERY_REQUIRED" ]]; then
+      echo "Rollback refused: invalid recovery marker at $RECOVERY_REQUIRED" >&2
+      return 2
+    fi
+  fi
+}
+validate_recovery_marker
 RECOVERY_MARKER_TMP=""
 cleanup() {
   rm -f -- "$STAGED_ENV" "$STAGED_SHA" "$RECOVERY_MARKER_TMP"
-  if [[ -n "$VALIDATED_BACKUP" ]]; then
-    rm -rf -- "${VALIDATED_BACKUP%/*}"
+  if [[ -n "$PREPARED_DIR" ]]; then
+    rm -rf -- "$PREPARED_DIR"
   fi
 }
 trap cleanup EXIT
+STAGED_ENV="$(mktemp ./.release.env.rollback.XXXXXXXX)"
+STAGED_SHA="$(mktemp ./.release-sha.rollback.XXXXXXXX)"
 cp "$PREVIOUS_ENV" "$STAGED_ENV"
 chmod 600 "$STAGED_ENV"
 printf '%s\n' "$PREVIOUS_RELEASE_SHA" > "$STAGED_SHA"
@@ -126,28 +134,34 @@ chmod 600 "$STAGED_SHA"
 # Validate and freeze the exact snapshot before publishing a recovery marker.
 # A rejected checksum or archive identity must not create a false incident.
 if [[ -n "$ROLLBACK_BACKUP" ]]; then
-  VALIDATED_BACKUP="$(DEPLOY_LOCK_FD="$DEPLOY_LOCK_FD" RESTORE_PREPARE_ONLY=1 RESTORE_START_SERVICES=0 \
-    bash ops/restore_postgres.sh "$STAGED_ENV" "$ROLLBACK_BACKUP" "RESTORE:${POSTGRES_DB}")"
-  if [[ ! "$VALIDATED_BACKUP" =~ ^\.ops-state/restore\.[[:alnum:]]{8}/archive\.dump$ ||
-        ! -s "$VALIDATED_BACKUP" || -L "$VALIDATED_BACKUP" ]]; then
-    echo "Rollback refused: restore preflight did not return a private verified snapshot" >&2
+  PREPARED_DIR="$(mktemp -d "$STATE_DIR/restore.XXXXXXXX")"
+  PREPARED_RECEIPT="$(DEPLOY_LOCK_FD="$DEPLOY_LOCK_FD" RESTORE_PREPARE_ONLY=1 RESTORE_START_SERVICES=0 \
+    bash ops/restore_postgres.sh "$STAGED_ENV" "$ROLLBACK_BACKUP" "PREPARE:${POSTGRES_DB}" "$PREPARED_DIR")"
+  if [[ ! "$PREPARED_RECEIPT" =~ ^[0-9a-f]{64}:[0-9]+:[0-9]+$ ]]; then
+    echo "Rollback refused: invalid prepared archive receipt" >&2
     exit 2
   fi
 fi
 
-# A failed restore or smoke can leave the live database/services inconsistent
-# with the active release pointers. Block future deploys before any mutation.
-if [[ "$RECOVERY_MARKER_PREEXISTED" -eq 0 ]]; then
+# Publish the guard before any mutation. Existing incidents are preserved.
+validate_recovery_marker
+if [[ ! -e "$RECOVERY_REQUIRED" && ! -L "$RECOVERY_REQUIRED" ]]; then
   RECOVERY_MARKER_TMP="$(mktemp "$STATE_DIR/recovery-required.XXXXXXXX")"
   printf 'reason=manual_rollback_in_progress\ncurrent_release=%s\nprevious_release=%s\n' \
     "$CURRENT_RELEASE" "$PREVIOUS_RELEASE_SHA" > "$RECOVERY_MARKER_TMP"
-  chmod 600 "$RECOVERY_MARKER_TMP"
-  mv -f -- "$RECOVERY_MARKER_TMP" "$RECOVERY_REQUIRED"
+  ln -T -- "$RECOVERY_MARKER_TMP" "$RECOVERY_REQUIRED"
+fi
+
+validate_recovery_marker
+if [[ ! -f "$RECOVERY_REQUIRED" ]]; then
+  echo "Rollback refused: recovery marker disappeared" >&2
+  exit 2
 fi
 
 if [[ -n "$ROLLBACK_BACKUP" ]]; then
   DEPLOY_LOCK_FD="$DEPLOY_LOCK_FD" RESTORE_PREPARE_ONLY=0 RESTORE_START_SERVICES=1 \
-    bash ops/restore_postgres.sh "$STAGED_ENV" "$VALIDATED_BACKUP" "RESTORE:${POSTGRES_DB}"
+    bash ops/restore_postgres.sh "$STAGED_ENV" "$PREPARED_DIR/archive.dump" "RESTORE:${POSTGRES_DB}" \
+      "$PREPARED_DIR" "$PREPARED_RECEIPT"
 else
   echo "No database snapshot was associated with this deployment; rolling back application images only"
   docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" pull backend worker frontend
@@ -159,7 +173,8 @@ python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-
 # Commit metadata only after the candidate release has passed post-rollback smoke.
 mv -f -- "$STAGED_ENV" .release.env
 mv -f -- "$STAGED_SHA" .release-sha
-if [[ "$RECOVERY_MARKER_PREEXISTED" -eq 0 ]]; then
+if [[ -n "$RECOVERY_MARKER_TMP" && ! -L "$RECOVERY_REQUIRED" &&
+      "$RECOVERY_MARKER_TMP" -ef "$RECOVERY_REQUIRED" ]]; then
   rm -f -- "$RECOVERY_REQUIRED"
 fi
 echo "Rollback succeeded: ${CURRENT_RELEASE} -> ${PREVIOUS_RELEASE_SHA}"

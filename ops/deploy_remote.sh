@@ -46,7 +46,7 @@ fi
 # A failed automatic rollback can leave partially migrated services. Never
 # try another deployment until a human has reconciled the recovery marker.
 RECOVERY_REQUIRED="$STATE_DIR/recovery-required"
-if [[ -e "$RECOVERY_REQUIRED" ]]; then
+if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
   echo "Deployment refused: unresolved recovery incident at $RECOVERY_REQUIRED" >&2
   exit 2
 fi
@@ -154,9 +154,18 @@ fi
 # Persist the in-progress recovery guard BEFORE mutating the active release.
 # A process crash, disk exhaustion or failure inside the ERR trap must not
 # silently permit another deployment against an uncertain state.
+marker_tmp="$(mktemp "$STATE_DIR/recovery-required.XXXXXXXX")"
+trap 'rm -f -- "$marker_tmp"' EXIT
 printf 'failed_release=%s\nprevious_release=%s\nreason=deployment_in_progress\n' \
-  "$RELEASE_SHA" "$previous_release_sha" > "$RECOVERY_REQUIRED"
-chmod 600 "$RECOVERY_REQUIRED"
+  "$RELEASE_SHA" "$previous_release_sha" > "$marker_tmp"
+ln -T -- "$marker_tmp" "$RECOVERY_REQUIRED"
+clear_recovery_marker() {
+  if [[ -L "$RECOVERY_REQUIRED" || ! "$marker_tmp" -ef "$RECOVERY_REQUIRED" ]]; then
+    echo "Recovery marker changed during deployment; operator inspection required" >&2
+    return 2
+  fi
+  rm -f -- "$RECOVERY_REQUIRED"
+}
 mv "$NEXT_ENV" "$CURRENT_ENV"
 
 rollback_backup=""
@@ -186,11 +195,11 @@ rollback() {
          mv -f -- "$recovery_env" "$CURRENT_ENV"; then
         recovery_env=""
         if [[ "$schema_integrity_uncertain" -ne 1 ]]; then
-          rm -f -- "$RECOVERY_REQUIRED"
+          clear_recovery_marker
         fi
       fi
     fi
-    if [[ -e "$RECOVERY_REQUIRED" ]]; then
+    if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
       echo "CRITICAL: deployment stopped before migrations; inspection required ($RECOVERY_REQUIRED)" >&2
     fi
     if [[ -n "$recovery_env" ]]; then rm -f -- "$recovery_env"; fi
@@ -232,11 +241,8 @@ rollback() {
   if [[ "$recovered" -eq 2 ]]; then
     # .release-sha already points to the previous release during a failed
     # deployment. Preserve it; only the active env needed to be restored.
-    rm -f -- "$RECOVERY_REQUIRED"
+    clear_recovery_marker
   else
-    printf 'failed_release=%s\nprevious_release=%s\nreason=automatic_rollback_failed\n' \
-      "$RELEASE_SHA" "$previous_release_sha" > "$RECOVERY_REQUIRED" || true
-    chmod 600 "$RECOVERY_REQUIRED" || true
     echo "CRITICAL: rollback not verified; manual recovery required ($RECOVERY_REQUIRED)" >&2
   fi
   if [[ -n "$recovery_env" ]]; then rm -f -- "$recovery_env"; fi
@@ -366,5 +372,5 @@ PY
 rm -f "$PREVIOUS_ENV"
 echo "$RELEASE_SHA" > .release-sha
 chmod 600 .release-sha
-rm -f -- "$RECOVERY_REQUIRED"
+clear_recovery_marker
 echo "Deployment succeeded: ${RELEASE_SHA}"

@@ -35,7 +35,9 @@ El CI no acredita por sí solo recuperación ante pérdida del servidor.
 
 ## Contrato de modos: preparación y recuperación real
 
-- La fase de preparación valida una copia sin cambiar servicios: `RESTORE_PREPARE_ONLY=1` y `RESTORE_START_SERVICES=0`.
+- La fase de preparación exige `PREPARE:<base>`, el directorio privado reservado por el padre y el lock heredado. Usa `RESTORE_PREPARE_ONLY=1` y `RESTORE_START_SERVICES=0`.
+- El padre fija el digest devuelto al verificar la copia y su identidad de archivo. La fase final compara ambos valores antes de detener escritores y reutiliza la copia sin leer un sidecar de preparación.
+- Ante errores como falta de espacio, datos sustituidos o una respuesta de preparación inválida, el padre limpia el directorio que reservó. Un marcador ya publicado permanece hasta la certificación.
 - La fase de restauración real fija explícitamente `RESTORE_PREPARE_ONLY=0` y `RESTORE_START_SERVICES=1`, también en rollback automático, sin aceptar valores heredados del entorno operativo.
 - Un manifiesto de despliegue malformado aborta antes de utilizar variables `PREVIOUS_RELEASE_SHA` o `ROLLBACK_BACKUP` heredadas.
 - Si HTTPS no llega a estar listo tras iniciar la mutación, el error debe ejecutar el mismo rollback controlado que fallos de arranque o smoke, no salir sin ejecutar recuperación.

@@ -59,10 +59,10 @@ def rollback_lab(tmp_path):
         "    echo 'Restore preflight checksum mismatch' >&2\n"
         "    exit 2\n"
         "  fi\n"
-        "  stage_dir=\"$(mktemp -d .ops-state/restore.XXXXXXXX)\"\n"
-        "  cp -- \"$backup\" \"$stage_dir/archive.dump\"\n"
-        "  sha256sum \"$stage_dir/archive.dump\" > \"$stage_dir/archive.dump.sha256\"\n"
-        "  printf '%s\\n' \"$stage_dir/archive.dump\"\n"
+        '  [[ "$3" == PREPARE:batalla_ci && "$RESTORE_START_SERVICES" == 0 ]] || exit 98\n'
+        '  cp -- "$backup" "$4/archive.dump"\n'
+        '  hash="$(sha256sum < "$4/archive.dump" | cut -d" " -f1)"\n'
+        '  printf "%s:%s\\n" "$hash" "$(stat -c %d:%i "$4/archive.dump")"\n'
         "  exit 0\n"
         "fi\n"
         "printf 'restore:%s\\n' \"$1\" >> \"$BM_TRACE\"\n"

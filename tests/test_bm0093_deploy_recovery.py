@@ -7,8 +7,10 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -509,7 +511,7 @@ def test_https_edge_timeout_activates_rollback_instead_of_simple_exit(deploy_lab
         "  cat >/dev/null\n"
         "  exit 1\n"
         "fi\n"
-        'exec /usr/local/bin/python3 "$@"\n',
+        f'exec {shlex.quote(sys.executable)} "$@"\n',
         encoding="utf-8",
     )
     python_shim.chmod(0o755)
@@ -558,7 +560,7 @@ def test_edge_timeout_with_failed_restore_retains_recovery_marker(deploy_lab):
         "  cat >/dev/null\n"
         "  exit 1\n"
         "fi\n"
-        'exec /usr/local/bin/python3 "$@"\n', encoding="utf-8",
+        f'exec {shlex.quote(sys.executable)} "$@"\n', encoding="utf-8",
     )
     python_shim.chmod(0o755)
     sleep_shim = bin_dir / "sleep"
@@ -572,3 +574,24 @@ def test_edge_timeout_with_failed_restore_retains_recovery_marker(deploy_lab):
     assert result.returncode != 0
     assert _marker(deploy_lab).is_file(), result.stderr
     assert any(s.startswith("restore:") for s in _trace(deploy_lab))
+
+
+@pytest.mark.parametrize("dangling", [True, False])
+def test_marker_symlink_always_blocks_deploy(deploy_lab, dangling):
+    marker = _marker(deploy_lab)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    target = deploy_lab["root"] / "marker-target"
+    if not dangling:
+        target.write_text("original incident\n")
+    marker.symlink_to(target)
+
+    result = _run(deploy_lab)
+
+    assert result.returncode == 2, result.stderr
+    assert "unresolved recovery incident" in result.stderr
+    assert marker.is_symlink()
+    if dangling:
+        assert not target.exists()
+    else:
+        assert target.read_text() == "original incident\n"
+    assert _trace(deploy_lab) == []
