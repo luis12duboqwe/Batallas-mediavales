@@ -124,6 +124,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./.ops-state/edge-maintenance:/etc/nginx/edge-maintenance:ro
     depends_on:
       backend:
         condition: service_healthy
