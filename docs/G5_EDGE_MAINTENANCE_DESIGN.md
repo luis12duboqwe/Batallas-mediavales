@@ -1,5 +1,29 @@
 # G5 Nginx edge maintenance gate
 
+## Activación controlada y compatibilidad (no se activa por defecto)
+
+La configuración de despliegue conserva `nginx.conf` como valor por defecto,
+sin cambiar el comportamiento de `docker-compose.yml` para desarrollo local.
+La barrera vive exclusivamente en `nginx.g5.conf` y puede seleccionarse en
+el archivo de configuración de una release protegida con
+`G5_NGINX_CONFIG_FILE=nginx.g5.conf`. `ops/preflight.py` permite únicamente
+`nginx.conf` o `nginx.g5.conf`, no rutas arbitrarias ni interpolaciones.
+La variable debe formar parte de la configuración inmutable de la release
+probada, no cambiarse durante un despliegue activo.
+
+**NO habilitar esa opción todavía en staging o producción.** El orquestador
+actual no cierra, drena, verifica ni reabre el gate durante el backup/rollback.
+Activarlo ahora provocaría fallos de smoke y recuperación; el issue #174 exige
+una integración adicional que proteja escrituras confirmadas. La inclusión
+de este archivo en main no equivale a activarlo ni a certificar G5.
+
+El `limit_req` de Nginx sigue protegiendo contra ráfagas **después**
+de comprobar la admisión mediante `auth_request`. Para la configuración
+G5 activa, una puerta cerrada responde `503` y las cabeceras de
+mantenimiento incluso ante ráfagas; una puerta abierta conserva `429`
+al superar el límite sin dejar pasar las peticiones rechazadas.
+
+
 ## Scope and behavior
 
 Caddy remains the public TLS edge and continues to proxy to internal Nginx.

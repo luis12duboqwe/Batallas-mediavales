@@ -91,7 +91,7 @@ def edge():
         control.chmod(0o755)  # mktemp/runner may have restrictive umask 077
         config_path = temp_root / "nginx.conf"
         port = _free_port()
-        config = (ROOT / "nginx.conf").read_text(encoding="utf-8")
+        config = (ROOT / "nginx.g5.conf").read_text(encoding="utf-8")
         config = config.replace("server backend:8000;", f"server 127.0.0.1:{backend.server_port};")
         config = config.replace("server frontend:80;", f"server 127.0.0.1:{frontend.server_port};")
         config = config.replace("listen 80;", f"listen 127.0.0.1:{port};")
@@ -282,6 +282,9 @@ def test_deploy_compose_mounts_control_read_only_and_design_documents_limits():
     compose = (ROOT / "docker-compose.deploy.yml").read_text(encoding="utf-8")
     nginx_service = compose.split("  nginx:\n", 1)[1].split("  caddy:\n", 1)[0]
     assert "./.ops-state/edge-maintenance:/etc/nginx/edge-maintenance:ro" in nginx_service
+    assert "./${G5_NGINX_CONFIG_FILE:-nginx.conf}:/etc/nginx/nginx.conf:ro" in nginx_service
+    assert (ROOT / "nginx.conf").is_file()
+    assert (ROOT / "nginx.g5.conf").is_file()
 
     design = (ROOT / "docs/G5_EDGE_MAINTENANCE_DESIGN.md").read_text(encoding="utf-8")
     assert "WebSocket" in design
@@ -314,3 +317,60 @@ def test_restrictive_umask_directory_is_normalized_before_open(closed_edge):
     marker.unlink()
     _assert_maintenance_response(_request(edge, "/api/write"))
     _assert_maintenance_response(_request(edge, "/socket.io/?transport=polling"))
+
+
+def test_burst_closed_edge_never_returns_rate_limit_instead_of_maintenance(closed_edge):
+    """Admission close has priority over API rate limiting for every request."""
+    responses = [
+        _request(
+            closed_edge, "/api/write?check=maintenance",
+            headers={"X-Forwarded-For": "198.51.100.220"},
+        )
+        for _ in range(45)
+    ]
+    for response in responses:
+        _assert_maintenance_response(response)
+
+
+def test_burst_open_edge_still_enforces_api_rate_limit(closed_edge):
+    """The normal 429 anti-abuse budget is retained after explicit opening."""
+    marker = closed_edge["control"] / "open"
+    marker.write_text("open\n", encoding="utf-8")
+    marker.chmod(0o644)
+    statuses = [
+        _request(
+            closed_edge, "/api/write?check=rate",
+            headers={"X-Forwarded-For": "198.51.100.221"},
+        )[0]
+        for _ in range(45)
+    ]
+    assert 200 in statuses
+    assert 429 in statuses
+
+
+def test_default_compose_remains_ungated_until_recovery_is_integrated():
+    """Do not break normal local play or activate an unsafe G5 gate on merge."""
+    base = (ROOT / "nginx.conf").read_text(encoding="utf-8")
+    gated = (ROOT / "nginx.g5.conf").read_text(encoding="utf-8")
+    local = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    protected = (ROOT / "docker-compose.deploy.yml").read_text(encoding="utf-8")
+    assert "auth_request /_edge_maintenance_check" not in base
+    assert "auth_request /_edge_maintenance_check" in gated
+    assert "./nginx.conf:/etc/nginx/nginx.conf:ro" in local
+    assert "G5_NGINX_CONFIG_FILE:-nginx.conf" in protected
+
+
+def test_rate_limit_during_closed_gate_never_forwards_to_backend(closed_edge):
+    """Rate limiting may emit 429 in a flood, but no request reaches a writer."""
+    edge = closed_edge
+    before = len(edge["records"])
+    statuses = []
+    for _ in range(40):
+        status, headers, _ = _request(edge, "/api/write")
+        statuses.append(status)
+        if status == 503:
+            assert headers["Retry-After"] == "60"
+            assert headers["Cache-Control"] == "no-store"
+    assert set(statuses) <= {429, 503}, statuses
+    assert 503 in statuses
+    assert len(edge["records"]) == before

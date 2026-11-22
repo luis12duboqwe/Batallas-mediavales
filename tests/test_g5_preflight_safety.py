@@ -143,3 +143,20 @@ def test_read_env_does_not_import_application(tmp_path: Path) -> None:
     dotenv = tmp_path / "example.env"
     dotenv.write_text("export APP_ENV=staging\nSECRET_KEY='test secret'\n", encoding="utf-8")
     assert preflight.read_env(dotenv) == {"APP_ENV": "staging", "SECRET_KEY": "test secret"}
+
+
+@pytest.mark.parametrize("name", ["nginx.conf", "nginx.g5.conf"])
+def test_g5_nginx_config_known_filename_accepted(name: str) -> None:
+    env = valid_env()
+    env["G5_NGINX_CONFIG_FILE"] = name
+    assert preflight.validate(env) == []
+
+
+@pytest.mark.parametrize("name", [
+    "", "../nginx.conf", "/etc/passwd", "nginx.conf:evil",
+    "${EXTERNAL_CONFIG}", "nginx.g5.conf/../../other",
+])
+def test_g5_nginx_config_rejects_arbitrary_paths_and_interpolation(name: str) -> None:
+    env = valid_env()
+    env["G5_NGINX_CONFIG_FILE"] = name
+    assert any("G5_NGINX_CONFIG_FILE" in err for err in preflight.validate(env))

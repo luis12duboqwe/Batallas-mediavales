@@ -51,6 +51,11 @@ jobs:
           python -m app.seed
           python -m app.seed
           alembic -c batalla_medieval_backend/alembic.ini downgrade base
+      - name: Prepare PostgreSQL 15 image for isolated BM-0093 reproduction
+        run: |
+          docker info >/dev/null
+          docker pull postgres:15-alpine
+          docker image inspect postgres:15-alpine >/dev/null
       - name: Run backend tests
         run: pytest
 
