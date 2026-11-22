@@ -51,6 +51,20 @@ if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
   exit 2
 fi
 
+marker_tmp=""
+backup_receipt=""
+prepared_dir=""
+recovery_env=""
+cleanup() {
+  trap - ERR
+  set +e
+  if [[ -n "$prepared_dir" ]]; then
+    rm -rf -- "$prepared_dir"
+  fi
+  rm -f -- "$NEXT_ENV" "$marker_tmp" "$backup_receipt" "$recovery_env"
+}
+trap cleanup EXIT
+
 cp "$BASE_ENV" "$NEXT_ENV"
 {
   echo
@@ -131,7 +145,6 @@ fi
 if [[ "$had_previous" -eq 0 ]]; then
   refuse_unmanaged() {
     echo "Deployment refused: $1. Inspect and adopt the existing deployment with a separately rehearsed recovery plan." >&2
-    rm -f -- "$NEXT_ENV"
     exit 2
   }
   if [[ -e .release-sha || -L .release-sha || -e "$PREVIOUS_ENV" || -L "$PREVIOUS_ENV" ]]; then
@@ -155,7 +168,6 @@ fi
 # A process crash, disk exhaustion or failure inside the ERR trap must not
 # silently permit another deployment against an uncertain state.
 marker_tmp="$(mktemp "$STATE_DIR/recovery-required.XXXXXXXX")"
-trap 'rm -f -- "$marker_tmp"' EXIT
 printf 'failed_release=%s\nprevious_release=%s\nreason=deployment_in_progress\n' \
   "$RELEASE_SHA" "$previous_release_sha" > "$marker_tmp"
 ln -T -- "$marker_tmp" "$RECOVERY_REQUIRED"
@@ -166,10 +178,8 @@ clear_recovery_marker() {
   fi
   rm -f -- "$RECOVERY_REQUIRED"
 }
-mv "$NEXT_ENV" "$CURRENT_ENV"
-
 rollback_backup=""
-backup_receipt=""
+prepared_receipt=""
 release_mutation_started=0
 schema_integrity_uncertain=0
 rollback() {
@@ -177,33 +187,20 @@ rollback() {
   trap - ERR
   set +e
   local recovered=0
-  local recovery_env=""
-
-  # The incident marker was written BEFORE the candidate env was activated.
-  # Never erase it on failures, even when mktemp/cp/chmod/mv also fail.
   echo "Deployment failed; attempting controlled rollback" >&2
 
   # Before release startup, no migrations or seed work has been requested.
   # NEVER call compose up for a pre-migration failure: dependency startup would
   # run migrate/seed even for a missing or untrusted database schema.
   if [[ "$release_mutation_started" -eq 0 ]]; then
-    if [[ "$had_previous" -eq 1 ]]; then
-      recovery_env="$(mktemp ./.release.env.recovery.XXXXXXXX)"
-      if [[ -n "$recovery_env" && -f "$recovery_env" ]] &&
-         cp "$PREVIOUS_ENV" "$recovery_env" &&
-         chmod 600 "$recovery_env" &&
-         mv -f -- "$recovery_env" "$CURRENT_ENV"; then
-        recovery_env=""
-        if [[ "$schema_integrity_uncertain" -ne 1 ]]; then
-          clear_recovery_marker
-        fi
-      fi
+    # For an existing release, the active env still points to the previous
+    # release. Recovery at this stage needs no additional disk writes.
+    if [[ "$had_previous" -eq 1 && "$schema_integrity_uncertain" -ne 1 ]]; then
+      clear_recovery_marker
     fi
     if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
       echo "CRITICAL: deployment stopped before migrations; inspection required ($RECOVERY_REQUIRED)" >&2
     fi
-    if [[ -n "$recovery_env" ]]; then rm -f -- "$recovery_env"; fi
-    if [[ -n "$backup_receipt" ]]; then rm -f -- "$backup_receipt"; fi
     exit "$exit_code"
   fi
 
@@ -212,16 +209,11 @@ rollback() {
     if [[ -n "$recovery_env" && -f "$recovery_env" ]] &&
        cp "$PREVIOUS_ENV" "$recovery_env" &&
        chmod 600 "$recovery_env"; then
-      if [[ -n "$rollback_backup" && -f "$rollback_backup" ]]; then
+      if [[ -n "$prepared_dir" && -n "$prepared_receipt" ]]; then
         echo "Restoring pre-deploy database snapshot and previous application release" >&2
         if DEPLOY_LOCK_FD="$DEPLOY_LOCK_FD" RESTORE_PREPARE_ONLY=0 RESTORE_START_SERVICES=1 \
-          bash ops/restore_postgres.sh "$recovery_env" "$rollback_backup" "RESTORE:${POSTGRES_DB}"; then
-          recovered=1
-        fi
-      elif [[ -z "$rollback_backup" ]]; then
-        echo "No database snapshot was created; restoring previous application images only" >&2
-        if docker compose --env-file "$recovery_env" -f "$COMPOSE_FILE" pull backend worker frontend &&
-           docker compose --env-file "$recovery_env" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy; then
+          bash ops/restore_postgres.sh "$recovery_env" "$prepared_dir/archive.dump" "RESTORE:${POSTGRES_DB}" \
+            "$prepared_dir" "$prepared_receipt"; then
           recovered=1
         fi
       fi
@@ -245,18 +237,23 @@ rollback() {
   else
     echo "CRITICAL: rollback not verified; manual recovery required ($RECOVERY_REQUIRED)" >&2
   fi
-  if [[ -n "$recovery_env" ]]; then rm -f -- "$recovery_env"; fi
-  if [[ -n "$backup_receipt" ]]; then rm -f -- "$backup_receipt"; fi
   exit "$exit_code"
 }
 trap rollback ERR
 
-echo "Ensuring PostgreSQL is healthy before backup"
-docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" up -d database
+candidate_env="$NEXT_ENV"
+database_env="$PREVIOUS_ENV"
+if [[ "$had_previous" -eq 0 ]]; then
+  mv -T -- "$NEXT_ENV" "$CURRENT_ENV"
+  candidate_env="$CURRENT_ENV"
+  database_env="$CURRENT_ENV"
+  echo "Starting PostgreSQL for the initial deployment"
+  docker compose --env-file "$database_env" -f "$COMPOSE_FILE" up -d database
+fi
 
 # Fail closed on a missing or failed database probe. A network or credential
 # error must never be mistaken for an empty first-install database.
-if ! has_schema="$(docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" exec -T database \
+if ! has_schema="$(docker compose --env-file "$database_env" -f "$COMPOSE_FILE" exec -T database \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "SELECT to_regclass('public.users') IS NOT NULL;" 2>/dev/null)"; then
   schema_integrity_uncertain=1
   echo "Database schema probe failed; refusing deployment without a known backup state" >&2
@@ -273,7 +270,7 @@ case "$has_schema" in
       false
     fi
     backup_receipt="$(mktemp "$STATE_DIR/backup-receipt.XXXXXXXX")"
-    BACKUP_RECEIPT_FILE="$backup_receipt" bash ops/backup_postgres.sh "$CURRENT_ENV"
+    BACKUP_RECEIPT_FILE="$backup_receipt" bash ops/backup_postgres.sh "$candidate_env"
     if [[ ! -s "$backup_receipt" ]]; then
       echo "Backup completed without an exact archive receipt" >&2
       false
@@ -291,6 +288,15 @@ case "$has_schema" in
       false
     fi
     rollback_backup="$candidate_backup"
+
+    # Allocate and verify the rollback copy while the old release is active.
+    prepared_dir="$(mktemp -d "$STATE_DIR/restore.XXXXXXXX")"
+    prepared_receipt="$(DEPLOY_LOCK_FD="$DEPLOY_LOCK_FD" RESTORE_PREPARE_ONLY=1 RESTORE_START_SERVICES=0 \
+      bash ops/restore_postgres.sh "$PREVIOUS_ENV" "$rollback_backup" "PREPARE:${POSTGRES_DB}" "$prepared_dir")"
+    if [[ ! "$prepared_receipt" =~ ^[0-9a-f]{64}:[0-9]+:[0-9]+$ ]]; then
+      echo "Deployment refused: invalid prepared archive receipt" >&2
+      false
+    fi
     ;;
   f)
     if [[ "$had_previous" -eq 1 ]]; then
@@ -308,9 +314,12 @@ case "$has_schema" in
 esac
 
 echo "Pulling immutable release images and pinned edge images"
-docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" pull migrate seed backend worker frontend nginx caddy
+docker compose --env-file "$candidate_env" -f "$COMPOSE_FILE" pull migrate seed backend worker frontend nginx caddy
 
 echo "Applying migrations and starting release ${RELEASE_SHA}"
+if [[ "$had_previous" -eq 1 ]]; then
+  mv -T -- "$NEXT_ENV" "$CURRENT_ENV"
+fi
 release_mutation_started=1
 docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" up -d --remove-orphans
 

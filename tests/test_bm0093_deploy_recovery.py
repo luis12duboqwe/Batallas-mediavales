@@ -18,6 +18,7 @@ import pytest
 PROJECT = Path(__file__).resolve().parents[1]
 OLD_SHA = "a" * 40
 NEW_SHA = "b" * 40
+BACKUP_NAME = "batalla_ci-20261120T123456Z-A1b2C3d4.dump"
 
 
 def _env(backup_dir, email):
@@ -51,9 +52,36 @@ def deploy_lab(tmp_path):
     for file in ("deploy_remote.sh", "preflight.py"):
         shutil.copy2(PROJECT / "ops" / file, ops / file)
     (ops / "restore_postgres.sh").write_text(
-        "#!/usr/bin/env bash\n"
-        "printf 'restore:%s:%s\\n' \"$1\" \"$2\" >> \"$BM_TRACE\"\n"
-        "exit \"${BM_RESTORE_EXIT:-0}\"\n", encoding="utf-8"
+        r"""#!/usr/bin/env bash
+set -euo pipefail
+[[ "/proc/$$/fd/$DEPLOY_LOCK_FD" -ef .ops-state/deploy.lock ]]
+flock -n "$DEPLOY_LOCK_FD"
+archive="$4/archive.dump"
+receipt() {
+  local digest
+  digest="$(sha256sum < "$archive")"
+  printf '%s:%s\n' "${digest%% *}" "$(stat -c '%d:%i' -- "$archive")"
+}
+if [[ "$3" == "PREPARE:batalla_ci" ]]; then
+  [[ "$RESTORE_PREPARE_ONLY:$RESTORE_START_SERVICES:$#" == 1:0:4 ]]
+  [[ "$1" == .release.env.previous ]]
+  cmp -s "$1" .release.env
+  printf 'prepare:%s\n' "$2" >> "$BM_TRACE"
+  cp -- "$2" "$archive"
+  chmod 400 "$archive"
+  if [[ "${BM_INVALID_PREPARED_RECEIPT:-0}" == 1 ]]; then
+    printf 'invalid receipt\n'
+  else
+    receipt
+  fi
+else
+  [[ "$3" == "RESTORE:batalla_ci" && "$RESTORE_PREPARE_ONLY:$RESTORE_START_SERVICES:$#" == 0:1:5 ]]
+  [[ "$2" == "$archive" && "$5" == "$(receipt)" ]]
+  grep -qx 'SUPPORT_CONTACT=active@example.invalid' "$1"
+  printf 'restore:%s:%s\n' "$1" "$2" >> "$BM_TRACE"
+  exit "${BM_RESTORE_EXIT:-0}"
+fi
+""", encoding="utf-8"
     )
     (ops / "smoke_http.py").write_text(
         "import os, sys\n"
@@ -69,7 +97,7 @@ set -euo pipefail
 printf 'backup\n' >> "$BM_TRACE"
 backup="$BM_TEST_BACKUP_DIR/batalla_ci-20261120T123456Z-A1b2C3d4.dump"
 printf 'fixture database dump' > "$backup"
-printf 'fixture checksum' > "$backup.sha256"
+sha256sum "$backup" > "$backup.sha256"
 if [[ "$BM_RECEIPT_MODE" == "empty" ]]; then exit 0; fi
 if [[ "$BM_RECEIPT_MODE" == "foreign" ]]; then
   printf 'unrelated existing archive' > "$BM_TEST_BACKUP_DIR/other.dump"
@@ -97,12 +125,23 @@ fi
         "  if [[ \"$BM_SCHEMA_PROBE_EXIT\" != 0 ]]; then exit \"$BM_SCHEMA_PROBE_EXIT\"; fi\n"
         "  printf '%s\\n' \"$BM_SCHEMA_PROBE_VALUE\"; exit 0\n"
         "fi\n"
-        "if [[ \"$*\" == *'up -d --remove-orphans'* ]]; then exit \"$BM_RELEASE_START_EXIT\"; fi\n"
+        "if [[ \"$*\" == *'pg_restore --list'* ]]; then\n"
+        "  [[ \"$(cat)\" == 'fixture database dump' ]] || exit 90\n"
+        "  printf ';     dbname: %s\\n' \"${BM_ARCHIVE_DB:-batalla_ci}\"; exit 0\n"
+        "fi\n"
+        "if [[ \"$*\" == *'pg_restore --clean'* ]]; then\n"
+        "  [[ \"$(cat)\" == 'fixture database dump' ]] || exit 91\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [[ \"$*\" == *'up -d --remove-orphans backend worker frontend nginx caddy'* ]]; then exit 0; fi\n"
+        "if [[ \"$*\" == *'up -d --remove-orphans'* ]]; then\n"
+        "  if [[ \"${BM_REMOVE_SOURCE_ON_START:-0}\" == 1 ]]; then\n"
+        "    rm -- \"$BM_TEST_BACKUP_DIR\"/*.dump \"$BM_TEST_BACKUP_DIR\"/*.sha256\n"
+        "  fi\n"
+        "  exit \"$BM_RELEASE_START_EXIT\"\n"
+        "fi\n"
         "if [[ \"$*\" == *'pull migrate seed backend worker frontend nginx caddy'* ]]; then\n"
         "  exit \"$BM_RELEASE_PULL_EXIT\"\n"
-        "fi\n"
-        "if [[ \"$*\" == *'pull backend worker frontend'* ]]; then\n"
-        "  exit \"$BM_RECOVERY_PULL_EXIT\"\n"
         "fi\n"
         "exit 0\n", encoding="utf-8"
     )
@@ -149,7 +188,6 @@ exec /usr/bin/mv "$@"
         "BM_SCHEMA_PROBE_VALUE": "t",
         "BM_RELEASE_PULL_EXIT": "0",
         "BM_RELEASE_START_EXIT": "0",
-        "BM_RECOVERY_PULL_EXIT": "0",
         "BM_RECEIPT_MODE": "valid",
     })
     return {"root": tmp_path, "base": base_env, "active": active, "env": env, "trace": trace}
@@ -173,12 +211,46 @@ def _marker(lab):
     return lab["root"] / ".ops-state" / "recovery-required"
 
 
+def _assert_temporary_files_cleaned(lab):
+    root = lab["root"]
+    for pattern in (
+        ".ops-state/restore.*", ".ops-state/backup-receipt.*",
+        ".ops-state/recovery-required.*", ".release.env.next", ".release.env.recovery.*",
+    ):
+        assert not list(root.glob(pattern)), pattern
+
+
+def _use_real_restore(lab):
+    shutil.copy2(PROJECT / "ops" / "restore_postgres.sh", lab["root"] / "ops")
+    cat = lab["root"] / "bin" / "cat"
+    cat.write_text(
+        r"""#!/usr/bin/env bash
+if [[ "${1:-}" == -- && "${2:-}" == *.dump ]]; then
+  printf 'copy:%s\n' "$2" >> "$BM_TRACE"
+  case "${BM_COPY_FAILURE:-}" in
+    enospc)
+      printf 'partial copy'
+      printf 'cat: write error: No space left on device\n' >&2
+      exit 1
+      ;;
+    checksum)
+      printf 'corrupt copy'
+      exit 0
+      ;;
+  esac
+fi
+exec /usr/bin/cat "$@"
+""", encoding="utf-8",
+    )
+    cat.chmod(0o755)
+
+
 def test_database_start_failure_does_not_start_migration_dependencies(deploy_lab):
+    (deploy_lab["root"] / ".release.env").unlink()
+    (deploy_lab["root"] / ".release-sha").unlink()
     result = _run(deploy_lab)
     assert result.returncode == 41, result.stderr
-    assert not _marker(deploy_lab).exists()
-    assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
-    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
+    assert _marker(deploy_lab).exists()
     assert not any("up -d --remove-orphans" in line for line in _trace(deploy_lab))
     assert not any(line.startswith("restore:") for line in _trace(deploy_lab))
     assert not list(deploy_lab["root"].glob(".release.env.recovery.*"))
@@ -189,14 +261,14 @@ def test_database_start_failure_does_not_start_migration_dependencies(deploy_lab
     {"BM_SMOKE_EXIT": "43"},
 ])
 def test_failed_automatic_rollback_flags_incident_and_blocks_redeploy(deploy_lab, extra_env):
-    first = _run(deploy_lab, {**extra_env, "BM_DATABASE_START_EXIT": "0", "BM_RELEASE_START_EXIT": "41"})
+    first = _run(deploy_lab, {**extra_env, "BM_RELEASE_START_EXIT": "41"})
     assert first.returncode == 41, first.stderr
     assert "manual recovery required" in first.stderr
     assert _marker(deploy_lab).is_file()
     assert "failed_release=" + NEW_SHA in _marker(deploy_lab).read_text(encoding="utf-8")
     assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
     assert "new@example.invalid" in (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8")
-    assert not list(deploy_lab["root"].glob(".release.env.recovery.*"))
+    _assert_temporary_files_cleaned(deploy_lab)
 
     before = _trace(deploy_lab)
     second = _run(deploy_lab)
@@ -235,7 +307,7 @@ def test_recovery_smoke_targets_previous_origin_not_new_origin(deploy_lab):
         ),
         encoding="utf-8",
     )
-    result = _run(deploy_lab, {"BM_DATABASE_START_EXIT": "0", "BM_RELEASE_START_EXIT": "41"})
+    result = _run(deploy_lab, {"BM_RELEASE_START_EXIT": "41"})
     assert result.returncode == 41, result.stderr
     assert _trace(deploy_lab)[-1] == "smoke:" + old_base
     assert not _marker(deploy_lab).exists()
@@ -263,7 +335,7 @@ def test_database_identity_change_requires_separate_migration(deploy_lab):
 def test_recovery_internal_failure_preserves_incident_marker_and_original_error(
     deploy_lab, failed_recovery_step
 ):
-    result = _run(deploy_lab, extra_env={**failed_recovery_step, "BM_DATABASE_START_EXIT": "0", "BM_RELEASE_START_EXIT": "41"})
+    result = _run(deploy_lab, extra_env={**failed_recovery_step, "BM_RELEASE_START_EXIT": "41"})
     assert result.returncode == 41, result.stderr
     assert _marker(deploy_lab).is_file()
     assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
@@ -277,7 +349,7 @@ def test_recovery_internal_failure_preserves_incident_marker_and_original_error(
 
 def test_failed_schema_probe_never_assumes_first_install(deploy_lab):
     result = _run(deploy_lab, {
-        "BM_DATABASE_START_EXIT": "0", "BM_SCHEMA_PROBE_EXIT": "47"
+        "BM_SCHEMA_PROBE_EXIT": "47"
     })
     assert result.returncode != 0
     assert "Database schema probe failed" in result.stderr
@@ -292,7 +364,7 @@ def test_failed_schema_probe_never_assumes_first_install(deploy_lab):
 
 def test_unrecognized_schema_probe_value_is_refused(deploy_lab):
     result = _run(deploy_lab, {
-        "BM_DATABASE_START_EXIT": "0", "BM_SCHEMA_PROBE_VALUE": "unknown"
+        "BM_SCHEMA_PROBE_VALUE": "unknown"
     })
     assert result.returncode != 0
     assert "Unexpected schema probe result" in result.stderr
@@ -305,7 +377,6 @@ def test_unrecognized_schema_probe_value_is_refused(deploy_lab):
 
 def test_existing_release_with_missing_schema_is_refused(deploy_lab):
     result = _run(deploy_lab, {
-        "BM_DATABASE_START_EXIT": "0",
         "BM_SCHEMA_PROBE_VALUE": "f",
     })
     assert result.returncode != 0
@@ -417,24 +488,102 @@ def test_deploy_restores_exact_new_backup_not_newest_directory_file(deploy_lab):
     decoy.write_bytes(b"unrelated backup with a newer filename")
     (backup_dir / (decoy.name + ".sha256")).write_text("decoy", encoding="utf-8")
     result = _run(deploy_lab, {
-        "BM_DATABASE_START_EXIT": "0",
         "BM_RELEASE_START_EXIT": "53",
     })
     assert result.returncode == 53, result.stderr
-    restored = [line for line in _trace(deploy_lab) if line.startswith("restore:")]
-    assert len(restored) == 1
-    assert restored[0].endswith(
-        "/batalla_ci-20261120T123456Z-A1b2C3d4.dump"
-    )
+    trace = _trace(deploy_lab)
+    prepared, = [line for line in trace if line.startswith("prepare:")]
+    restored, = [line for line in trace if line.startswith("restore:")]
+    candidate_up, = [line for line in trace if " up -d " in line]
+    assert prepared.endswith("/batalla_ci-20261120T123456Z-A1b2C3d4.dump")
+    assert restored.endswith("/archive.dump")
+    assert trace.index(prepared) < trace.index(candidate_up) < trace.index(restored)
     assert decoy.exists()
     assert not list((deploy_lab["root"] / ".ops-state").glob("backup-receipt.*"))
     assert not _marker(deploy_lab).exists()
 
 
+@pytest.mark.parametrize(("fault", "diagnostic"), [
+    ("receipt", "invalid prepared archive receipt"),
+    ("enospc", "No space left on device"),
+    ("checksum", "archive checksum mismatch"),
+    ("dbname", "does not match configured 'batalla_ci'"),
+])
+def test_prepare_failure_preserves_active_release_without_starting_services(
+    deploy_lab, fault, diagnostic
+):
+    if fault == "receipt":
+        env = {"BM_INVALID_PREPARED_RECEIPT": "1"}
+    else:
+        _use_real_restore(deploy_lab)
+        env = {"BM_COPY_FAILURE": fault, "BM_ARCHIVE_DB": "other_db"}
+    result = _run(deploy_lab, env)
+    assert result.returncode != 0
+    assert diagnostic in result.stderr
+    trace = _trace(deploy_lab)
+    assert "backup" in trace
+    assert not any(
+        fragment in line
+        for line in trace
+        for fragment in (" up ", "migrate", "seed", "restore:", "pg_restore --clean", " stop ")
+    )
+    root = deploy_lab["root"]
+    assert (root / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+    assert (root / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
+    assert (root / "backups" / BACKUP_NAME).read_bytes() == b"fixture database dump"
+    assert not _marker(deploy_lab).exists()
+    _assert_temporary_files_cleaned(deploy_lab)
+
+
+def test_real_auto_restore_reuses_prepared_copy_after_source_disappears(deploy_lab):
+    _use_real_restore(deploy_lab)
+    result = _run(deploy_lab, {"BM_RELEASE_START_EXIT": "53", "BM_REMOVE_SOURCE_ON_START": "1"})
+    assert result.returncode == 53, result.stderr
+    trace = _trace(deploy_lab)
+    copy, = [i for i, line in enumerate(trace) if line.startswith("copy:")]
+    prepare_list, restore_list = [i for i, line in enumerate(trace) if "pg_restore --list" in line]
+    candidate_up, previous_up = [i for i, line in enumerate(trace) if " up -d " in line]
+    restore, = [i for i, line in enumerate(trace) if "pg_restore --clean" in line]
+    assert copy < prepare_list < candidate_up < restore_list < restore < previous_up
+    assert "--env-file .release.env.previous " in trace[prepare_list]
+    assert "backend worker frontend nginx caddy" in trace[previous_up]
+    assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+    assert not (deploy_lab["root"] / "backups" / BACKUP_NAME).exists()
+    assert not _marker(deploy_lab).exists()
+    _assert_temporary_files_cleaned(deploy_lab)
+
+
+def test_successful_deploy_cleans_private_copy_and_keeps_original_backup_in_manifest(deploy_lab):
+    python = deploy_lab["root"] / "bin" / "python3"
+    python.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1:$2" == "-:https://staging.example.invalid" ]]; then\n'
+        "  cat >/dev/null\n"
+        "  exit 0\n"
+        "fi\n"
+        f'exec {shlex.quote(sys.executable)} "$@"\n',
+        encoding="utf-8",
+    )
+    python.chmod(0o755)
+    result = _run(deploy_lab)
+    assert result.returncode == 0, result.stderr
+    trace = _trace(deploy_lab)
+    prepared, = [i for i, line in enumerate(trace) if line.startswith("prepare:")]
+    candidate_up, = [i for i, line in enumerate(trace) if " up -d " in line]
+    assert prepared < candidate_up
+    assert not any(line.startswith("restore:") for line in trace)
+    root = deploy_lab["root"]
+    manifest = json.loads((root / ".ops-state" / "deployments" / f"{NEW_SHA}.json").read_text())
+    backup = root / "backups" / BACKUP_NAME
+    assert manifest["rollback_backup"] == str(backup)
+    assert backup.is_file()
+    assert not _marker(deploy_lab).exists()
+    _assert_temporary_files_cleaned(deploy_lab)
+
+
 @pytest.mark.parametrize("receipt_mode", ["empty", "foreign"])
 def test_invalid_backup_receipt_blocks_release_pull(deploy_lab, receipt_mode):
     result = _run(deploy_lab, {
-        "BM_DATABASE_START_EXIT": "0",
         "BM_RECEIPT_MODE": receipt_mode,
     })
     assert result.returncode != 0
@@ -455,13 +604,12 @@ def test_backup_receipt_accepts_trailing_directory_separator(deploy_lab):
             encoding="utf-8",
         )
     result = _run(deploy_lab, {
-        "BM_DATABASE_START_EXIT": "0",
         "BM_RELEASE_START_EXIT": "54",
         "BM_TEST_BACKUP_DIR": str(backup_dir) + "/",
     })
     assert result.returncode == 54, result.stderr
     assert any(
-        line.startswith("restore:") and
+        line.startswith("prepare:") and
         line.endswith("/batalla_ci-20261120T123456Z-A1b2C3d4.dump")
         for line in _trace(deploy_lab)
     )
@@ -470,7 +618,6 @@ def test_backup_receipt_accepts_trailing_directory_separator(deploy_lab):
 
 def test_pre_migration_image_pull_failure_does_not_restore_or_migrate(deploy_lab):
     result = _run(deploy_lab, {
-        "BM_DATABASE_START_EXIT": "0",
         "BM_RELEASE_PULL_EXIT": "55",
     })
     assert result.returncode == 55
@@ -481,6 +628,7 @@ def test_pre_migration_image_pull_failure_does_not_restore_or_migrate(deploy_lab
     assert not any(line.startswith("smoke:") for line in trace)
     assert not _marker(deploy_lab).exists()
     assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+    _assert_temporary_files_cleaned(deploy_lab)
 
 
 def test_deployment_fails_before_mutation_if_operation_lock_is_held(deploy_lab):
@@ -496,9 +644,9 @@ def test_deployment_fails_before_mutation_if_operation_lock_is_held(deploy_lab):
         assert not _marker(deploy_lab).exists()
 
     # Once the holder releases the lock, this path reaches the normal
-    # database-start failure rather than being permanently locked.
-    retried = _run(deploy_lab)
-    assert retried.returncode == 41
+    # image-pull failure.
+    retried = _run(deploy_lab, {"BM_RELEASE_PULL_EXIT": "55"})
+    assert retried.returncode == 55
     assert "already running" not in retried.stderr
 
 def test_https_edge_timeout_activates_rollback_instead_of_simple_exit(deploy_lab):
@@ -519,7 +667,6 @@ def test_https_edge_timeout_activates_rollback_instead_of_simple_exit(deploy_lab
     sleep_shim.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     sleep_shim.chmod(0o755)
     result = _run(deploy_lab, {
-        "BM_DATABASE_START_EXIT": "0",
         "BM_RELEASE_START_EXIT": "0",
     })
     trace = _trace(deploy_lab)
@@ -531,19 +678,10 @@ def test_https_edge_timeout_activates_rollback_instead_of_simple_exit(deploy_lab
 
 def test_auto_rollback_forces_restore_mode_after_inherited_environment(deploy_lab):
     """The parent must override inherited preflight and no-start flags."""
-    stub = deploy_lab["root"] / "ops" / "restore_postgres.sh"
-    old = stub.read_text(encoding="utf-8")
-    stub.write_text(
-        "#!/usr/bin/env bash\n"
-        'if [[ "${RESTORE_PREPARE_ONLY:-0}" != "0" || "${RESTORE_START_SERVICES:-1}" != "1" ]]; then exit 97; fi\n'
-        + old.split("\n", 1)[1],
-        encoding="utf-8",
-    )
     result = _run(deploy_lab, {
-        "BM_DATABASE_START_EXIT": "0",
         "BM_RELEASE_START_EXIT": "41",
-        "RESTORE_PREPARE_ONLY": "1",
-        "RESTORE_START_SERVICES": "0",
+        "RESTORE_PREPARE_ONLY": "invalid",
+        "RESTORE_START_SERVICES": "invalid",
     })
     assert result.returncode == 41, result.stderr
     assert not _marker(deploy_lab).exists(), result.stderr
@@ -567,7 +705,6 @@ def test_edge_timeout_with_failed_restore_retains_recovery_marker(deploy_lab):
     sleep_shim.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     sleep_shim.chmod(0o755)
     result = _run(deploy_lab, {
-        "BM_DATABASE_START_EXIT": "0",
         "BM_RELEASE_START_EXIT": "0",
         "BM_RESTORE_EXIT": "42",
     })

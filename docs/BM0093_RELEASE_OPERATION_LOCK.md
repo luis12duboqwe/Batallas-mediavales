@@ -1,4 +1,4 @@
-# BM-0093 — Exclusión mutua de despliegue y rollback manual
+# BM-0093 — Exclusión mutua de despliegue, restore y rollback
 
 `ops/deploy_remote.sh` y `ops/rollback_remote.sh` modifican
 `.release.env`, `.release-sha`, manifiestos y servicios compartidos.
@@ -37,6 +37,25 @@ y la identidad del archivo. El padre pasa esos valores a la fase
 `RESTORE:<base>`, que verifica la misma copia sin crear una segunda. El
 directorio que creó el padre es la única ruta que usa para limpiar la copia.
 
+En un despliegue con una versión activa, PostgreSQL debe estar disponible
+para la consulta de esquema y el backup. Deploy usa la configuración anterior
+para consultar el esquema y preparar el dump, con el lock y el marcador ya
+activos. Solo el primer despliegue puede arrancar PostgreSQL durante esta fase.
+Deploy conserva `.release.env` apuntando a la versión anterior hasta verificar
+la copia privada con `PREPARE:<base>` y descargar las imágenes candidatas.
+Si falta espacio en `.ops-state`, falla la copia o la verificación, o el recibo
+es inválido, el despliegue termina antes de ejecutar `compose up`, migrar,
+sembrar datos o restaurar. El puntero anterior ya está en su sitio y se retira
+el marcador si el estado del esquema es conocido.
+
+Si falla el despliegue después de iniciar el candidato, el rollback automático
+pasa a `RESTORE:<base>` la misma ruta privada y el recibo SHA-256, dispositivo e
+inodo que devolvió la preparación. Restore verifica la copia privada y la usa
+sin volver a leer ni copiar el dump original. Si fallan el restore, el smoke
+o la publicación del entorno recuperado, el marcador se conserva. Al salir,
+deploy limpia sus temporales, incluida la copia privada. El manifiesto del
+despliegue exitoso conserva la ruta del backup original para el rollback manual.
+
 El archivo del lock no es un marcador de incidente: se conserva entre
 ejecuciones y el kernel libera el bloqueo al terminar el proceso. No es
 necesario borrar el archivo después de un error ni en un reinicio.
@@ -50,8 +69,11 @@ el bloqueo. La regresión de restore comprueba que una invocación directa no
 llega a Docker si deploy mantiene el lock, y que un restore anidado acepta el
 descriptor del proceso propietario lanzado mediante Bash. También cubre un FD
 heredado sin lock, sustitución atómica del pathname y el rechazo read-only de
-snapshots con checksum o identidad incorrectos antes del marcador. Docker,
-restore y smoke siguen siendo dobles locales.
+snapshots con checksum o identidad incorrectos antes del marcador. Las pruebas
+de despliegue simulan ENOSPC durante la copia, comprueban el orden de
+preparación y arranque, y ejecutan el script de restore con Docker y smoke
+simulados para comprobar que el rollback usa una sola copia incluso si
+desaparece el dump original.
 
 ## Límites
 
