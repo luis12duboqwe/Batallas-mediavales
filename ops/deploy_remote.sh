@@ -140,9 +140,27 @@ keys = ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "DB_URL", "COMPOSE_
 # The two env files may interpolate the same raw expression differently from
 # file-local definitions. Compare only literal connection identities to avoid
 # backing up one PostgreSQL volume and restoring into another.
+def compose_interpolates(path, key):
+    # Match the last occurrence, as read_env does. Compose single quotes
+    # disable interpolation; unquoted/double quoted values expand variables.
+    raw_value = ""
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        if name.strip() == key:
+            raw_value = value.strip()
+    if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] == "'":
+        return False
+    # Compose treats $$ as a literal $, not as a variable reference.
+    return bool(re.search(r"\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*)", raw_value.replace("$$", "")))
+
 for key in keys:
-    for value in (previous.get(key, ""), next_release.get(key, "")):
-        if re.search(r"\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*)", value):
+    for path in (Path(sys.argv[1]), Path(sys.argv[2])):
+        if compose_interpolates(path, key):
             print(f"Deployment refused: {key} must not contain variable interpolation", file=sys.stderr)
             raise SystemExit(2)
 # Compose interpolates ${VAR} from the external shell environment, so two

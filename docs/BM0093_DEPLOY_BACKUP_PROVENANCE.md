@@ -73,3 +73,16 @@ consultar el esquema. Si no alcanza health, aborta antes de ejecutar
 migraciones o seed. El fallo de arranque de una base gestionada es reintentable
 sin modificar los punteros de release; una consulta SQL fallida **después**
 de confirmar health sigue tratándose como incidente de integridad.
+
+Las referencias dinámicas en los campos de identidad de PostgreSQL se
+rechazan cuando Compose las interpolaría. En cambio, las contraseñas que
+contienen `$` entre comillas simples o con `$$` como escape son valores
+literales válidos: no se confunden con variables externas. Las pruebas
+protegen ambas variantes y la negativa para `${DB_SECRET}` sin protección.
+
+En una **primera instalación**, un error de arranque o health de la base
+anterior a migraciones conserva intencionalmente el marcador
+`recovery-required`: no hay release anterior certificada a la que volver y
+un volumen parcialmente inicializado no debe adoptarse automáticamente.
+Antes de reintentar, un operador debe comprobar que la base no contiene datos
+y completar el procedimiento de adopción/limpieza controlada.

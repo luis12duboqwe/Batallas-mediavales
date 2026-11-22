@@ -833,3 +833,31 @@ def test_interpolated_postgres_identity_cannot_change_volume_silently(deploy_lab
     assert "must not contain variable interpolation" in result.stderr
     assert _trace(deploy_lab) == []
     assert not _marker(deploy_lab).exists()
+
+
+def test_single_quoted_dollar_password_is_literal_and_allows_preflight(deploy_lab):
+    """A safely quoted '$' in PostgreSQL credentials is not Compose interpolation."""
+    for path in (deploy_lab["root"] / ".release.env", deploy_lab["base"]):
+        path.write_text(
+            path.read_text(encoding="utf-8") +
+            "POSTGRES_PASSWORD='ci$literal-password'\n" +
+            "DB_URL=postgresql://ci:ci%24literal-password@database/batalla_ci\n",
+            encoding="utf-8",
+        )
+    result = _run(deploy_lab, {"BM_RELEASE_PULL_EXIT": "55"})
+    assert result.returncode == 55, result.stderr
+    assert "must not contain variable interpolation" not in result.stderr
+    assert any(item == "backup" for item in _trace(deploy_lab))
+    assert not _marker(deploy_lab).exists()
+    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
+
+
+def test_doubled_dollar_in_literal_password_is_not_variable_reference(deploy_lab):
+    """Compose '$$' escapes a dollar; no external variable may change that value."""
+    for path in (deploy_lab["root"] / ".release.env", deploy_lab["base"]):
+        path.write_text(path.read_text(encoding="utf-8") +
+                        "POSTGRES_PASSWORD=ci$$dollar\n", encoding="utf-8")
+    result = _run(deploy_lab, {"BM_RELEASE_PULL_EXIT": "55"})
+    assert result.returncode == 55, result.stderr
+    assert "must not contain variable interpolation" not in result.stderr
+    assert not _marker(deploy_lab).exists()
