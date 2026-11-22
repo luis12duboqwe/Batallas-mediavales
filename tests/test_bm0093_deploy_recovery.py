@@ -498,3 +498,77 @@ def test_deployment_fails_before_mutation_if_operation_lock_is_held(deploy_lab):
     retried = _run(deploy_lab)
     assert retried.returncode == 41
     assert "already running" not in retried.stderr
+
+def test_https_edge_timeout_activates_rollback_instead_of_simple_exit(deploy_lab):
+    """Adversarial regression: explicit exit 1 must not bypass ERR rollback trap."""
+    bin_dir = Path(deploy_lab["env"]["PATH"].split(os.pathsep)[0])
+    python_shim = bin_dir / "python3"
+    python_shim.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "-" && "$2" == "https://staging.example.invalid" ]]; then\n'
+        "  cat >/dev/null\n"
+        "  exit 1\n"
+        "fi\n"
+        'exec /usr/local/bin/python3 "$@"\n',
+        encoding="utf-8",
+    )
+    python_shim.chmod(0o755)
+    sleep_shim = bin_dir / "sleep"
+    sleep_shim.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    sleep_shim.chmod(0o755)
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0",
+        "BM_RELEASE_START_EXIT": "0",
+    })
+    trace = _trace(deploy_lab)
+    assert result.returncode != 0
+    assert any(s.startswith("restore:") for s in trace), (
+        "HTTPS timeout exited without attempting automatic rollback; "
+        "stderr=" + result.stderr + ", trace=" + repr(trace)
+    )
+
+def test_auto_rollback_forces_restore_mode_after_inherited_environment(deploy_lab):
+    """The parent must override inherited preflight and no-start flags."""
+    stub = deploy_lab["root"] / "ops" / "restore_postgres.sh"
+    old = stub.read_text(encoding="utf-8")
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "${RESTORE_PREPARE_ONLY:-0}" != "0" || "${RESTORE_START_SERVICES:-1}" != "1" ]]; then exit 97; fi\n'
+        + old.split("\n", 1)[1],
+        encoding="utf-8",
+    )
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0",
+        "BM_RELEASE_START_EXIT": "41",
+        "RESTORE_PREPARE_ONLY": "1",
+        "RESTORE_START_SERVICES": "0",
+    })
+    assert result.returncode == 41, result.stderr
+    assert not _marker(deploy_lab).exists(), result.stderr
+    assert any(s.startswith("restore:") for s in _trace(deploy_lab))
+
+
+def test_edge_timeout_with_failed_restore_retains_recovery_marker(deploy_lab):
+    """The recovery marker must remain when HTTPS timeout rollback itself fails."""
+    bin_dir = Path(deploy_lab["env"]["PATH"].split(os.pathsep)[0])
+    python_shim = bin_dir / "python3"
+    python_shim.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "-" && "$2" == "https://staging.example.invalid" ]]; then\n'
+        "  cat >/dev/null\n"
+        "  exit 1\n"
+        "fi\n"
+        'exec /usr/local/bin/python3 "$@"\n', encoding="utf-8",
+    )
+    python_shim.chmod(0o755)
+    sleep_shim = bin_dir / "sleep"
+    sleep_shim.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    sleep_shim.chmod(0o755)
+    result = _run(deploy_lab, {
+        "BM_DATABASE_START_EXIT": "0",
+        "BM_RELEASE_START_EXIT": "0",
+        "BM_RESTORE_EXIT": "42",
+    })
+    assert result.returncode != 0
+    assert _marker(deploy_lab).is_file(), result.stderr
+    assert any(s.startswith("restore:") for s in _trace(deploy_lab))

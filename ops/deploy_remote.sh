@@ -205,7 +205,8 @@ rollback() {
        chmod 600 "$recovery_env"; then
       if [[ -n "$rollback_backup" && -f "$rollback_backup" ]]; then
         echo "Restoring pre-deploy database snapshot and previous application release" >&2
-        if bash ops/restore_postgres.sh "$recovery_env" "$rollback_backup" "RESTORE:${POSTGRES_DB}"; then
+        if DEPLOY_LOCK_FD="$DEPLOY_LOCK_FD" RESTORE_PREPARE_ONLY=0 RESTORE_START_SERVICES=1 \
+          bash ops/restore_postgres.sh "$recovery_env" "$rollback_backup" "RESTORE:${POSTGRES_DB}"; then
           recovered=1
         fi
       elif [[ -z "$rollback_backup" ]]; then
@@ -328,7 +329,7 @@ if [[ "$edge_ready" -ne 1 ]]; then
   echo "HTTPS edge did not become ready within 120 seconds" >&2
   docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" ps >&2 || true
   docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" logs --tail=200 caddy nginx backend >&2 || true
-  exit 1
+  false  # Trigger ERR trap and controlled rollback after release mutation.
 fi
 
 echo "Running post-deploy smoke against ${PUBLIC_BASE_URL}"
