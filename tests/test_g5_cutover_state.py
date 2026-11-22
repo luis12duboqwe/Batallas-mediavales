@@ -14,6 +14,9 @@ from threading import Barrier
 
 import pytest
 
+# CI uses pytest.ini pythonpath=batalla_medieval_backend, not the repo root.
+# Make the standalone stdlib-only ops module importable in both local and CI.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ops import g5_cutover_state as cutover
 from ops.g5_cutover_state import CutoverStore, Identity, MANIFEST, Phase, StateError
 
