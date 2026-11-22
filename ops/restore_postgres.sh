@@ -23,6 +23,7 @@ STATE_DIR=".ops-state"
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 DEPLOY_LOCK_FILE="$STATE_DIR/deploy.lock"
+NESTED_RESTORE=0
 
 # Standalone restores must serialize with deploys and rollbacks. Those callers
 # pass their already-held descriptor so this nested operation shares the lock.
@@ -30,7 +31,7 @@ if [[ "${DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] &&
    [[ -e "/proc/$$/fd/$DEPLOY_LOCK_FD" ]] &&
    [[ "/proc/$$/fd/$DEPLOY_LOCK_FD" -ef "$DEPLOY_LOCK_FILE" ]] &&
    flock -n "$DEPLOY_LOCK_FD"; then
-  :
+  NESTED_RESTORE=1
 else
   umask 077
   exec {RESTORE_LOCK_FD}>> "$DEPLOY_LOCK_FILE"
@@ -90,6 +91,18 @@ ARCHIVE_DATABASE="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exe
 if [[ "$ARCHIVE_DATABASE" != "$POSTGRES_DB" ]]; then
   echo "Restore refused: backup database '${ARCHIVE_DATABASE:-unknown}' does not match configured '${POSTGRES_DB}'" >&2
   exit 2
+fi
+
+if [[ "$NESTED_RESTORE" -eq 0 ]]; then
+  # A standalone restore can partially mutate PostgreSQL before failing. Keep
+  # deployment blocked until an operator verifies recovery and clears the marker.
+  RECOVERY_REQUIRED="$STATE_DIR/recovery-required"
+  if [[ ! -e "$RECOVERY_REQUIRED" && ! -L "$RECOVERY_REQUIRED" ]]; then
+    RESTORE_MARKER_TMP="$(mktemp "$STATE_DIR/recovery-required.XXXXXXXX")"
+    printf 'reason=standalone_restore_requires_operator_certification\n' > "$RESTORE_MARKER_TMP"
+    chmod 600 "$RESTORE_MARKER_TMP"
+    mv -f -- "$RESTORE_MARKER_TMP" "$RECOVERY_REQUIRED"
+  fi
 fi
 
 echo "Stopping application writers before restore"

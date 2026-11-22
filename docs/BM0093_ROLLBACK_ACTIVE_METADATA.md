@@ -12,13 +12,16 @@ No ejecuta un rollback real, no cambia servicios externos y no publica producci�
 - Solo después de pasar el smoke HTTP publica `.release.env` y `.release-sha`.
 - Antes de restaurar o cambiar servicios, publica `.ops-state/recovery-required` para impedir nuevos despliegues mientras el estado es incierto.
 - Si el restore, el smoke o la publicación de metadatos falla, conserva el marcador y los punteros originales que no se hayan publicado.
-- Solo elimina el marcador tras completar restore, smoke y publicación de ambos punteros. Un fallo de restore **puede haber modificado servicios o datos** antes de fallar; requiere diagnóstico y recuperación controlada.
+- Solo elimina el marcador creado por este rollback tras completar restore, smoke y publicación de ambos punteros. Un marcador preexistente nunca se borra con el rollback, incluso si solo cambian imágenes y el smoke pasa; requiere certificación explícita independiente.
+- Una restauración directa crea el mismo marcador tras validar el snapshot y la identidad de la base, antes de detener escritores. Persiste incluso si el comando termina correctamente; la recuperación aún necesita verificación y certificación del operador.
+- Un fallo de restore **puede haber modificado servicios o datos** antes de fallar; requiere diagnóstico y recuperación controlada.
 
 ## Pruebas automáticas
 
 `tests/test_bm0093_rollback_atomic.py` reproduce en un directorio temporal:
 SHA obsoleto, snapshot ausente, fallo de restore, fallo de smoke,
-fallo de Docker, bloqueo de despliegue tras fallo y rollback satisfactorio.
+fallo de Docker, bloqueo de despliegue tras fallo, preservación de marcador
+preexistente en rollback app-only y rollback satisfactorio.
 Reemplaza Docker y los scripts de recuperación y smoke por dobles locales,
 sin conexiones a producción.
 

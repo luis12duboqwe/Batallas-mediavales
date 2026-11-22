@@ -14,6 +14,12 @@ se rechaza la segunda acción sin acceder a Docker o a la base de datos.
 directamente, antes del preflight y de cualquier operación Docker. Cuando
 deploy o rollback lo invocan como subproceso, hereda el descriptor ya bloqueado
 para conservar la exclusión mutua sin bloquearse a sí mismo.
+Tras validar checksum e identidad de la base, un restore directo crea
+`.ops-state/recovery-required` antes de detener escritores. El script no
+elimina este marcador, ni siquiera si el comando termina sin error: un operador
+debe verificar servicios, datos y smoke y certificar la recuperación antes de
+limpiarlo. El protocolo de recuperación del invocador sigue controlando los
+restores anidados.
 
 El archivo del lock no es un marcador de incidente: se conserva entre
 ejecuciones y el kernel libera el bloqueo al terminar el proceso. No es

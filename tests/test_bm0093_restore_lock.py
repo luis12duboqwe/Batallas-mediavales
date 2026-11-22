@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 def restore_lab(tmp_path):
     ops = tmp_path / "ops"
     ops.mkdir()
-    for filename in ("restore_postgres.sh", "preflight.py"):
+    for filename in ("restore_postgres.sh", "deploy_remote.sh", "preflight.py"):
         shutil.copy2(PROJECT_ROOT / "ops" / filename, ops / filename)
 
     state = tmp_path / ".ops-state"
@@ -55,6 +55,7 @@ BACKUP_RETENTION_DAYS=14
 """,
         encoding="utf-8",
     )
+    (tmp_path / "base.env").write_text(env_file.read_text(encoding="utf-8"), encoding="utf-8")
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -62,7 +63,9 @@ BACKUP_RETENTION_DAYS=14
     docker.write_text(
         "#!/usr/bin/env bash\n"
         "printf '%s\\n' \"$*\" >> \"$BM_DOCKER_TRACE\"\n"
-        "if [[ \"$*\" == *'pg_restore --list'* ]]; then printf '; dbname: batalla_ci\\n'; fi\n",
+        "if [[ \"$*\" == *'pg_restore --list'* ]]; then printf '; dbname: batalla_ci\\n'; fi\n"
+        "if [[ \"$*\" == *'stop backend worker'* ]]; then exit \"${BM_STOP_EXIT:-0}\"; fi\n"
+        "if [[ \"$*\" == *'pg_restore --clean --if-exists --create'* ]]; then exit \"${BM_PG_RESTORE_EXIT:-0}\"; fi\n",
         encoding="utf-8",
     )
     docker.chmod(0o755)
@@ -73,6 +76,8 @@ BACKUP_RETENTION_DAYS=14
     return {
         "root": tmp_path,
         "lock": state / "deploy.lock",
+        "marker": state / "recovery-required",
+        "base_env": tmp_path / "base.env",
         "env_file": env_file,
         "backup": backup,
         "trace": trace,
@@ -98,6 +103,25 @@ def _run(lab, *, extra_env=None, pass_fds=()):
         timeout=20,
         check=False,
         pass_fds=pass_fds,
+    )
+
+
+def _run_deploy(lab):
+    return subprocess.run(
+        [
+            "bash",
+            "ops/deploy_remote.sh",
+            str(lab["base_env"]),
+            "c" * 40,
+            "registry.example.invalid/game/backend",
+            "registry.example.invalid/game/frontend",
+        ],
+        cwd=lab["root"],
+        env=lab["env"],
+        text=True,
+        capture_output=True,
+        timeout=20,
+        check=False,
     )
 
 
@@ -133,3 +157,86 @@ def test_restore_inherits_lock_from_deploy_or_rollback(restore_lab):
 
     retried = _run(restore_lab)
     assert retried.returncode == 0, retried.stderr
+
+
+def test_restore_inherits_lock_through_bash_descriptor(restore_lab):
+    command = (
+        'exec {DEPLOY_LOCK_FD}>>.ops-state/deploy.lock; '
+        'flock -n "$DEPLOY_LOCK_FD"; export DEPLOY_LOCK_FD; '
+        'RESTORE_START_SERVICES=0 bash ops/restore_postgres.sh "$1" "$2" "$3"'
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            command,
+            "restore-lock-test",
+            str(restore_lab["env_file"]),
+            str(restore_lab["backup"]),
+            "RESTORE:batalla_ci",
+        ],
+        cwd=restore_lab["root"],
+        env=restore_lab["env"],
+        text=True,
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    trace = restore_lab["trace"].read_text(encoding="utf-8").splitlines()
+    assert any(line.endswith("stop backend worker") for line in trace)
+    assert any("pg_restore --clean --if-exists --create" in line for line in trace)
+
+
+@pytest.mark.parametrize(
+    ("failure_env", "expected_docker_operation"),
+    [
+        ({"BM_STOP_EXIT": "31"}, "stop backend worker"),
+        ({"BM_PG_RESTORE_EXIT": "32"}, "pg_restore --clean --if-exists --create"),
+    ],
+)
+def test_failed_standalone_restore_marks_recovery_and_blocks_deploy(
+    restore_lab, failure_env, expected_docker_operation
+):
+    result = _run(restore_lab, extra_env=failure_env)
+    assert result.returncode in {31, 32}
+    assert expected_docker_operation in "\n".join(
+        restore_lab["trace"].read_text(encoding="utf-8").splitlines()
+    )
+    assert restore_lab["marker"].is_file()
+    assert "standalone_restore_requires_operator_certification" in (
+        restore_lab["marker"].read_text(encoding="utf-8")
+    )
+
+    trace_before_deploy = restore_lab["trace"].read_text(encoding="utf-8")
+    deploy = _run_deploy(restore_lab)
+    assert deploy.returncode == 2
+    assert "unresolved recovery incident" in deploy.stderr
+    assert restore_lab["trace"].read_text(encoding="utf-8") == trace_before_deploy
+
+
+def test_successful_standalone_restore_keeps_marker_for_operator_certification(restore_lab):
+    result = _run(restore_lab, extra_env={"RESTORE_START_SERVICES": "0"})
+    assert result.returncode == 0, result.stderr
+    assert restore_lab["marker"].is_file()
+    assert "standalone_restore_requires_operator_certification" in (
+        restore_lab["marker"].read_text(encoding="utf-8")
+    )
+
+
+def test_nested_restore_does_not_replace_parent_recovery_marker(restore_lab):
+    restore_lab["marker"].write_text("reason=parent_recovery_protocol\n", encoding="utf-8")
+    with restore_lab["lock"].open("a+", encoding="utf-8") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = _run(
+            restore_lab,
+            extra_env={
+                "DEPLOY_LOCK_FD": str(holder.fileno()),
+                "RESTORE_START_SERVICES": "0",
+            },
+            pass_fds=(holder.fileno(),),
+        )
+
+    assert result.returncode == 0, result.stderr
+    assert restore_lab["marker"].read_text(encoding="utf-8") == "reason=parent_recovery_protocol\n"

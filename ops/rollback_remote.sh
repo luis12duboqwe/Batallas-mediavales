@@ -100,6 +100,10 @@ fi
 STAGED_ENV="$(mktemp ./.release.env.rollback.XXXXXXXX)"
 STAGED_SHA="$(mktemp ./.release-sha.rollback.XXXXXXXX)"
 RECOVERY_REQUIRED="$STATE_DIR/recovery-required"
+RECOVERY_MARKER_PREEXISTED=0
+if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
+  RECOVERY_MARKER_PREEXISTED=1
+fi
 RECOVERY_MARKER_TMP=""
 cleanup() {
   rm -f -- "$STAGED_ENV" "$STAGED_SHA" "$RECOVERY_MARKER_TMP"
@@ -112,17 +116,13 @@ chmod 600 "$STAGED_SHA"
 
 # A failed restore or smoke can leave the live database/services inconsistent
 # with the active release pointers. Block future deploys before any mutation.
-RECOVERY_MARKER_TMP="$(mktemp "$STATE_DIR/recovery-required.XXXXXXXX")"
-{
-  if [[ -f "$RECOVERY_REQUIRED" ]]; then
-    cat "$RECOVERY_REQUIRED"
-    printf '\n'
-  fi
+if [[ "$RECOVERY_MARKER_PREEXISTED" -eq 0 ]]; then
+  RECOVERY_MARKER_TMP="$(mktemp "$STATE_DIR/recovery-required.XXXXXXXX")"
   printf 'reason=manual_rollback_in_progress\ncurrent_release=%s\nprevious_release=%s\n' \
-    "$CURRENT_RELEASE" "$PREVIOUS_RELEASE_SHA"
-} > "$RECOVERY_MARKER_TMP"
-chmod 600 "$RECOVERY_MARKER_TMP"
-mv -f -- "$RECOVERY_MARKER_TMP" "$RECOVERY_REQUIRED"
+    "$CURRENT_RELEASE" "$PREVIOUS_RELEASE_SHA" > "$RECOVERY_MARKER_TMP"
+  chmod 600 "$RECOVERY_MARKER_TMP"
+  mv -f -- "$RECOVERY_MARKER_TMP" "$RECOVERY_REQUIRED"
+fi
 
 if [[ -n "$ROLLBACK_BACKUP" ]]; then
   DEPLOY_LOCK_FD="$DEPLOY_LOCK_FD" \
@@ -138,5 +138,7 @@ python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-
 # Commit metadata only after the candidate release has passed post-rollback smoke.
 mv -f -- "$STAGED_ENV" .release.env
 mv -f -- "$STAGED_SHA" .release-sha
-rm -f -- "$RECOVERY_REQUIRED"
+if [[ "$RECOVERY_MARKER_PREEXISTED" -eq 0 ]]; then
+  rm -f -- "$RECOVERY_REQUIRED"
+fi
 echo "Rollback succeeded: ${CURRENT_RELEASE} -> ${PREVIOUS_RELEASE_SHA}"
