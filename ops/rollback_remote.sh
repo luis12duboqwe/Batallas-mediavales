@@ -100,6 +100,7 @@ fi
 STAGED_ENV="$(mktemp ./.release.env.rollback.XXXXXXXX)"
 STAGED_SHA="$(mktemp ./.release-sha.rollback.XXXXXXXX)"
 RECOVERY_REQUIRED="$STATE_DIR/recovery-required"
+VALIDATED_BACKUP=""
 RECOVERY_MARKER_PREEXISTED=0
 if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
   RECOVERY_MARKER_PREEXISTED=1
@@ -107,12 +108,27 @@ fi
 RECOVERY_MARKER_TMP=""
 cleanup() {
   rm -f -- "$STAGED_ENV" "$STAGED_SHA" "$RECOVERY_MARKER_TMP"
+  if [[ -n "$VALIDATED_BACKUP" ]]; then
+    rm -rf -- "${VALIDATED_BACKUP%/*}"
+  fi
 }
 trap cleanup EXIT
 cp "$PREVIOUS_ENV" "$STAGED_ENV"
 chmod 600 "$STAGED_ENV"
 printf '%s\n' "$PREVIOUS_RELEASE_SHA" > "$STAGED_SHA"
 chmod 600 "$STAGED_SHA"
+
+# Validate and freeze the exact snapshot before publishing a recovery marker.
+# A rejected checksum or archive identity must not create a false incident.
+if [[ -n "$ROLLBACK_BACKUP" ]]; then
+  VALIDATED_BACKUP="$(DEPLOY_LOCK_FD="$DEPLOY_LOCK_FD" RESTORE_PREPARE_ONLY=1 \
+    bash ops/restore_postgres.sh "$STAGED_ENV" "$ROLLBACK_BACKUP" "RESTORE:${POSTGRES_DB}")"
+  if [[ ! "$VALIDATED_BACKUP" =~ ^\.ops-state/restore\.[[:alnum:]]{8}/archive\.dump$ ||
+        ! -s "$VALIDATED_BACKUP" || -L "$VALIDATED_BACKUP" ]]; then
+    echo "Rollback refused: restore preflight did not return a private verified snapshot" >&2
+    exit 2
+  fi
+fi
 
 # A failed restore or smoke can leave the live database/services inconsistent
 # with the active release pointers. Block future deploys before any mutation.
@@ -126,7 +142,7 @@ fi
 
 if [[ -n "$ROLLBACK_BACKUP" ]]; then
   DEPLOY_LOCK_FD="$DEPLOY_LOCK_FD" \
-    bash ops/restore_postgres.sh "$STAGED_ENV" "$ROLLBACK_BACKUP" "RESTORE:${POSTGRES_DB}"
+    bash ops/restore_postgres.sh "$STAGED_ENV" "$VALIDATED_BACKUP" "RESTORE:${POSTGRES_DB}"
 else
   echo "No database snapshot was associated with this deployment; rolling back application images only"
   docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" pull backend worker frontend

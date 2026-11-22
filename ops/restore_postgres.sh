@@ -6,6 +6,7 @@ BACKUP_FILE="${2:-}"
 CONFIRMATION="${3:-}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.deploy.yml}"
 RESTORE_START_SERVICES="${RESTORE_START_SERVICES:-1}"
+RESTORE_PREPARE_ONLY="${RESTORE_PREPARE_ONLY:-0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_DIR"
@@ -16,6 +17,10 @@ if [[ -z "$BACKUP_FILE" ]]; then
 fi
 if [[ "$RESTORE_START_SERVICES" != "0" && "$RESTORE_START_SERVICES" != "1" ]]; then
   echo "RESTORE_START_SERVICES must be 0 or 1" >&2
+  exit 2
+fi
+if [[ "$RESTORE_PREPARE_ONLY" != "0" && "$RESTORE_PREPARE_ONLY" != "1" ]]; then
+  echo "RESTORE_PREPARE_ONLY must be 0 or 1" >&2
   exit 2
 fi
 
@@ -29,9 +34,19 @@ NESTED_RESTORE=0
 # pass their already-held descriptor so this nested operation shares the lock.
 if [[ "${DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] &&
    [[ -e "/proc/$$/fd/$DEPLOY_LOCK_FD" ]] &&
-   [[ "/proc/$$/fd/$DEPLOY_LOCK_FD" -ef "$DEPLOY_LOCK_FILE" ]] &&
-   flock -n "$DEPLOY_LOCK_FD"; then
-  NESTED_RESTORE=1
+   [[ "/proc/$$/fd/$DEPLOY_LOCK_FD" -ef "$DEPLOY_LOCK_FILE" ]]; then
+  exec {RESTORE_PROBE_FD}>> "$DEPLOY_LOCK_FILE"
+  if flock -n "$RESTORE_PROBE_FD"; then
+    RESTORE_LOCK_FD="$RESTORE_PROBE_FD"
+  else
+    exec {RESTORE_PROBE_FD}>&-
+    if flock -n "$DEPLOY_LOCK_FD"; then
+      NESTED_RESTORE=1
+    else
+      echo "Restore refused: another deploy, rollback or restore is already running" >&2
+      exit 2
+    fi
+  fi
 else
   umask 077
   exec {RESTORE_LOCK_FD}>> "$DEPLOY_LOCK_FILE"
@@ -41,7 +56,20 @@ else
   fi
 fi
 
-python3 ops/preflight.py "$ENV_FILE"
+RESTORE_TMP_DIR=""
+RESTORE_PRESERVE_TMP=0
+cleanup_restore() {
+  if [[ "$RESTORE_PRESERVE_TMP" != 1 && -n "$RESTORE_TMP_DIR" ]]; then
+    rm -rf -- "$RESTORE_TMP_DIR"
+  fi
+}
+trap cleanup_restore EXIT
+
+if [[ "$RESTORE_PREPARE_ONLY" == "1" ]]; then
+  python3 ops/preflight.py "$ENV_FILE" >&2
+else
+  python3 ops/preflight.py "$ENV_FILE"
+fi
 
 eval "$(python3 - "$ENV_FILE" <<'PY'
 import shlex
@@ -81,16 +109,43 @@ if [[ "${EXPECTED_HASH,,}" != "$ACTUAL_HASH" ]]; then
   echo "Restore refused: checksum mismatch for requested archive" >&2
   exit 2
 fi
-echo "Backup checksum verified for requested archive"
+if [[ "$RESTORE_PREPARE_ONLY" == "1" ]]; then
+  echo "Backup checksum verified for requested archive" >&2
+else
+  echo "Backup checksum verified for requested archive"
+fi
+
+# Freeze the verified bytes in a private directory. Identity inspection and
+# pg_restore must consume the same snapshot even if BACKUP_FILE is replaced.
+umask 077
+RESTORE_TMP_DIR="$(mktemp -d "$STATE_DIR/restore.XXXXXXXX")"
+RESTORE_SNAPSHOT="$RESTORE_TMP_DIR/archive.dump"
+cat -- "$BACKUP_FILE" > "$RESTORE_SNAPSHOT"
+if [[ ! -s "$RESTORE_SNAPSHOT" ]]; then
+  echo "Restore refused: verified snapshot copy is empty" >&2
+  exit 2
+fi
+SNAPSHOT_HASH="$(sha256sum "$RESTORE_SNAPSHOT" | cut -d' ' -f1)"
+if [[ "${EXPECTED_HASH,,}" != "$SNAPSHOT_HASH" ]]; then
+  echo "Restore refused: backup changed while creating verified snapshot" >&2
+  exit 2
+fi
+printf '%s  %s\n' "$SNAPSHOT_HASH" "$RESTORE_SNAPSHOT" > "${RESTORE_SNAPSHOT}.sha256"
 
 # pg_restore --create uses the database name embedded in the archive, NOT the
 # -d connection database. Refuse a wrong-database archive *before* stopping
 # writers or terminating PostgreSQL sessions.
 ARCHIVE_DATABASE="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
-  pg_restore --list < "$BACKUP_FILE" | sed -n 's/^;[[:space:]]*dbname: //p')"
+  pg_restore --list < "$RESTORE_SNAPSHOT" | sed -n 's/^;[[:space:]]*dbname: //p')"
 if [[ "$ARCHIVE_DATABASE" != "$POSTGRES_DB" ]]; then
   echo "Restore refused: backup database '${ARCHIVE_DATABASE:-unknown}' does not match configured '${POSTGRES_DB}'" >&2
   exit 2
+fi
+
+if [[ "$RESTORE_PREPARE_ONLY" == "1" ]]; then
+  RESTORE_PRESERVE_TMP=1
+  printf '%s\n' "$RESTORE_SNAPSHOT"
+  exit 0
 fi
 
 if [[ "$NESTED_RESTORE" -eq 0 ]]; then
@@ -116,7 +171,7 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
 echo "Restoring $BACKUP_FILE into $POSTGRES_DB"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
   pg_restore --clean --if-exists --create --no-owner --no-privileges --exit-on-error \
-  -U "$POSTGRES_USER" -d postgres < "$BACKUP_FILE"
+  -U "$POSTGRES_USER" -d postgres < "$RESTORE_SNAPSHOT"
 
 if [[ "$RESTORE_START_SERVICES" == "1" ]]; then
   echo "Starting selected release, migration chain and HTTPS edge"

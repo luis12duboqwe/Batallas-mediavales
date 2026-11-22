@@ -5,6 +5,7 @@ are stubs. These tests never touch a staging or production deployment.
 """
 
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -52,6 +53,18 @@ def rollback_lab(tmp_path):
     ops = tmp_path / "ops"
     (ops / "restore_postgres.sh").write_text(
         "#!/usr/bin/env bash\n"
+        "if [[ \"${RESTORE_PREPARE_ONLY:-0}\" == 1 ]]; then\n"
+        "  backup=\"$2\"\n"
+        "  if [[ ! -s \"${backup}.sha256\" ]] || ! sha256sum --check \"${backup}.sha256\" >/dev/null 2>&1; then\n"
+        "    echo 'Restore preflight checksum mismatch' >&2\n"
+        "    exit 2\n"
+        "  fi\n"
+        "  stage_dir=\"$(mktemp -d .ops-state/restore.XXXXXXXX)\"\n"
+        "  cp -- \"$backup\" \"$stage_dir/archive.dump\"\n"
+        "  sha256sum \"$stage_dir/archive.dump\" > \"$stage_dir/archive.dump.sha256\"\n"
+        "  printf '%s\\n' \"$stage_dir/archive.dump\"\n"
+        "  exit 0\n"
+        "fi\n"
         "printf 'restore:%s\\n' \"$1\" >> \"$BM_TRACE\"\n"
         "exit \"${BM_RESTORE_EXIT:-0}\"\n",
         encoding="utf-8",
@@ -91,6 +104,10 @@ def rollback_lab(tmp_path):
 
     backup = backups / "sample.dump"
     backup.write_bytes(b"test-only-data")
+    (backups / "sample.dump.sha256").write_text(
+        f"{hashlib.sha256(backup.read_bytes()).hexdigest()}  {backup}\n",
+        encoding="utf-8",
+    )
     manifest = tmp_path / ".ops-state" / "deployments" / (CURRENT_SHA + ".json")
     manifest.write_text(
         json.dumps({"previous_release_sha": PREVIOUS_SHA, "rollback_backup": str(backup)}),
@@ -231,6 +248,19 @@ def test_successful_application_only_rollback_preserves_existing_recovery_marker
     assert _trace(rollback_lab)[-1] == "smoke"
     assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == PREVIOUS_SHA + "\n"
     assert marker.read_text(encoding="utf-8") == "reason=database_recovery_still_pending\n"
+
+
+def test_invalid_snapshot_is_rejected_before_rollback_marker_or_docker(rollback_lab):
+    sidecar = rollback_lab["backup"].with_name(rollback_lab["backup"].name + ".sha256")
+    sidecar.write_text(f'{"0" * 64}  {rollback_lab["backup"]}\n', encoding="utf-8")
+
+    result = _run(rollback_lab)
+
+    assert result.returncode == 2
+    assert "Restore preflight checksum mismatch" in result.stderr
+    assert not (rollback_lab["root"] / ".ops-state" / "recovery-required").exists()
+    assert _trace(rollback_lab) == []
+    assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == CURRENT_SHA + "\n"
 
 
 def test_manual_rollback_refused_if_release_operation_lock_is_held(rollback_lab):
