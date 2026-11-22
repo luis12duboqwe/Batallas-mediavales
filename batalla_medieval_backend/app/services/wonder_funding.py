@@ -179,7 +179,9 @@ def contribute(
                 or project.alliance_id != member
             ):
                 raise ValueError("Idempotency key was already used for a different contribution")
-            return _snapshot(city, project.target_level, member, project)
+            response = _snapshot(city, project.target_level, member, project)
+            db.rollback()  # End the read-only replay and release its row locks.
+            return response
 
         building = db.query(models.Building).filter_by(
             city_id=city.id, name="world_wonder",
@@ -219,8 +221,8 @@ def contribute(
             source_city_id=source_city_id, idempotency_key=idempotency_key,
             **amounts,
         ))
-        db.commit()
         response = _snapshot(city, target_level, member, project)
+        db.commit()
         production.record_resource_gains(db, donor, gains)
         return response
     except Exception:
