@@ -19,6 +19,19 @@ permissions:
   contents: read
 
 jobs:
+  readiness:
+    name: NOT READY — no staging soak probe executed
+    if: ${{ vars.STAGING_BASE_URL == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report scheduled soak readiness
+        run: |
+          {
+            echo "## Staging soak readiness: NOT READY"
+            echo "- Sustained probes are skipped because the repository variable \`STAGING_BASE_URL\` is not configured."
+            echo "- A readiness success does not provide staging soak evidence."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   soak:
     name: Staging sustained read load
     if: ${{ vars.STAGING_BASE_URL != '' }}
@@ -26,6 +39,8 @@ jobs:
     environment: staging
     env:
       STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+      STAGING_BASIC_AUTH_USERNAME: ${{ vars.STAGING_BASIC_AUTH_USERNAME }}
+      STAGING_BASIC_AUTH_PASSWORD: ${{ secrets.STAGING_BASIC_AUTH_PASSWORD }}
       REQUESTED_DURATION: ${{ inputs.duration || '15m' }}
     steps:
       - name: Checkout repository
