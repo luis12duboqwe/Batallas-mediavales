@@ -200,6 +200,37 @@ def test_two_competing_activations_cannot_both_succeed(release):
     assert outcome == ["version=1\noperation_id=first\n"]
 
 
+@pytest.mark.parametrize("script", [
+    "deploy_remote.sh", "rollback_remote.sh", "restore_postgres.sh"
+])
+def test_activated_marker_blocks_real_legacy_entrypoint_without_docker(release, script):
+    """Integration with the actual historical scripts, without starting services."""
+    import shutil
+    import subprocess
+
+    root, state = release
+    ops = root / "ops"
+    ops.mkdir()
+    shutil.copy2(Path(__file__).resolve().parents[1] / "ops" / script, ops / script)
+    (root / "base.env").write_text("APP_ENV=staging\\n")
+    sha = "b" * 40
+    arguments = {
+        "deploy_remote.sh": ["base.env", sha, "registry.invalid/b", "registry.invalid/f"],
+        "rollback_remote.sh": [sha, "ROLLBACK:" + sha],
+        "restore_postgres.sh": ["base.env", "not-real.dump", "RESTORE:synthetic"],
+    }[script]
+    with arm_cutover(str(root), "g5-script-integration"):
+        assert (state / MARKER).is_file()
+    result = subprocess.run(
+        ["bash", "ops/" + script, *arguments], cwd=root,
+        capture_output=True, text=True, check=False, timeout=8,
+    )
+    assert result.returncode == 2, result.stderr
+    assert "Legacy G5 operation refused" in result.stderr
+    assert (state / MARKER).is_file()
+    assert not (root / ".release.env.next").exists()
+
+
 def test_non_string_operation_identity_is_rejected(release):
     root, state = release
     with pytest.raises(StateError, match="operation ID"):
