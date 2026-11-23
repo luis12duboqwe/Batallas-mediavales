@@ -80,14 +80,13 @@ fi
 marker_tmp=""
 backup_receipt=""
 prepared_dir=""
-recovery_env=""
 cleanup() {
   trap - ERR
   set +e
   if [[ -n "$prepared_dir" ]]; then
     rm -rf -- "$prepared_dir"
   fi
-  rm -f -- "$NEXT_ENV" "$marker_tmp" "$backup_receipt" "$recovery_env"
+  rm -f -- "$NEXT_ENV" "$marker_tmp" "$backup_receipt"
 }
 trap cleanup EXIT
 
@@ -242,11 +241,10 @@ rollback_backup=""
 prepared_receipt=""
 release_mutation_started=0
 schema_integrity_uncertain=0
-rollback() {
+handle_deployment_error() {
   local exit_code=$?
   trap - ERR
   set +e
-  local recovered=0
   echo "Deployment failed; entering fail-closed incident handling" >&2
 
   # Before release startup, no migrations or seed work has been requested.
@@ -276,7 +274,7 @@ rollback() {
   echo "CRITICAL: recovery marker retained; no database restore or automatic reopening ($RECOVERY_REQUIRED)" >&2
   exit "$exit_code"
 }
-trap rollback ERR
+trap handle_deployment_error ERR
 
 candidate_env="$NEXT_ENV"
 database_env="$PREVIOUS_ENV"
