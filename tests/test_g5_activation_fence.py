@@ -50,6 +50,23 @@ def test_worker_error_does_not_reopen_legacy_entrypoints(release):
             pytest.fail("A failed cutover must remain blocked")
 
 
+@pytest.mark.parametrize("kind", ["regular", "directory", "dangling-symlink"])
+def test_orphaned_legacy_recovery_receipt_blocks_new_activation(release, kind):
+    root, state = release
+    receipt = state / "recovery-required.unresolved"
+    if kind == "regular":
+        receipt.write_text("reason=failed_recovery_marker_publication\\n")
+    elif kind == "directory":
+        receipt.mkdir()
+    else:
+        receipt.symlink_to(state / "missing")
+    with pytest.raises(StateError, match="orphaned recovery evidence"):
+        with arm_cutover(str(root), "must-not-bypass-incident"):
+            pytest.fail("G5 must refuse a legacy incident even without canonical marker")
+    assert not (state / MARKER).exists()
+    assert receipt.is_symlink() or receipt.exists()
+
+
 @pytest.mark.parametrize("previous", ["g5-cutover.json", MARKER, "recovery-required"])
 @pytest.mark.parametrize("kind", ["file", "directory", "dangling-symlink"])
 def test_prior_cutover_or_incident_is_fail_closed(release, previous, kind):
