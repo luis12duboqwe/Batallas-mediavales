@@ -95,9 +95,9 @@ def rollback_lab(tmp_path):
         "printf 'docker:%s\\n' \"$*\" >> \"$BM_TRACE\"\n"
         "if [[ \"$*\" == *' up --no-deps '* ]]; then\n"
         "  if [[ \"${BM_SIGNAL_UP:-0}\" == 1 ]]; then\n"
-        "    kill -TERM \"$PPID\"\n"
+        "    kill -\"${BM_SIGNAL_KIND:-TERM}\" \"$PPID\"\n"
         "    sleep 0.2\n"
-        "    if [[ \"${BM_SIGNAL_AGAIN:-0}\" == 1 ]]; then kill -TERM \"$PPID\"; fi\n"
+        "    if [[ \"${BM_SIGNAL_AGAIN:-0}\" == 1 ]]; then kill -\"${BM_SIGNAL_KIND:-TERM}\" \"$PPID\"; fi\n"
         "    printf 'writer-started-late\\n' >> \"$BM_TRACE\"\n"
         "  fi\n"
         "  exit \"${BM_UP_EXIT:-0}\"\n"
@@ -268,12 +268,20 @@ def test_application_only_rollback_stops_writers_if_compose_partially_starts(rol
     _assert_active_unchanged(rollback_lab)
 
 
+@pytest.mark.parametrize(
+    ("signal_kind", "expected_code"),
+    [("TERM", 143), ("HUP", 129), ("USR1", 138), ("PIPE", 141), ("ALRM", 142)],
+)
 @pytest.mark.parametrize("repeat_signal", [False, True])
-def test_sigterm_waits_for_compose_up_before_stopping_writers(rollback_lab, repeat_signal):
+def test_termination_signals_wait_for_compose_up_before_stopping_writers(
+    rollback_lab, repeat_signal, signal_kind, expected_code
+):
     result = _run(rollback_lab, extra_env={
-        "BM_SIGNAL_UP": "1", "BM_SIGNAL_AGAIN": "1" if repeat_signal else "0",
+        "BM_SIGNAL_UP": "1",
+        "BM_SIGNAL_KIND": signal_kind,
+        "BM_SIGNAL_AGAIN": "1" if repeat_signal else "0",
     })
-    assert result.returncode == 143, result.stderr
+    assert result.returncode == expected_code, result.stderr
     trace = _trace(rollback_lab)
     assert "writer-started-late" in trace, trace
     stops = [i for i, line in enumerate(trace)
