@@ -240,7 +240,7 @@ def test_application_only_rollback_refuses_existing_recovery_incident(rollback_l
         encoding="utf-8",
     )
     marker = rollback_lab["root"] / ".ops-state" / "recovery-required"
-    marker.write_text("reason=database_recovery_still_pending\\n", encoding="utf-8")
+    marker.write_text("reason=database_recovery_still_pending\n", encoding="utf-8")
 
     result = _run(rollback_lab)
 
@@ -248,7 +248,7 @@ def test_application_only_rollback_refuses_existing_recovery_incident(rollback_l
     assert "existing recovery incident requires certified G5" in result.stderr
     assert _trace(rollback_lab) == []
     _assert_active_unchanged(rollback_lab)
-    assert marker.read_text(encoding="utf-8") == "reason=database_recovery_still_pending\\n"
+    assert marker.read_text(encoding="utf-8") == "reason=database_recovery_still_pending\n"
 
 
 def test_invalid_snapshot_is_rejected_before_rollback_marker_or_docker(rollback_lab):
