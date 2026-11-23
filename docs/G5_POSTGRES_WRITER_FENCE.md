@@ -18,7 +18,8 @@ antes de tomar el respaldo, incluso si reinicia un worker o muere el gestor.
    administrativa en la base `postgres` y comprueba permisos de superusuario.
 2. Comprueba que `DB_URL` corresponde a una cuenta **distinta y no elevada**
    (sin SUPERUSER, CREATEDB, CREATEROLE, REPLICATION, BYPASSRLS ni membresía
-   en privilegios globales peligrosos).
+   **directa o indirecta** en roles que posean cualquiera de esos atributos
+   o privilegios globales peligrosos, incluso con `NOINHERIT` / `SET ROLE`).
 3. Exige la base esperada con `datconnlimit` no bloqueado. Si ya figura
    bloqueada, considera el estado como incidente previo y rechaza rearmar.
 4. Ejecuta primero `ALTER DATABASE <base> CONNECTION LIMIT 0` con
@@ -65,7 +66,11 @@ ambigüedad de identidad, SQL o sesiones.
   sintético `--network none`, sin puertos públicos ni volúmenes reales.
   El ensayo verifica una escritura ya confirmada, una sesión viva antes
   de la barrera, la terminación, la persistencia del bloqueo tras
-  construir otro objeto Python y el rechazo de una reconexión. No certifica
+  construir otro objeto Python, rechazo de reconexión y membresías
+  elevadas directas/indirectas sin modificar la base. El test también espera
+  al **postmaster final** (`SHOW listen_addresses`), no al servidor temporal
+  de inicialización que acepta sockets, conservando `--network none`.
+  No certifica
   escritores superusuario o multiinstancia ni habilita datos reales.
 
 Referencias de PostgreSQL 15:
