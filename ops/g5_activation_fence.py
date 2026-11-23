@@ -28,7 +28,7 @@ def _entry(directory: int, name: str):
 
 
 def _identity(info):
-    return info.st_dev, info.st_ino, info.st_uid, info.st_mode
+    return info.st_dev, info.st_ino, info.st_mode, info.st_uid
 
 
 def _check_lock(directory: int, lock_fd: int) -> None:
