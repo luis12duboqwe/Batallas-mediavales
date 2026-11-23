@@ -571,6 +571,57 @@ def test_missing_source_archive_never_triggers_unsafe_restore(deploy_lab):
     assert _marker(deploy_lab).is_file()
     _assert_temporary_files_cleaned(deploy_lab)
 
+@pytest.mark.parametrize("metadata_failure", ["release_copy", "manifest"])
+def test_post_mutation_metadata_publish_failure_keeps_incident_and_stops_writers(
+    deploy_lab, metadata_failure
+):
+    """A late metadata failure is never an unguarded exit or a DB restore."""
+    bin_dir = Path(deploy_lab["env"]["PATH"].split(os.pathsep)[0])
+    python = bin_dir / "python3"
+    python.write_text(
+        "#!/usr/bin/env bash\\n"
+        'if [[ "$1:$2" == "-:https://staging.example.invalid" ]]; then\\n'
+        "  cat >/dev/null\\n"
+        "  exit 0\\n"
+        "fi\\n"
+        'if [[ "$1" == "-" && "$2" == .ops-state/deployments/*'
+        ' && "$BM_METADATA_FAILURE" == "manifest" ]]; then\\n'
+        "  cat >/dev/null\\n"
+        "  exit 61\\n"
+        "fi\\n"
+        f'exec {shlex.quote(sys.executable)} "$@"\\n',
+        encoding="utf-8",
+    )
+    python.chmod(0o755)
+    cp = bin_dir / "cp"
+    cp.write_text(
+        "#!/usr/bin/env bash\\n"
+        'if [[ "$BM_METADATA_FAILURE" == "release_copy" '
+        '&& "${*: -1}" == .ops-state/releases/* ]]; then\\n'
+        "  exit 62\\n"
+        "fi\\n"
+        'exec /usr/bin/cp "$@"\\n',
+        encoding="utf-8",
+    )
+    cp.chmod(0o755)
+    code = 62 if metadata_failure == "release_copy" else 61
+    result = _run(deploy_lab, {
+        "BM_METADATA_FAILURE": metadata_failure,
+        "BM_RELEASE_START_EXIT": "0",
+    })
+    assert result.returncode == code, result.stderr
+    assert "database restore is NOT SAFE" in result.stderr
+    assert _marker(deploy_lab).is_file()
+    trace = _trace(deploy_lab)
+    assert any(" up -d --remove-orphans" in line for line in trace)
+    assert any("stop -t 120 backend worker migrate seed" in line for line in trace)
+    assert not any(line.startswith("restore:") or "pg_restore --clean" in line for line in trace)
+    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\\n"
+    retry = _run(deploy_lab)
+    assert retry.returncode == 2
+    assert "unresolved recovery incident" in retry.stderr
+
+
 def test_successful_deploy_cleans_private_copy_and_keeps_original_backup_in_manifest(deploy_lab):
     python = deploy_lab["root"] / "bin" / "python3"
     python.write_text(
