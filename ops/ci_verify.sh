@@ -256,12 +256,27 @@ if [[ "$CURRENT_MARKER" != "after-backup" ]]; then
   exit 1
 fi
 
-COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" RESTORE_START_SERVICES=0 \
-  bash ops/restore_postgres.sh "$ENV_FILE" "$BACKUP_FILE" "RESTORE:batalla_ci"
+# The injected stop failure published a durable recovery incident. Do not
+# bypass or clear that marker to restore an older archive into the live DB.
+# Validate the snapshot instead in a separate disposable destination database.
+if [[ ! -s .ops-state/recovery-required ]]; then
+  echo "Refused restore did not preserve its recovery incident" >&2
+  exit 1
+fi
+docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
+  createdb -U batalla batalla_ci_restore_probe
+docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
+  pg_restore --no-owner --no-privileges --exit-on-error -U batalla -d batalla_ci_restore_probe < "$BACKUP_FILE"
 RESTORED_MARKER="$(docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
-  psql -h 127.0.0.1 -U batalla -d batalla_ci -Atqc "SELECT marker FROM recovery_probe WHERE id=1;")"
+  psql -h 127.0.0.1 -U batalla -d batalla_ci_restore_probe -Atqc "SELECT marker FROM recovery_probe WHERE id=1;")"
 if [[ "$RESTORED_MARKER" != "before-backup" ]]; then
-  echo "Backup/restore round trip failed: got marker '$RESTORED_MARKER'" >&2
+  echo "Isolated backup/restore drill failed: got marker '$RESTORED_MARKER'" >&2
+  exit 1
+fi
+CURRENT_MARKER="$(docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T database \
+  psql -h 127.0.0.1 -U batalla -d batalla_ci -Atqc "SELECT marker FROM recovery_probe WHERE id=1;")"
+if [[ "$CURRENT_MARKER" != "after-backup" ]]; then
+  echo "Isolation failure: restore drill modified source database" >&2
   exit 1
 fi
 
