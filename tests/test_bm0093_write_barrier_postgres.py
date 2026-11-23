@@ -415,3 +415,72 @@ def test_readiness_waits_for_definitive_postgres_and_checks_sql(monkeypatch):
     ]
     assert commands[3][:4] == ["docker", "exec", name, "psql"]
     assert commands[3][-1] == "SHOW server_version_num;"
+
+
+@pytest.mark.parametrize("privileged_flag,reset_flag", [
+    ("SUPERUSER", "NOSUPERUSER"),
+    ("CREATEDB", "NOCREATEDB"),
+    ("CREATEROLE", "NOCREATEROLE"),
+    ("REPLICATION", "NOREPLICATION"),
+    ("BYPASSRLS", "NOBYPASSRLS"),
+    ("NOLOGIN", "LOGIN"),
+])
+def test_g5_role_audit_uses_actual_postgres15_role_flags(
+    postgres_pair, monkeypatch, privileged_flag, reset_flag
+):
+    """Reject real PostgreSQL 15 privileged role identities, not fake SQL output."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from ops import g5_writer_drain_probe as probe
+
+    source, _ = postgres_pair
+    app_role = "bm0093_g5_role_fixture"
+    _sql(source, f"CREATE ROLE {app_role} LOGIN PASSWORD 'only-for-disposable-ci';")
+    try:
+        monkeypatch.setattr(probe, "_run", lambda argv: _sql(source, argv[-1]))
+        probe._require_unprivileged_app_role(
+            ["docker", "compose"], "postgres", app_role
+        )
+        _sql(source, f"ALTER ROLE {app_role} {privileged_flag};")
+        with pytest.raises(probe.ProbeError, match="elevated"):
+            probe._require_unprivileged_app_role(
+                ["docker", "compose"], "postgres", app_role
+            )
+        _sql(source, f"ALTER ROLE {app_role} {reset_flag};")
+        probe._require_unprivileged_app_role(
+            ["docker", "compose"], "postgres", app_role
+        )
+    finally:
+        _sql(source, f"DROP ROLE IF EXISTS {app_role};")
+
+
+@pytest.mark.parametrize("inherited_role", [
+    "pg_write_all_data", "pg_read_all_data", "pg_execute_server_program",
+    "pg_read_server_files", "pg_write_server_files",
+])
+def test_g5_role_audit_rejects_real_postgres15_privileged_membership(
+    postgres_pair, monkeypatch, inherited_role
+):
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from ops import g5_writer_drain_probe as probe
+
+    source, _ = postgres_pair
+    app_role = "bm0093_g5_member_fixture"
+    _sql(source, f"CREATE ROLE {app_role} LOGIN PASSWORD 'only-for-disposable-ci';")
+    try:
+        monkeypatch.setattr(probe, "_run", lambda argv: _sql(source, argv[-1]))
+        probe._require_unprivileged_app_role(
+            ["docker", "compose"], "postgres", app_role
+        )
+        _sql(source, f"GRANT {inherited_role} TO {app_role};")
+        with pytest.raises(probe.ProbeError, match="elevated"):
+            probe._require_unprivileged_app_role(
+                ["docker", "compose"], "postgres", app_role
+            )
+        _sql(source, f"REVOKE {inherited_role} FROM {app_role};")
+        probe._require_unprivileged_app_role(
+            ["docker", "compose"], "postgres", app_role
+        )
+    finally:
+        _sql(source, f"DROP ROLE IF EXISTS {app_role};")
