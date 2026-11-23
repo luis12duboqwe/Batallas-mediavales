@@ -87,6 +87,17 @@ def test_missing_expected_service_is_blocker(sample):
     assert any("missing" in issue for issue in check(sample))
 
 
+@pytest.mark.parametrize("invalid", [None, [], "bad", {"services": []}])
+def test_malformed_compose_config_is_blocked(sample, invalid):
+    _, containers, edge = sample
+    assert probe.inspect(invalid, containers, "0|0", edge)
+
+
+def test_missing_nginx_spec_is_blocked_without_exception(sample):
+    sample[0]["services"]["nginx"] = None
+    assert any("Nginx" in reason for reason in check(sample))
+
+
 @pytest.mark.parametrize("pg", ["1|0", "0|1", "2|3"])
 def test_postgres_sessions_and_prepared_transactions_block(sample, pg):
     assert any("PostgreSQL" in reason for reason in check(sample, pg))
@@ -119,6 +130,16 @@ def test_missing_or_writable_g5_mount_is_blocked(sample, target):
     mount["read_only"] = True
     config["services"]["nginx"]["volumes"].remove(mount)
     assert any("mount" in reason for reason in check(sample))
+
+
+def test_mount_with_same_basename_in_another_directory_is_blocked(sample, tmp_path):
+    config, _, edge = sample
+    mount = next(m for m in config["services"]["nginx"]["volumes"]
+                 if m["target"] == "/etc/nginx/nginx.conf")
+    other = tmp_path / "other"
+    other.mkdir()
+    mount["source"] = str(other / "nginx.g5.conf")
+    assert any("misplaced" in reason for reason in check(sample))
 
 
 def test_open_gate_even_as_dangling_symlink_is_blocked(sample, tmp_path):
