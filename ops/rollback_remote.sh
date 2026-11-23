@@ -203,7 +203,9 @@ if [[ -n "$ROLLBACK_BACKUP" ]]; then
 else
   echo "No database snapshot was associated with this deployment; rolling back application images only"
   docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" pull backend worker frontend
-  docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy
+  # --no-deps is mandatory: backend -> seed -> migrate may write to the DB.
+  # An application-only rollback must not silently rerun migration or seed.
+  docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" up --no-deps -d --remove-orphans backend worker frontend nginx caddy
 fi
 
 python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-ms 750
