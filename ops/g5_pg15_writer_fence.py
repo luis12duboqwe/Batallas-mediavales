@@ -48,6 +48,7 @@ class Pg15SqlSession(Protocol):
     printed, interpolated into SQL, or exposed by exceptions.
     """
     def query(self, sql: str) -> str: ...
+    def execute(self, sql: str) -> None: ...
 
 
 class Pg15PersistentFence:
@@ -74,6 +75,14 @@ class Pg15PersistentFence:
         if not isinstance(result, str) or not result.strip() or "\n" in result.strip():
             raise FenceError("PostgreSQL writer-fence evidence is missing or ambiguous")
         return result.strip()
+
+    def _execute(self, sql: str) -> None:
+        try:
+            result = self.session.execute(sql)
+        except Exception as exc:
+            raise FenceError("PostgreSQL write-fence DDL failed") from exc
+        if result is not None:
+            raise FenceError("PostgreSQL write-fence DDL returned ambiguous evidence")
 
     def _expect(self, sql: str, expected: str, reason: str) -> None:
         if self._scalar(sql) != expected:
@@ -137,12 +146,13 @@ class Pg15PersistentFence:
         app = self.target.application_role
         # Identifiers are strict ASCII-simple names, so quoted identifiers
         # cannot contain double quotes, whitespace or SQL metacharacters.
-        self._scalar(f'ALTER DATABASE "{database}" CONNECTION LIMIT 0;')
-        self._scalar(f'ALTER ROLE "{app}" NOLOGIN;')
-        self._scalar(
+        self._execute(f'ALTER DATABASE "{database}" CONNECTION LIMIT 0;')
+        self._execute(f'ALTER ROLE "{app}" NOLOGIN;')
+        self._expect(
             "SELECT COALESCE(bool_and(pg_terminate_backend(pid)), true) "
             "FROM pg_stat_activity "
-            f"WHERE datname='{database}' AND pid<>pg_backend_pid();"
+            f"WHERE datname='{database}' AND pid<>pg_backend_pid();",
+            "t", "PostgreSQL refused to terminate an active connection",
         )
         self.assert_closed()
 
