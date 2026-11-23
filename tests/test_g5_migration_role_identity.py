@@ -80,6 +80,33 @@ def test_raw_at_sign_in_password_never_certifies_ambiguous_destination(
 
 
 @pytest.mark.parametrize("url_field", ["DB_URL", "G5_MIGRATION_DB_URL"])
+@pytest.mark.parametrize("delimiter", ["#", "?"])
+def test_trailing_raw_fragment_or_query_delimiter_does_not_change_db_target(
+    values, url_field, delimiter
+):
+    values[url_field] += delimiter
+    with pytest.raises(RoleSplitError, match="literal PostgreSQL URL"):
+        validate_split(values)
+
+
+@pytest.mark.parametrize("url_field", ["DB_URL", "G5_MIGRATION_DB_URL"])
+@pytest.mark.parametrize("escaped,decoded", [("%23", "#"), ("%3F", "?")])
+def test_percent_encoded_reserved_chars_are_safe_in_password(values, url_field, escaped, decoded):
+    if url_field == "DB_URL":
+        values["DB_URL"] = (
+            "postgresql+psycopg://game_app:password" + escaped +
+            "@database:5432/game_db"
+        )
+    else:
+        values["G5_MIGRATION_DB_URL"] = (
+            "postgresql+psycopg://game_admin:password" + escaped +
+            "@database:5432/game_db"
+        )
+        values["POSTGRES_PASSWORD"] = "password" + decoded
+    assert validate_split(values).application == "game_app"
+
+
+@pytest.mark.parametrize("url_field", ["DB_URL", "G5_MIGRATION_DB_URL"])
 @pytest.mark.parametrize("encoded", ["%67ame_db", "game%5Fdb", "game_%64b"])
 def test_percent_encoded_database_path_is_not_certified_as_target(
     values, url_field, encoded
