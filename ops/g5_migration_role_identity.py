@@ -28,7 +28,8 @@ class SplitRoles:
 
 
 def _url(value: str, database: str, label: str) -> tuple[str, str]:
-    if (not isinstance(value, str) or not value or "$" in value or
+    if (not isinstance(value, str) or not value or
+            any(char in value for char in ("$", "#", "?")) or
             any(ord(char) < 32 or ord(char) == 127 for char in value)):
         raise RoleSplitError(f"{label} must have a literal PostgreSQL URL")
     try:
@@ -42,7 +43,11 @@ def _url(value: str, database: str, label: str) -> tuple[str, str]:
         password = unquote(parsed.password or "")
         host = parsed.hostname
         port = parsed.port
-    except (TypeError, ValueError) as exc:
+    except RoleSplitError:
+        # This is also a ValueError; never discard a specific fail-closed
+        # ambiguity diagnostic by catching it as a parser error.
+        raise
+    except (TypeError, ValueError):
         raise RoleSplitError(f"{label} has malformed connection identity") from None
     if (parsed.scheme not in _SCHEMES or host != "database" or
             port not in (None, 5432) or
