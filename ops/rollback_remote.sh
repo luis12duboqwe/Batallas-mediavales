@@ -155,11 +155,31 @@ if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
   exit 2
 fi
 RECOVERY_MARKER_TMP=""
+# Once Compose is asked to start the previous application, failure means it
+# may be serving players or executing workers while recovery remains uncertain.
+ROLLBACK_START_REQUESTED=0
+ROLLBACK_VERIFIED=0
 cleanup() {
+  local status=$?
+  trap - EXIT
+  set +e
+  if [[ "$ROLLBACK_START_REQUESTED" == 1 && "$ROLLBACK_VERIFIED" != 1 ]]; then
+    echo "CRITICAL: rollback did not pass smoke and metadata/marker certification; stopping writers" >&2
+    local stop_env="$STAGED_ENV"
+    # The first release-pointer rename may already have committed.
+    if [[ ! -f "$stop_env" ]]; then
+      stop_env=".release.env"
+    fi
+    if ! docker compose --env-file "$stop_env" -f "$COMPOSE_FILE" stop -t 120 backend worker migrate seed; then
+      echo "CRITICAL: writer stop failed; inspect database sessions and running containers immediately" >&2
+    fi
+    echo "CRITICAL: recovery requires operator certification; writers must remain closed" >&2
+  fi
   rm -f -- "$STAGED_ENV" "$STAGED_SHA" "$RECOVERY_MARKER_TMP"
   if [[ -n "$PREPARED_DIR" ]]; then
     rm -rf -- "$PREPARED_DIR"
   fi
+  exit "$status"
 }
 trap cleanup EXIT
 STAGED_ENV="$(mktemp ./.release.env.rollback.XXXXXXXX)"
@@ -205,6 +225,8 @@ else
   docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" pull backend worker frontend
   # --no-deps is mandatory: backend -> seed -> migrate may write to the DB.
   # An application-only rollback must not silently rerun migration or seed.
+  # Arm failure cleanup before Compose can partially start any writer.
+  ROLLBACK_START_REQUESTED=1
   docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" up --no-deps -d --remove-orphans backend worker frontend nginx caddy
 fi
 
@@ -213,8 +235,12 @@ python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-
 # Commit metadata only after the candidate release has passed post-rollback smoke.
 mv -f -- "$STAGED_ENV" .release.env
 mv -f -- "$STAGED_SHA" .release-sha
-if [[ -n "$RECOVERY_MARKER_TMP" && ! -L "$RECOVERY_REQUIRED" &&
-      "$RECOVERY_MARKER_TMP" -ef "$RECOVERY_REQUIRED" ]]; then
+if [[ -n "$RECOVERY_MARKER_TMP" ]]; then
+  if [[ -L "$RECOVERY_REQUIRED" || ! "$RECOVERY_MARKER_TMP" -ef "$RECOVERY_REQUIRED" ]]; then
+    echo "Rollback refused: recovery marker was replaced or disappeared; leaving writers stopped" >&2
+    exit 2
+  fi
   rm -f -- "$RECOVERY_REQUIRED"
 fi
+ROLLBACK_VERIFIED=1
 echo "Rollback succeeded: ${CURRENT_RELEASE} -> ${PREVIOUS_RELEASE_SHA}"
