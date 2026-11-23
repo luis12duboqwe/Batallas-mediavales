@@ -247,7 +247,7 @@ rollback() {
   trap - ERR
   set +e
   local recovered=0
-  echo "Deployment failed; attempting controlled rollback" >&2
+  echo "Deployment failed; entering fail-closed incident handling" >&2
 
   # Before release startup, no migrations or seed work has been requested.
   # NEVER call compose up for a pre-migration failure: dependency startup would
@@ -264,39 +264,16 @@ rollback() {
     exit "$exit_code"
   fi
 
-  if [[ "$had_previous" -eq 1 ]]; then
-    recovery_env="$(mktemp ./.release.env.recovery.XXXXXXXX)"
-    if [[ -n "$recovery_env" && -f "$recovery_env" ]] &&
-       cp "$PREVIOUS_ENV" "$recovery_env" &&
-       chmod 600 "$recovery_env"; then
-      if [[ -n "$prepared_dir" && -n "$prepared_receipt" ]]; then
-        echo "Restoring pre-deploy database snapshot and previous application release" >&2
-        if DEPLOY_LOCK_FD="$DEPLOY_LOCK_FD" RESTORE_PREPARE_ONLY=0 RESTORE_START_SERVICES=1 \
-          bash ops/restore_postgres.sh "$recovery_env" "$prepared_dir/archive.dump" "RESTORE:${POSTGRES_DB}" \
-            "$prepared_dir" "$prepared_receipt"; then
-          recovered=1
-        fi
-      fi
-    fi
-
-    if [[ "$recovered" -eq 1 ]]; then
-      if python3 ops/smoke_http.py --base-url "$previous_public_base_url" --requests 20 --max-p95-ms "$MAX_P95_MS" &&
-         mv -f -- "$recovery_env" "$CURRENT_ENV"; then
-        recovered=2
-        recovery_env=""
-      fi
-    fi
-  else
-    echo "No previous release exists; cannot automatically restore this deployment" >&2
+  # A live release may commit writes AFTER the snapshot was captured.
+  # Restoring that old snapshot would silently erase those confirmed writes.
+  # The legacy manager has no durable, universal writer barrier, so it may
+  # NEVER auto-restore an earlier PostgreSQL dump after release mutation.
+  echo "CRITICAL: database restore is NOT SAFE after release mutation without a certified G5 writer barrier" >&2
+  echo "Stopping application writers and preserving the current database for operator recovery" >&2
+  if ! docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" stop -t 120 backend worker migrate seed; then
+    echo "CRITICAL: writer stop failed; check live containers and database sessions immediately" >&2
   fi
-
-  if [[ "$recovered" -eq 2 ]]; then
-    # .release-sha already points to the previous release during a failed
-    # deployment. Preserve it; only the active env needed to be restored.
-    clear_recovery_marker
-  else
-    echo "CRITICAL: rollback not verified; manual recovery required ($RECOVERY_REQUIRED)" >&2
-  fi
+  echo "CRITICAL: recovery marker retained; no database restore or automatic reopening ($RECOVERY_REQUIRED)" >&2
   exit "$exit_code"
 }
 trap rollback ERR
