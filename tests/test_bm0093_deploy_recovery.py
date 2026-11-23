@@ -626,12 +626,15 @@ def test_backup_receipt_accepts_trailing_directory_separator(deploy_lab):
         "BM_TEST_BACKUP_DIR": str(backup_dir) + "/",
     })
     assert result.returncode == 54, result.stderr
+    trace = _trace(deploy_lab)
     assert any(
         line.startswith("prepare:") and
         line.endswith("/batalla_ci-20261120T123456Z-A1b2C3d4.dump")
-        for line in _trace(deploy_lab)
+        for line in trace
     )
-    assert not _marker(deploy_lab).exists()
+    assert any("stop -t 120 backend worker migrate seed" in line for line in trace)
+    assert not any(line.startswith("restore:") or "pg_restore --clean" in line for line in trace)
+    assert _marker(deploy_lab).is_file()
 
 
 def test_pre_migration_image_pull_failure_does_not_restore_or_migrate(deploy_lab):
