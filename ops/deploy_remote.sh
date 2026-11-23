@@ -355,10 +355,12 @@ echo "Pulling immutable release images and pinned edge images"
 docker compose --env-file "$candidate_env" -f "$COMPOSE_FILE" pull migrate seed backend worker frontend nginx caddy
 
 echo "Applying migrations and starting release ${RELEASE_SHA}"
+# Enter the guarded mutation phase BEFORE moving the release pointer. A failed
+# or interrupted metadata publish cannot be mistaken for a pre-mutation error.
+release_mutation_started=1
 if [[ "$had_previous" -eq 1 ]]; then
   mv -T -- "$NEXT_ENV" "$CURRENT_ENV"
 fi
-release_mutation_started=1
 docker compose --env-file "$CURRENT_ENV" -f "$COMPOSE_FILE" up -d --remove-orphans
 
 echo "Waiting for HTTPS edge and certificate readiness at ${PUBLIC_BASE_URL}"
