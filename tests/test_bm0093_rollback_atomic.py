@@ -189,7 +189,21 @@ def test_reject_missing_snapshot_before_any_mutation(rollback_lab):
     _assert_active_unchanged(rollback_lab)
 
 
-@pytest.mark.parametrize("failed_step", ["restore", "smoke"])
+
+@pytest.mark.parametrize("archive_state", ["valid", "tampered"])
+def test_snapshot_rollback_refused_without_g5_barrier(rollback_lab, archive_state):
+    if archive_state == "tampered":
+        rollback_lab["backup"].with_name("sample.dump.sha256").write_text(
+            "0" * 64 + "  " + str(rollback_lab["backup"]) + "\n",
+            encoding="utf-8",
+        )
+    result = _run(rollback_lab)
+    assert result.returncode == 2, result.stderr
+    assert "legacy database snapshot restore requires certified G5" in result.stderr
+    assert _trace(rollback_lab) == []
+    _assert_active_unchanged(rollback_lab)
+    assert not (rollback_lab["root"] / ".ops-state" / "recovery-required").exists()
+
 def test_failed_recovery_preserves_active_release_pointers(rollback_lab, failed_step):
     env = {"BM_RESTORE_EXIT": "35"} if failed_step == "restore" else {"BM_SMOKE_EXIT": "36"}
     result = _run(rollback_lab, extra_env=env)
@@ -223,7 +237,11 @@ def test_failed_application_only_rollback_keeps_metadata(rollback_lab):
     assert (rollback_lab["root"] / ".ops-state" / "recovery-required").is_file()
 
 
-def test_success_commits_both_release_pointers_after_smoke(rollback_lab):
+def test_app_only_rollback_commits_both_release_pointers_after_smoke(rollback_lab):
+    rollback_lab["manifest"].write_text(
+        json.dumps({"previous_release_sha": PREVIOUS_SHA, "rollback_backup": None}),
+        encoding="utf-8",
+    )
     result = _run(rollback_lab)
     assert result.returncode == 0, result.stderr
     assert _trace(rollback_lab)[-1] == "smoke"
@@ -258,7 +276,7 @@ def test_invalid_snapshot_is_rejected_before_rollback_marker_or_docker(rollback_
     result = _run(rollback_lab)
 
     assert result.returncode == 2
-    assert "Restore preflight checksum mismatch" in result.stderr
+    assert "legacy database snapshot restore requires certified G5" in result.stderr
     assert not (rollback_lab["root"] / ".ops-state" / "recovery-required").exists()
     assert _trace(rollback_lab) == []
     assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == CURRENT_SHA + "\n"
@@ -276,5 +294,6 @@ def test_manual_rollback_refused_if_release_operation_lock_is_held(rollback_lab)
 
     # After release, manual rollback must be allowed through its own checks.
     retried = _run(rollback_lab)
-    assert retried.returncode == 0, retried.stderr
-    assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == PREVIOUS_SHA + "\n"
+    assert retried.returncode == 2, retried.stderr
+    assert "legacy database snapshot restore requires certified G5" in retried.stderr
+    _assert_active_unchanged(rollback_lab)
