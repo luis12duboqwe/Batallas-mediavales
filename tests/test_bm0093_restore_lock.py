@@ -235,6 +235,26 @@ def test_restore_inherits_lock_from_deploy_or_rollback(restore_lab):
     assert restore_lab["marker"].is_file()
 
 
+@pytest.mark.parametrize("receipt_kind", ["file", "symlink", "directory"])
+def test_standalone_restore_rejects_orphaned_recovery_evidence(restore_lab, receipt_kind):
+    orphan = restore_lab["root"] / ".ops-state/recovery-required.orphaned"
+    sentinel = restore_lab["root"] / "sentinel"
+    sentinel.write_text("preserve", encoding="utf-8")
+    if receipt_kind == "file":
+        orphan.write_text("reason=incident", encoding="utf-8")
+    elif receipt_kind == "symlink":
+        orphan.symlink_to(sentinel)
+    else:
+        orphan.mkdir()
+    result = _run(restore_lab)
+    assert result.returncode == 2, result.stderr
+    assert "orphaned recovery evidence" in result.stderr
+    assert not restore_lab["trace"].exists()
+    assert not restore_lab["marker"].exists()
+    assert sentinel.read_text() == "preserve"
+    assert orphan.is_symlink() if receipt_kind == "symlink" else orphan.exists()
+
+
 def test_restore_inherits_lock_through_bash_descriptor(restore_lab):
     command = (
         'exec {DEPLOY_LOCK_FD}>>.ops-state/deploy.lock; '
