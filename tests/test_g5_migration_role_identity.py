@@ -80,6 +80,18 @@ def test_raw_at_sign_in_password_never_certifies_ambiguous_destination(
 
 
 @pytest.mark.parametrize("url_field", ["DB_URL", "G5_MIGRATION_DB_URL"])
+@pytest.mark.parametrize("encoded", ["%67ame_db", "game%5Fdb", "game_%64b"])
+def test_percent_encoded_database_path_is_not_certified_as_target(
+    values, url_field, encoded
+):
+    # urllib.unquote would collapse this to game_db, while SQLAlchemy 2.0
+    # keeps the path encoded as a literal database identifier.
+    values[url_field] = values[url_field].replace("/game_db", "/" + encoded)
+    with pytest.raises(RoleSplitError, match="audited Compose PostgreSQL"):
+        validate_split(values)
+
+
+@pytest.mark.parametrize("url_field", ["DB_URL", "G5_MIGRATION_DB_URL"])
 def test_percent_encoded_at_in_password_can_be_unambiguously_routed(values, url_field):
     if url_field == "DB_URL":
         values[url_field] = (
