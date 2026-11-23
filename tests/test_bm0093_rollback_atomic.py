@@ -71,8 +71,13 @@ def rollback_lab(tmp_path):
     )
     (ops / "smoke_http.py").write_text(
         "import os, sys\n"
+        "from pathlib import Path\n"
         "with open(os.environ['BM_TRACE'], 'a', encoding='utf-8') as f:\n"
         "    f.write('smoke\\n')\n"
+        "if os.environ.get('BM_SWAP_RECOVERY_MARKER') == '1':\n"
+        "    marker = Path('.ops-state/recovery-required')\n"
+        "    marker.unlink()\n"
+        "    marker.write_text('reason=foreign_operator_incident\\n')\n"
         "sys.exit(int(os.environ.get('BM_SMOKE_EXIT', '0')))\n",
         encoding="utf-8",
     )
@@ -83,6 +88,8 @@ def rollback_lab(tmp_path):
     docker.write_text(
         "#!/usr/bin/env bash\n"
         "printf 'docker:%s\\n' \"$*\" >> \"$BM_TRACE\"\n"
+        "if [[ \"$*\" == *' up --no-deps '* ]]; then exit \"${BM_UP_EXIT:-0}\"; fi\n"
+        "if [[ \"$*\" == *' stop -t 120 '* ]]; then exit \"${BM_STOP_EXIT:-0}\"; fi\n"
         "exit \"${BM_DOCKER_EXIT:-0}\"\n",
         encoding="utf-8",
     )
@@ -207,6 +214,10 @@ def test_failed_application_only_recovery_preserves_active_release_pointers(
     trace = _trace(rollback_lab)
     assert trace and trace[0].startswith("docker:compose --env-file ./.release.env.rollback.")
     assert ("smoke" in trace) == (failed_step == "smoke")
+    stop = [line for line in trace if " stop -t 120 backend worker migrate seed" in line]
+    assert len(stop) == (1 if failed_step == "smoke" else 0), trace
+    if stop:
+        assert "CRITICAL: rollback did not pass smoke" in result.stderr
     _assert_active_unchanged(rollback_lab)
     marker = rollback_lab["root"] / ".ops-state" / "recovery-required"
     assert marker.is_file()
@@ -230,6 +241,43 @@ def test_failed_application_only_rollback_keeps_metadata(rollback_lab):
     assert "smoke" not in _trace(rollback_lab)
     _assert_active_unchanged(rollback_lab)
     assert (rollback_lab["root"] / ".ops-state" / "recovery-required").is_file()
+
+
+def test_application_only_rollback_stops_writers_if_compose_partially_starts(rollback_lab):
+    result = _run(rollback_lab, extra_env={"BM_UP_EXIT": "43"})
+    assert result.returncode == 43, result.stderr
+    trace = _trace(rollback_lab)
+    assert any(" up --no-deps -d --remove-orphans " in line for line in trace)
+    assert sum(" stop -t 120 backend worker migrate seed" in line for line in trace) == 1
+    assert "smoke" not in trace
+    assert "CRITICAL: rollback did not pass smoke" in result.stderr
+    assert (rollback_lab["root"] / ".ops-state/recovery-required").is_file()
+    _assert_active_unchanged(rollback_lab)
+
+
+def test_app_only_rollback_reports_stop_failure_without_masking_smoke_error(rollback_lab):
+    result = _run(rollback_lab, extra_env={"BM_SMOKE_EXIT": "36", "BM_STOP_EXIT": "50"})
+    assert result.returncode == 36, result.stderr
+    assert "CRITICAL: writer stop failed" in result.stderr
+    assert sum(" stop -t 120 backend worker migrate seed" in line for line in _trace(rollback_lab)) == 1
+    assert (rollback_lab["root"] / ".ops-state/recovery-required").is_file()
+    _assert_active_unchanged(rollback_lab)
+
+
+def test_app_only_rollback_rejects_replaced_incident_marker_after_smoke(rollback_lab):
+    result = _run(rollback_lab, extra_env={"BM_SWAP_RECOVERY_MARKER": "1"})
+    assert result.returncode == 2, result.stderr
+    assert "recovery marker was replaced or disappeared" in result.stderr
+    trace = _trace(rollback_lab)
+    assert "smoke" in trace
+    stop = [line for line in trace if " stop -t 120 backend worker migrate seed" in line]
+    assert len(stop) == 1, trace
+    assert "--env-file .release.env " in stop[0]  # staged env was already moved
+    assert (rollback_lab["root"] / ".ops-state/recovery-required").read_text() == (
+        "reason=foreign_operator_incident\\n"
+    )
+    assert (rollback_lab["root"] / ".release-sha").read_text().strip() == PREVIOUS_SHA
+    assert not list(rollback_lab["root"].glob(".release*.rollback.*"))
 
 
 def test_success_commits_both_release_pointers_after_smoke(rollback_lab):
