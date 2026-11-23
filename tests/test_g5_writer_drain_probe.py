@@ -47,7 +47,7 @@ def test_only_quiescent_known_compose_passes_observation(sample):
 @pytest.mark.parametrize("format_text", [
     '[{"Service":"database","State":"running"}]',
     '{"Service":"database","State":"running"}',
-    '{"Service":"database","State":"running"}\\n{"Service":"nginx","State":"running"}',
+    '{"Service":"database","State":"running"}\n{"Service":"nginx","State":"running"}',
 ])
 def test_compose_inventory_decodes_supported_formats(format_text):
     assert probe.decode_ps(format_text)
@@ -92,7 +92,7 @@ def test_postgres_sessions_and_prepared_transactions_block(sample, pg):
     assert any("PostgreSQL" in reason for reason in check(sample, pg))
 
 
-@pytest.mark.parametrize("pg", ["", "0", "0|x", "-1|0", "0|0|0", "0\\n0"])
+@pytest.mark.parametrize("pg", ["", "0", "0|x", "-1|0", "0|0|0", "0\n0"])
 def test_malformed_postgres_counts_block(sample, pg):
     assert any("two numeric counts" in reason for reason in check(sample, pg))
 
@@ -144,9 +144,9 @@ def test_read_only_collection_uses_passed_env_and_no_mutating_docker_commands(
 ):
     config, containers, edge = sample
     env = tmp_path / ".release.env"
-    env.write_text("POSTGRES_DB=medievol_db\\nPOSTGRES_USER=medievol\\n")
+    env.write_text("POSTGRES_DB=medievol_db\nPOSTGRES_USER=medievol\n")
     compose = tmp_path / "docker-compose.deploy.yml"
-    compose.write_text("services: {}\\n")
+    compose.write_text("services: {}\n")
     calls = []
 
     def fake_run(argv):
@@ -156,7 +156,7 @@ def test_read_only_collection_uses_passed_env_and_no_mutating_docker_commands(
         if argv[-3:] == ["ps", "--all", "--format", "json"]:
             return json.dumps(containers)
         assert "exec" in argv and "-Atqc" in argv
-        return "0|0\\n"
+        return "0|0\n"
 
     monkeypatch.setattr(probe, "_run", fake_run)
     assert probe.collect(env, [compose], edge) == []
@@ -171,9 +171,9 @@ def test_read_only_collection_uses_passed_env_and_no_mutating_docker_commands(
 def test_invalid_database_name_never_reaches_psql(sample, tmp_path, monkeypatch, dbname):
     _, _, edge = sample
     env = tmp_path / ".release.env"
-    env.write_text(f"POSTGRES_DB={dbname}\\nPOSTGRES_USER=medievol\\n")
+    env.write_text(f"POSTGRES_DB={dbname}\nPOSTGRES_USER=medievol\n")
     compose = tmp_path / "docker-compose.deploy.yml"
-    compose.write_text("services: {}\\n")
+    compose.write_text("services: {}\n")
     monkeypatch.setattr(probe, "_run",
                         lambda argv: pytest.fail("Must not reach Docker with untrusted dbname"))
     with pytest.raises(probe.ProbeError):
