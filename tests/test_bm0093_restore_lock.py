@@ -360,8 +360,15 @@ def test_manual_snapshot_rollback_is_refused_before_preparing_restore(restore_la
     assert not restore_lab["trace"].exists()
     assert not list((restore_lab["root"] / ".ops-state").glob("restore.*"))
 
-def test_database_rollback_refuses_preexisting_recovery_incident(restore_lab):
+@pytest.mark.parametrize("with_backup", [True, False])
+def test_database_rollback_refuses_preexisting_recovery_incident(restore_lab, with_backup):
     current_sha, previous_sha = _configure_rollback_lab(restore_lab)
+    if not with_backup:
+        manifest = restore_lab["root"] / ".ops-state" / "deployments" / (current_sha + ".json")
+        manifest.write_text(
+            json.dumps({"previous_release_sha": previous_sha, "rollback_backup": None}),
+            encoding="utf-8",
+        )
     marker_contents = "reason=operator_recovery_still_pending\n"
     restore_lab["marker"].write_text(marker_contents, encoding="utf-8")
     env = dict(restore_lab["env"])
@@ -381,7 +388,11 @@ def test_database_rollback_refuses_preexisting_recovery_incident(restore_lab):
     )
 
     assert result.returncode == 2, result.stderr
-    assert "existing recovery incident requires certified G5" in result.stderr
+    expected = (
+        "snapshot-based legacy rollback is disabled" if with_backup
+        else "existing recovery incident requires certified G5"
+    )
+    assert expected in result.stderr
     assert (restore_lab["root"] / ".release-sha").read_text(encoding="utf-8") == current_sha + "\n"
     assert restore_lab["marker"].read_text(encoding="utf-8") == marker_contents
     assert not restore_lab["trace"].exists()
@@ -548,8 +559,14 @@ def test_prepare_requires_explicit_database_confirmation(restore_lab, confirmati
     assert not list((restore_lab["root"] / directory).iterdir())
 
 
-def _run_rollback(lab, **extra_env):
-    current, _ = _configure_rollback_lab(lab)
+def _run_rollback(lab, *, app_only=False, **extra_env):
+    current, previous = _configure_rollback_lab(lab)
+    if app_only:
+        manifest = lab["root"] / ".ops-state" / "deployments" / (current + ".json")
+        manifest.write_text(
+            json.dumps({"previous_release_sha": previous, "rollback_backup": None}),
+            encoding="utf-8",
+        )
     return subprocess.run(
         ["bash", "ops/rollback_remote.sh", current, f"ROLLBACK:{current}"],
         cwd=lab["root"], env={**lab["env"], **extra_env}, text=True,
@@ -570,7 +587,10 @@ def test_restore_and_rollback_reject_invalid_marker(restore_lab, command, kind):
         if kind == "symlink":
             target.write_text("sentinel\n")
         marker.symlink_to(target)
-    result = _run(restore_lab) if command == "restore" else _run_rollback(restore_lab)
+    result = (
+        _run(restore_lab) if command == "restore"
+        else _run_rollback(restore_lab, app_only=True)
+    )
     assert result.returncode == 2, result.stderr
     assert "invalid recovery marker" in result.stderr
     assert not restore_lab["trace"].exists()
