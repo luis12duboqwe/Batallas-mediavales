@@ -46,7 +46,10 @@ def _url(value: str, database: str, label: str) -> tuple[str, str]:
         raise RoleSplitError(f"{label} has malformed connection identity") from None
     if (parsed.scheme not in _SCHEMES or host != "database" or
             port not in (None, 5432) or
-            unquote(parsed.path) != "/" + database or
+            # SQLAlchemy 2.0 leaves the database name URL path encoded;
+            # only username/password are percent-decoded there. Do not
+            # certify a different target under urllib's unquote semantics.
+            parsed.path != "/" + database or
             parsed.query or parsed.fragment or
             not _ROLE.fullmatch(role) or
             not password or any(ord(ch) < 32 for ch in password)):
