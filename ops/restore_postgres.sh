@@ -13,6 +13,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_DIR"
 
+# G5 cutover manifests are authoritative. Legacy operations cannot verify the
+# durable writer barrier or hold the verified archive FD. Refuse before any
+# filesystem/release mutation, Docker command or PostgreSQL operation.
+# Dangling symlinks and partial/corrupt state must also fail closed.
+if [[ -L .ops-state || ( -e .ops-state && ! -d .ops-state ) ]]; then
+  echo "Legacy G5 operation refused: unsafe .ops-state directory" >&2
+  exit 2
+fi
+for g5_state in .ops-state/g5-cutover.json .ops-state/g5-cutover-activated; do
+  if [[ -e "$g5_state" || -L "$g5_state" ]]; then
+    echo "Legacy G5 operation refused: cutover state exists ($g5_state); certified coordinator required" >&2
+    exit 2
+  fi
+done
+
 if [[ -z "$BACKUP_FILE" || $# -gt 5 ]]; then
   echo "Usage: $0 <env-file> <backup.dump> RESTORE:<database>" >&2
   exit 2
