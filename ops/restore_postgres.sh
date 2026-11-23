@@ -90,6 +90,19 @@ validate_recovery_marker() {
 }
 validate_recovery_marker
 
+# When an aborted operation could not publish the canonical incident marker,
+# its surviving recovery-required.* evidence must still forbid restore.
+if [[ ! -e "$RECOVERY_REQUIRED" && ! -L "$RECOVERY_REQUIRED" ]]; then
+  if ! orphaned_recovery="$(find "$STATE_DIR" -maxdepth 1 -name 'recovery-required.*' -print -quit)"; then
+    echo "Restore refused: cannot inspect orphaned recovery evidence" >&2
+    exit 2
+  fi
+  if [[ -n "$orphaned_recovery" ]]; then
+    echo "Restore refused: orphaned recovery evidence requires certified G5 coordinator ($orphaned_recovery)" >&2
+    exit 2
+  fi
+fi
+
 # A direct legacy restore during an unresolved incident, or with an active
 # managed release, can discard commits made after the archive was captured.
 # No durable G5 write barrier authorizes that destructive operation yet.
