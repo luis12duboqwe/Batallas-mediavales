@@ -45,6 +45,15 @@ puede convertir un checksum correcto en permiso para descartar escrituras.
   impide que las dependencias `backend → seed → migrate` ejecuten SQL
   inadvertidamente. Requiere que la base de datos existente esté disponible;
   si no lo está, falla el smoke y conserva el incidente, sin sembrar ni migrar.
+- La salida fallida posterior a solicitar `docker compose up --no-deps`
+  intenta `docker compose stop -t 120 backend worker migrate seed`, antes
+  de borrar archivos temporales. Esto cubre fallos de arranque parcial,
+  smoke y publicación final de metadatos. El marcador de recuperación no
+  se elimina por error y el código de salida original se conserva aunque
+  falle el stop; en ese caso emite alerta crítica para inspección.
+- Si el marcador de incidente cambia o desaparece justo antes de dar éxito,
+  el rollback falla y también intenta cerrar escritores, en vez de publicar
+  éxito silenciosamente. No se deshacen escrituras ya confirmadas.
 
 **Pendiente P1 #174:** la restauración anidada bajo lock en
 `restore_postgres.sh` y el restore directo en instalaciones no administradas
