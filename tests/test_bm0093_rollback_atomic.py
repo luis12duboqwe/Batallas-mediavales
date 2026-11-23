@@ -110,7 +110,7 @@ def rollback_lab(tmp_path):
     )
     manifest = tmp_path / ".ops-state" / "deployments" / (CURRENT_SHA + ".json")
     manifest.write_text(
-        json.dumps({"previous_release_sha": PREVIOUS_SHA, "rollback_backup": str(backup)}),
+        json.dumps({"previous_release_sha": PREVIOUS_SHA, "rollback_backup": None}),
         encoding="utf-8",
     )
     trace = tmp_path / "trace.log"
@@ -180,22 +180,32 @@ def test_reject_stale_current_release_without_mutating_anything(rollback_lab):
     _assert_active_unchanged(rollback_lab)
 
 
-def test_reject_missing_snapshot_before_any_mutation(rollback_lab):
-    rollback_lab["backup"].unlink()
+@pytest.mark.parametrize("backup_exists", [True, False])
+def test_snapshot_rollback_is_refused_even_without_prior_incident(rollback_lab, backup_exists):
+    # A valid archive is not proof that post-snapshot commits can be discarded.
+    rollback_lab["manifest"].write_text(
+        json.dumps({"previous_release_sha": PREVIOUS_SHA,
+                    "rollback_backup": str(rollback_lab["backup"])}),
+        encoding="utf-8",
+    )
+    if not backup_exists:
+        rollback_lab["backup"].unlink()
     result = _run(rollback_lab)
-    assert result.returncode == 2
-    assert "snapshot missing" in result.stderr
+    assert result.returncode == 2, result.stderr
+    assert "snapshot-based legacy rollback is disabled" in result.stderr
     assert _trace(rollback_lab) == []
     _assert_active_unchanged(rollback_lab)
+    assert not (rollback_lab["root"] / ".ops-state" / "recovery-required").exists()
 
-
-@pytest.mark.parametrize("failed_step", ["restore", "smoke"])
-def test_failed_recovery_preserves_active_release_pointers(rollback_lab, failed_step):
-    env = {"BM_RESTORE_EXIT": "35"} if failed_step == "restore" else {"BM_SMOKE_EXIT": "36"}
+@pytest.mark.parametrize("failed_step", ["docker", "smoke"])
+def test_failed_application_only_recovery_preserves_active_release_pointers(
+    rollback_lab, failed_step
+):
+    env = {"BM_DOCKER_EXIT": "35"} if failed_step == "docker" else {"BM_SMOKE_EXIT": "36"}
     result = _run(rollback_lab, extra_env=env)
-    assert result.returncode == (35 if failed_step == "restore" else 36)
+    assert result.returncode == (35 if failed_step == "docker" else 36)
     trace = _trace(rollback_lab)
-    assert trace[0].startswith("restore:./.release.env.rollback.")
+    assert trace and trace[0].startswith("docker:compose --env-file ./.release.env.rollback.")
     assert ("smoke" in trace) == (failed_step == "smoke")
     _assert_active_unchanged(rollback_lab)
     marker = rollback_lab["root"] / ".ops-state" / "recovery-required"
@@ -207,7 +217,6 @@ def test_failed_recovery_preserves_active_release_pointers(rollback_lab, failed_
     assert deploy.returncode == 2
     assert "unresolved recovery incident" in deploy.stderr
     assert _trace(rollback_lab) == before_retry
-
 
 def test_failed_application_only_rollback_keeps_metadata(rollback_lab):
     rollback_lab["manifest"].write_text(
@@ -251,18 +260,20 @@ def test_application_only_rollback_refuses_existing_recovery_incident(rollback_l
     assert marker.read_text(encoding="utf-8") == "reason=database_recovery_still_pending\n"
 
 
-def test_invalid_snapshot_is_rejected_before_rollback_marker_or_docker(rollback_lab):
+def test_invalid_snapshot_never_bypasses_g5_legacy_rollback_guard(rollback_lab):
+    rollback_lab["manifest"].write_text(
+        json.dumps({"previous_release_sha": PREVIOUS_SHA,
+                    "rollback_backup": str(rollback_lab["backup"])}),
+        encoding="utf-8",
+    )
     sidecar = rollback_lab["backup"].with_name(rollback_lab["backup"].name + ".sha256")
     sidecar.write_text(f'{"0" * 64}  {rollback_lab["backup"]}\n', encoding="utf-8")
-
     result = _run(rollback_lab)
-
     assert result.returncode == 2
-    assert "Restore preflight checksum mismatch" in result.stderr
+    assert "snapshot-based legacy rollback is disabled" in result.stderr
     assert not (rollback_lab["root"] / ".ops-state" / "recovery-required").exists()
     assert _trace(rollback_lab) == []
-    assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == CURRENT_SHA + "\n"
-
+    _assert_active_unchanged(rollback_lab)
 
 def test_manual_rollback_refused_if_release_operation_lock_is_held(rollback_lab):
     lock_path = rollback_lab["root"] / ".ops-state" / "deploy.lock"
