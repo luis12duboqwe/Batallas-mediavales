@@ -26,6 +26,6 @@ Un checksum correcto y una copia restaurable **no** garantizan que no haya escri
 
 ## Verificación
 
-Las pruebas de `tests/test_bm0093_deploy_recovery.py` usan Docker simulado. Cubren fallo de startup, timeout HTTPS, ausencia del archivo original, backups más recientes, stop fallido, variables heredadas de restore, preservación del código original y bloqueo de redeploy. En fallos posteriores a la mutación no se admite `pg_restore --clean` ni recuperación automática.
+Las pruebas de `tests/test_bm0093_deploy_recovery.py` usan Docker simulado. Cubren fallo de startup, timeout HTTPS, ausencia del archivo original, backups más recientes, stop fallido, variables heredadas de restore, **fallo de publicación de `.release.env` antes y después de un rename atómico**, preservación del código original y bloqueo de redeploy. En fallos posteriores a la mutación no se admite `pg_restore --clean` ni recuperación automática.
 
 Para cerrar #174 hace falta un **coordinador G5** que arme el sentinel antes de tocar escritores, cierre nuevas conexiones HTTP/Socket.IO, drene transacciones, impida reinicios y nuevos escritores, tome snapshot bajo protección continua, y recién entonces permita un restore controlado usando FD verificado.
