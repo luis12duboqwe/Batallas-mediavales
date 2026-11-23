@@ -78,6 +78,11 @@ def rollback_lab(tmp_path):
         "    marker = Path('.ops-state/recovery-required')\n"
         "    marker.unlink()\n"
         "    marker.write_text('reason=foreign_operator_incident\\n')\n"
+        "if os.environ.get('BM_DELETE_RECOVERY_MARKER') == '1':\n"
+        "    Path('.ops-state/recovery-required').unlink()\n"
+        "    if os.environ.get('BM_DELETE_ORIGINAL_MARKER') == '1':\n"
+        "        for old in Path('.ops-state').glob('recovery-required.*'):\n"
+        "            old.unlink()\n"
         "sys.exit(int(os.environ.get('BM_SMOKE_EXIT', '0')))\n",
         encoding="utf-8",
     )
@@ -88,7 +93,15 @@ def rollback_lab(tmp_path):
     docker.write_text(
         "#!/usr/bin/env bash\n"
         "printf 'docker:%s\\n' \"$*\" >> \"$BM_TRACE\"\n"
-        "if [[ \"$*\" == *' up --no-deps '* ]]; then exit \"${BM_UP_EXIT:-0}\"; fi\n"
+        "if [[ \"$*\" == *' up --no-deps '* ]]; then\n"
+        "  if [[ \"${BM_SIGNAL_UP:-0}\" == 1 ]]; then\n"
+        "    kill -TERM \"$PPID\"\n"
+        "    sleep 0.2\n"
+        "    if [[ \"${BM_SIGNAL_AGAIN:-0}\" == 1 ]]; then kill -TERM \"$PPID\"; fi\n"
+        "    printf 'writer-started-late\\n' >> \"$BM_TRACE\"\n"
+        "  fi\n"
+        "  exit \"${BM_UP_EXIT:-0}\"\n"
+        "fi\n"
         "if [[ \"$*\" == *' stop -t 120 '* ]]; then exit \"${BM_STOP_EXIT:-0}\"; fi\n"
         "exit \"${BM_DOCKER_EXIT:-0}\"\n",
         encoding="utf-8",
@@ -253,6 +266,45 @@ def test_application_only_rollback_stops_writers_if_compose_partially_starts(rol
     assert "CRITICAL: rollback did not pass smoke" in result.stderr
     assert (rollback_lab["root"] / ".ops-state/recovery-required").is_file()
     _assert_active_unchanged(rollback_lab)
+
+
+@pytest.mark.parametrize("repeat_signal", [False, True])
+def test_sigterm_waits_for_compose_up_before_stopping_writers(rollback_lab, repeat_signal):
+    result = _run(rollback_lab, extra_env={
+        "BM_SIGNAL_UP": "1", "BM_SIGNAL_AGAIN": "1" if repeat_signal else "0",
+    })
+    assert result.returncode == 143, result.stderr
+    trace = _trace(rollback_lab)
+    assert "writer-started-late" in trace, trace
+    stops = [i for i, line in enumerate(trace)
+             if " stop -t 120 backend worker migrate seed" in line]
+    assert len(stops) == 1 and trace.index("writer-started-late") < stops[0], trace
+    assert "smoke" not in trace
+    assert (rollback_lab["root"] / ".ops-state/recovery-required").is_file()
+    _assert_active_unchanged(rollback_lab)
+
+
+@pytest.mark.parametrize("missing_original", [False, True])
+def test_rollback_rearms_missing_durable_incident_marker(rollback_lab, missing_original):
+    result = _run(rollback_lab, extra_env={
+        "BM_DELETE_RECOVERY_MARKER": "1",
+        "BM_DELETE_ORIGINAL_MARKER": "1" if missing_original else "0",
+    })
+    assert result.returncode == 2, result.stderr
+    assert "recovery marker was replaced or disappeared" in result.stderr
+    trace = _trace(rollback_lab)
+    assert "smoke" in trace
+    assert sum(" stop -t 120 backend worker migrate seed" in line for line in trace) == 1
+    marker = rollback_lab["root"] / ".ops-state/recovery-required"
+    assert marker.is_file()
+    text = marker.read_text(encoding="utf-8")
+    expected_reason = (
+        "reason=rollback_recovery_marker_rearmed" if missing_original
+        else "reason=manual_rollback_in_progress"
+    )
+    assert expected_reason in text
+    assert not list((rollback_lab["root"] / ".ops-state").glob("recovery-required.*"))
+    assert (rollback_lab["root"] / ".release-sha").read_text().strip() == PREVIOUS_SHA
 
 
 def test_app_only_rollback_reports_stop_failure_without_masking_smoke_error(rollback_lab):
