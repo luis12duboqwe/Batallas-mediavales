@@ -28,7 +28,8 @@ class SplitRoles:
 
 
 def _url(value: str, database: str, label: str) -> tuple[str, str]:
-    if not isinstance(value, str) or not value or "$" in value:
+    if (not isinstance(value, str) or not value or "$" in value or
+            any(ord(char) < 32 or ord(char) == 127 for char in value)):
         raise RoleSplitError(f"{label} must have a literal PostgreSQL URL")
     try:
         parsed = urlsplit(value)
