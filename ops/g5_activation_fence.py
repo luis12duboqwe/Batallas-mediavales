@@ -81,6 +81,13 @@ def arm_cutover(host_root: str, operation_id: str):
                 for name in (MARKER, "g5-cutover.json", "recovery-required"):
                     if _entry(directory, name) is not None:
                         raise StateError("G5 or recovery state already exists; reconcile manually")
+                # Legacy recovery can leave an orphaned hardlink if publishing
+                # the canonical marker failed (ENOSPC/fsync/race). The legacy
+                # entrypoints already reject these; G5 must not bypass them.
+                # listdir on the pinned private dirfd observes names without
+                # dereferencing a malicious symlink or opening an attacker file.
+                if any(name.startswith("recovery-required.") for name in os.listdir(directory)):
+                    raise StateError("orphaned recovery evidence blocks G5 activation")
 
                 marker_fd = os.open(
                     MARKER,
