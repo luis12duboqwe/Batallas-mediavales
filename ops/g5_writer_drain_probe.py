@@ -40,6 +40,18 @@ def _application_role(values: dict[str, str], postgres_admin: str) -> str:
     if (not DB_IDENTIFIER.fullmatch(app_role) or
             not DB_IDENTIFIER.fullmatch(postgres_admin)):
         raise ProbeError("Application or maintenance database role name is unsafe")
+    # A role audit against this Compose database proves nothing if a driver
+    # parameter, hostname or alternate database redirects the application.
+    expected_db = values.get("POSTGRES_DB", "")
+    try:
+        endpoint_is_local = (url.hostname == "database" and url.port in (None, 5432))
+    except ValueError as exc:
+        raise ProbeError("Application database endpoint is malformed") from exc
+    if (not DB_IDENTIFIER.fullmatch(expected_db) or not endpoint_is_local or
+            unquote(url.path) != "/" + expected_db or url.query or url.fragment):
+        raise ProbeError("Application database endpoint differs from audited Compose PostgreSQL")
+    if not url.password:
+        raise ProbeError("Application database password is missing")
     if app_role == postgres_admin:
         raise ProbeError(
             "Application and maintenance database users are identical; G5 role isolation NO-GO"
