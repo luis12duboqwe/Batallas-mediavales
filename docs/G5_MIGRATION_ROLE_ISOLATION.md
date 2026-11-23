@@ -61,7 +61,11 @@ para revisar datos sin ejecutar Docker ni SQL. Exige que ambas URL:
   distintos separadores de host ante delimitadores sin escape;
 - usen el **nombre de base sin codificación porcentual** en la ruta. SQLAlchemy
   2.0 mantiene el path de database codificado aunque `urllib.unquote` lo
-  convierta a otro texto; no puede certificarse como el mismo destino.
+  convierta a otro texto; no puede certificarse como el mismo destino;
+- rechacen delimitadores literales `#` y `?` incluso si aparecen al final
+  sin fragmento/query de contenido. SQLAlchemy y `urlsplit` pueden diferir
+  al tratar estos delimitadores vacíos; en contraseñas deben usarse `%23`
+  y `%3F` respectivamente.
 
 La validación evita imprimir contraseñas o URL completas.
 
