@@ -243,6 +243,18 @@ def test_success_commits_both_release_pointers_after_smoke(rollback_lab):
     assert not list(rollback_lab["root"].glob(".release-sha.rollback.*"))
 
 
+def test_application_only_rollback_never_starts_migrate_or_seed(rollback_lab):
+    result = _run(rollback_lab)
+    assert result.returncode == 0, result.stderr
+    commands = _trace(rollback_lab)
+    up = [line for line in commands if " up " in line]
+    assert len(up) == 1, commands
+    assert " up --no-deps -d --remove-orphans backend worker frontend nginx caddy" in up[0]
+    assert "migrate" not in up[0].split()
+    assert "seed" not in up[0].split()
+    assert (rollback_lab["root"] / ".release-sha").read_text().strip() == PREVIOUS_SHA
+
+
 def test_application_only_rollback_refuses_existing_recovery_incident(rollback_lab):
     rollback_lab["manifest"].write_text(
         json.dumps({"previous_release_sha": PREVIOUS_SHA, "rollback_backup": None}),
