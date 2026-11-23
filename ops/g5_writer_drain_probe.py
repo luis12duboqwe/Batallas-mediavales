@@ -95,7 +95,7 @@ def inspect(
         if counts.get(service, 0) != 1:
             errors.append(f"{service}: expected exactly one running container")
 
-    match = re.fullmatch(r"([0-9]+)\\|([0-9]+)", postgres_counts.strip())
+    match = re.fullmatch(r"([0-9]+)[|]([0-9]+)", postgres_counts.strip())
     if not match:
         errors.append("PostgreSQL probe did not return two numeric counts")
     else:
