@@ -15,20 +15,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_DIR"
 
-# G5 cutover manifests are authoritative. Legacy operations cannot verify the
-# durable writer barrier or hold the verified archive FD. Refuse before any
-# filesystem/release mutation, Docker command or PostgreSQL operation.
-# Dangling symlinks and partial/corrupt state must also fail closed.
-if [[ -L .ops-state || ( -e .ops-state && ! -d .ops-state ) ]]; then
-  echo "Legacy G5 operation refused: unsafe .ops-state directory" >&2
-  exit 2
-fi
-for g5_state in .ops-state/g5-cutover.json .ops-state/g5-cutover-activated; do
-  if [[ -e "$g5_state" || -L "$g5_state" ]]; then
-    echo "Legacy G5 operation refused: cutover state exists ($g5_state); certified coordinator required" >&2
+# G5 cutover state is authoritative. No legacy entrypoint understands
+# the verified backup FD or durable writer barrier. Check once on entry
+# and again after obtaining the shared release lock to close the entry race.
+guard_legacy_g5_cutover() {
+  if [[ -L .ops-state || ( -e .ops-state && ! -d .ops-state ) ]]; then
+    echo "Legacy G5 operation refused: unsafe .ops-state directory" >&2
     exit 2
   fi
-done
+  local g5_state
+  for g5_state in .ops-state/g5-cutover.json .ops-state/g5-cutover-activated; do
+    if [[ -e "$g5_state" || -L "$g5_state" ]]; then
+      echo "Legacy G5 operation refused: cutover state exists ($g5_state); certified coordinator required" >&2
+      exit 2
+    fi
+  done
+}
+guard_legacy_g5_cutover
 
 if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Release SHA must be a full 40-character lowercase git SHA" >&2
@@ -57,6 +60,8 @@ if ! flock -n "$DEPLOY_LOCK_FD"; then
   echo "Deployment refused: another deploy or rollback is already running" >&2
   exit 2
 fi
+
+guard_legacy_g5_cutover
 
 # A failed automatic rollback can leave partially migrated services. Never
 # try another deployment until a human has reconciled the recovery marker.
