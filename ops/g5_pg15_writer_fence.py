@@ -71,7 +71,7 @@ class Pg15PersistentFence:
             result = self.session.query(sql)
         except Exception as exc:
             # Do not print a connection string, SQL diagnostics or credentials.
-            raise FenceError("PostgreSQL writer-fence statement failed") from exc
+            raise FenceError("PostgreSQL writer-fence statement failed") from None
         if not isinstance(result, str) or not result.strip() or "\n" in result.strip():
             raise FenceError("PostgreSQL writer-fence evidence is missing or ambiguous")
         return result.strip()
@@ -80,7 +80,7 @@ class Pg15PersistentFence:
         try:
             result = self.session.execute(sql)
         except Exception as exc:
-            raise FenceError("PostgreSQL write-fence DDL failed") from exc
+            raise FenceError("PostgreSQL write-fence DDL failed") from None
         if result is not None:
             raise FenceError("PostgreSQL write-fence DDL returned ambiguous evidence")
 
