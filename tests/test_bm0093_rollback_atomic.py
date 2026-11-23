@@ -274,7 +274,7 @@ def test_app_only_rollback_rejects_replaced_incident_marker_after_smoke(rollback
     assert len(stop) == 1, trace
     assert "--env-file .release.env " in stop[0]  # staged env was already moved
     assert (rollback_lab["root"] / ".ops-state/recovery-required").read_text() == (
-        "reason=foreign_operator_incident\\n"
+        "reason=foreign_operator_incident\n"
     )
     assert (rollback_lab["root"] / ".release-sha").read_text().strip() == PREVIOUS_SHA
     assert not list(rollback_lab["root"].glob(".release*.rollback.*"))
