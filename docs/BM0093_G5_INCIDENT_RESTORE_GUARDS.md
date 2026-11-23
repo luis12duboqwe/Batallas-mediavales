@@ -45,6 +45,31 @@ puede convertir un checksum correcto en permiso para descartar escrituras.
   impide que las dependencias `backend → seed → migrate` ejecuten SQL
   inadvertidamente. Requiere que la base de datos existente esté disponible;
   si no lo está, falla el smoke y conserva el incidente, sin sembrar ni migrar.
+- La salida fallida posterior a solicitar `docker compose up --no-deps`
+  intenta `docker compose stop -t 120 backend worker migrate seed`, antes
+  de borrar archivos temporales. Esto cubre fallos de arranque parcial,
+  smoke y publicación final de metadatos. El marcador de recuperación no
+  se elimina por error y el código de salida original se conserva aunque
+  falle el stop; en ese caso emite alerta crítica para inspección.
+- El arranque Compose se espera como hijo supervisado. Las señales
+  operativas atrapables `SIGHUP`, `SIGTERM`, `SIGINT`, `SIGQUIT`, `SIGPIPE`,
+  `SIGUSR1`, `SIGUSR2` y `SIGALRM` dirigidas al shell deben esperar
+  la finalización del hijo antes del stop final, incluso si se repiten,
+  para que el stop no ocurra antes de que un escritor aparezca.
+  Un `SIGKILL`, `SIGSTOP`, fallo fatal o caída total de host no es
+  recuperable con traps de shell.
+- Si el marcador de incidente cambia o desaparece justo antes de dar éxito,
+  el rollback falla y también intenta cerrar escritores, en vez de publicar
+  éxito silenciosamente. Si desaparece, intenta recuperar el hardlink original
+  o crear un incidente nuevo con creación exclusiva (`O_EXCL`), fsync del
+  archivo y del directorio; nunca sobrescribe un incidente ajeno. Si no puede
+  certificar la persistencia, conserva el archivo de evidencia original
+  cuando existe y emite un error crítico. Los tres puntos de entrada
+  legacy (`deploy_remote.sh`, `rollback_remote.sh` y `restore_postgres.sh`)
+  rechazan también una evidencia huérfana `.ops-state/recovery-required.*`
+  cuando falta el marcador canónico, sin seguir enlaces simbólicos ni crear
+  otro deployment sobre un incidente no certificado. No se deshacen
+  escrituras ya confirmadas.
 
 **Pendiente P1 #174:** la restauración anidada bajo lock en
 `restore_postgres.sh` y el restore directo en instalaciones no administradas
