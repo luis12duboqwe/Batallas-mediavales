@@ -41,6 +41,10 @@ sin un incidente preexistente y aunque el snapshot esté íntegro. El rollback
 solo de aplicación conserva las validaciones de metadatos y de incidentes.
 El rechazo no ofrece una variable de entorno de excepción: un operador no
 puede convertir un checksum correcto en permiso para descartar escrituras.
+- En rollback exclusivamente de aplicación, `docker compose up --no-deps`
+  impide que las dependencias `backend → seed → migrate` ejecuten SQL
+  inadvertidamente. Requiere que la base de datos existente esté disponible;
+  si no lo está, falla el smoke y conserva el incidente, sin sembrar ni migrar.
 
 **Pendiente P1 #174:** la restauración anidada bajo lock en
 `restore_postgres.sh` y el restore directo en instalaciones no administradas
