@@ -154,6 +154,14 @@ if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
   echo "Rollback refused: existing recovery incident requires certified G5 coordinator" >&2
   exit 2
 fi
+if ! orphaned_recovery="$(find "$STATE_DIR" -maxdepth 1 -name 'recovery-required.*' -print -quit)"; then
+  echo "Rollback refused: cannot inspect orphaned recovery evidence" >&2
+  exit 2
+fi
+if [[ -n "$orphaned_recovery" ]]; then
+  echo "Rollback refused: orphaned recovery evidence requires certified G5 coordinator ($orphaned_recovery)" >&2
+  exit 2
+fi
 RECOVERY_MARKER_TMP=""
 ROLLBACK_UP_PID=""
 # Once Compose is asked to start the previous application, failure means it
