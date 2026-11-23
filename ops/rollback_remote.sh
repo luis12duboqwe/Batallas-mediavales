@@ -94,6 +94,17 @@ if [[ ! "$PREVIOUS_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Rollback refused: deployment has no previous release" >&2
   exit 2
 fi
+
+# A checksum proves the archive bytes, not that no acknowledged game writes
+# happened after its snapshot. Legacy rollback has no durable write barrier
+# covering all HTTP, Socket.IO, workers and external DB writers. Reject BEFORE
+# preflight, staging a release pointer, touching Docker, or preparing a restore.
+# No environment flag can bypass this check; only the certified G5 coordinator
+# may eventually authorize a database recovery against an exact manifest.
+if [[ -n "$ROLLBACK_BACKUP" ]]; then
+  echo "Rollback refused: snapshot-based legacy rollback is disabled until G5 writer-barrier certification" >&2
+  exit 2
+fi
 PREVIOUS_ENV="$STATE_DIR/releases/${PREVIOUS_RELEASE_SHA}.env"
 if [[ ! -f "$PREVIOUS_ENV" ]]; then
   echo "Rollback refused: previous release environment missing: $PREVIOUS_ENV" >&2
@@ -192,7 +203,9 @@ if [[ -n "$ROLLBACK_BACKUP" ]]; then
 else
   echo "No database snapshot was associated with this deployment; rolling back application images only"
   docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" pull backend worker frontend
-  docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" up -d --remove-orphans backend worker frontend nginx caddy
+  # --no-deps is mandatory: backend -> seed -> migrate may write to the DB.
+  # An application-only rollback must not silently rerun migration or seed.
+  docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" up --no-deps -d --remove-orphans backend worker frontend nginx caddy
 fi
 
 python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-ms 750

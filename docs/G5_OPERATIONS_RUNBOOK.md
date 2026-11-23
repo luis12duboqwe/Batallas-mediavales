@@ -133,7 +133,7 @@ Si la detención de escritores falla, tampoco se considera recuperado. Es posibl
 
 **No ejecutar** `ops/rollback_remote.sh` sobre una release con datos reales mientras siga abierto el P1 #174. Un rollback que restaure el backup anterior puede descartar commits posteriores al snapshot, aunque el archivo tenga un checksum válido.
 
-El script legacy exige identidad y metadatos de release, pero **rechaza ahora un `recovery-required` preexistente**, también si el rollback solo cambiaría imágenes. Ese incidente debe conservarse para diagnóstico supervisado; no se debe borrar el marcador para eludir el rechazo. Tampoco editar manualmente `.release-sha` o `.release.env`.
+El script legacy **rechaza de forma incondicional cualquier manifiesto con `rollback_backup` no vacío**, aunque no exista incidente y el dump tenga checksum válido. La comprobación sucede antes de Docker o de preparar un archivo de restauración. El rollback solo de aplicación conserva las comprobaciones de identidad y **rechaza un `recovery-required` preexistente**. Ese incidente debe conservarse para diagnóstico supervisado; no se debe borrar el marcador para eludir el rechazo. Tampoco editar manualmente `.release-sha` o `.release.env`.
 
 Los ensayos de recuperación deben usar una copia/instancia PostgreSQL aislada y datos sintéticos hasta que un coordinador certificado conserve la barrera de escritores durante snapshot, migración, restauración y reapertura.
 

@@ -34,11 +34,23 @@ parciales, enlaces simbólicos, incidentes de distintos orígenes y rechazo de
 rollback de aplicación sin operaciones Docker ni cambios de versión. No
 ejecutan restores sobre VPS ni datos de jugadores.
 
-**Pendiente P1 #174:** un rollback manual sin incidente preexistente y una
-restauración anidada bajo lock legacy pueden todavía recuperar un backup
-sin demostrar una barrera de escritura mantenida desde su captura. Además,
-un restore directo sobre una base no administrada sin marcador tampoco queda
-protegido por una barrera universal. Estas rutas **no deben usarse sobre datos
+**Avance posterior:** `ops/rollback_remote.sh` rechaza ahora todo
+`rollback_backup` no vacío **antes** de preflight, copias, comandos Docker,
+marcadores, smoke o actualización de `.release-sha`/`.release.env`, incluso
+sin un incidente preexistente y aunque el snapshot esté íntegro. El rollback
+solo de aplicación conserva las validaciones de metadatos y de incidentes.
+El rechazo no ofrece una variable de entorno de excepción: un operador no
+puede convertir un checksum correcto en permiso para descartar escrituras.
+- En rollback exclusivamente de aplicación, `docker compose up --no-deps`
+  impide que las dependencias `backend → seed → migrate` ejecuten SQL
+  inadvertidamente. Requiere que la base de datos existente esté disponible;
+  si no lo está, falla el smoke y conserva el incidente, sin sembrar ni migrar.
+
+**Pendiente P1 #174:** la restauración anidada bajo lock en
+`restore_postgres.sh` y el restore directo en instalaciones no administradas
+siguen sin demostrar una barrera de escritura mantenida desde la captura;
+el futuro coordinador G5 debe sustituir estas rutas, no reutilizar la vía
+legacy para datos con actividad. Estas rutas **no deben usarse sobre datos
 reales** hasta implementar el único coordinador G5, con validación de
 sesiones, permisos, admisión, identidad y manifiesto duradero.
 

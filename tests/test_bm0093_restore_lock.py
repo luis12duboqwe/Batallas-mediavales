@@ -343,36 +343,32 @@ def test_prepared_snapshot_can_be_restored_by_the_real_restore_script(restore_la
     assert not snapshot.parent.exists()
 
 
-def test_manual_rollback_uses_prepared_snapshot_with_real_restore_script(restore_lab):
+@pytest.mark.parametrize("archive_present", [True, False])
+def test_manual_snapshot_rollback_is_refused_before_preparing_restore(restore_lab, archive_present):
     current_sha, previous_sha = _configure_rollback_lab(restore_lab)
-    list_input = restore_lab["root"] / "rollback-list.input"
-    clean_input = restore_lab["root"] / "rollback-clean.input"
-    env = dict(restore_lab["env"])
-    env.update({
-        "BM_LIST_INPUT": str(list_input),
-        "BM_CLEAN_INPUT": str(clean_input),
-    })
-
+    if not archive_present:
+        restore_lab["backup"].unlink()
     result = subprocess.run(
         ["bash", "ops/rollback_remote.sh", current_sha, f"ROLLBACK:{current_sha}"],
-        cwd=restore_lab["root"],
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=20,
-        check=False,
+        cwd=restore_lab["root"], env=restore_lab["env"], text=True,
+        capture_output=True, timeout=20, check=False,
     )
-
-    assert result.returncode == 0, result.stderr
-    assert list_input.read_bytes() == restore_lab["backup"].read_bytes()
-    assert clean_input.read_bytes() == restore_lab["backup"].read_bytes()
-    assert (restore_lab["root"] / ".release-sha").read_text(encoding="utf-8") == previous_sha + "\n"
+    assert result.returncode == 2, result.stderr
+    assert "snapshot-based legacy rollback is disabled" in result.stderr
+    assert (restore_lab["root"] / ".release-sha").read_text() == current_sha + "\n"
     assert not restore_lab["marker"].exists()
+    assert not restore_lab["trace"].exists()
     assert not list((restore_lab["root"] / ".ops-state").glob("restore.*"))
 
-
-def test_database_rollback_refuses_preexisting_recovery_incident(restore_lab):
+@pytest.mark.parametrize("with_backup", [True, False])
+def test_database_rollback_refuses_preexisting_recovery_incident(restore_lab, with_backup):
     current_sha, previous_sha = _configure_rollback_lab(restore_lab)
+    if not with_backup:
+        manifest = restore_lab["root"] / ".ops-state" / "deployments" / (current_sha + ".json")
+        manifest.write_text(
+            json.dumps({"previous_release_sha": previous_sha, "rollback_backup": None}),
+            encoding="utf-8",
+        )
     marker_contents = "reason=operator_recovery_still_pending\n"
     restore_lab["marker"].write_text(marker_contents, encoding="utf-8")
     env = dict(restore_lab["env"])
@@ -392,7 +388,11 @@ def test_database_rollback_refuses_preexisting_recovery_incident(restore_lab):
     )
 
     assert result.returncode == 2, result.stderr
-    assert "existing recovery incident requires certified G5" in result.stderr
+    expected = (
+        "snapshot-based legacy rollback is disabled" if with_backup
+        else "existing recovery incident requires certified G5"
+    )
+    assert expected in result.stderr
     assert (restore_lab["root"] / ".release-sha").read_text(encoding="utf-8") == current_sha + "\n"
     assert restore_lab["marker"].read_text(encoding="utf-8") == marker_contents
     assert not restore_lab["trace"].exists()
@@ -428,7 +428,7 @@ def test_rollback_rejects_bad_snapshot_before_creating_recovery_marker(
     )
 
     assert result.returncode != 0
-    assert expected_error in result.stderr
+    assert "snapshot-based legacy rollback is disabled" in result.stderr
     assert not restore_lab["marker"].exists()
     trace = restore_lab["trace"].read_text(encoding="utf-8").splitlines() if restore_lab["trace"].exists() else []
     assert not any("stop backend worker" in line for line in trace)
@@ -559,8 +559,14 @@ def test_prepare_requires_explicit_database_confirmation(restore_lab, confirmati
     assert not list((restore_lab["root"] / directory).iterdir())
 
 
-def _run_rollback(lab, **extra_env):
-    current, _ = _configure_rollback_lab(lab)
+def _run_rollback(lab, *, app_only=False, **extra_env):
+    current, previous = _configure_rollback_lab(lab)
+    if app_only:
+        manifest = lab["root"] / ".ops-state" / "deployments" / (current + ".json")
+        manifest.write_text(
+            json.dumps({"previous_release_sha": previous, "rollback_backup": None}),
+            encoding="utf-8",
+        )
     return subprocess.run(
         ["bash", "ops/rollback_remote.sh", current, f"ROLLBACK:{current}"],
         cwd=lab["root"], env={**lab["env"], **extra_env}, text=True,
@@ -581,7 +587,10 @@ def test_restore_and_rollback_reject_invalid_marker(restore_lab, command, kind):
         if kind == "symlink":
             target.write_text("sentinel\n")
         marker.symlink_to(target)
-    result = _run(restore_lab) if command == "restore" else _run_rollback(restore_lab)
+    result = (
+        _run(restore_lab) if command == "restore"
+        else _run_rollback(restore_lab, app_only=True)
+    )
     assert result.returncode == 2, result.stderr
     assert "invalid recovery marker" in result.stderr
     assert not restore_lab["trace"].exists()
@@ -600,73 +609,34 @@ def _wrap_restore(lab, script):
 
 
 @pytest.mark.parametrize("replacement", ["new_inode", "same_bytes", "same_inode"])
-def test_rollback_rejects_prepared_archive_replacement(restore_lab, replacement):
+def test_archive_tampering_cannot_reach_legacy_rollback_restore(restore_lab, replacement):
     _wrap_restore(restore_lab, """
-if [[ "$RESTORE_PREPARE_ONLY" == 0 ]]; then
-  if [[ "$BM_REPLACEMENT" == same_inode ]]; then
-    chmod 600 "$2"
-    printf 'different archive for the same database' > "$2"
-  else
-    if [[ "$BM_REPLACEMENT" == same_bytes ]]; then
-      cp -- "$2" "$2.other"
-    else
-      printf 'different archive for the same database' > "$2.other"
-    fi
-    mv -T -- "$2.other" "$2"
-  fi
-  chmod 400 "$2"
-  sha256sum "$2" > "$2.sha256"
-fi
-exec bash ops/restore_real.sh "$@"
+printf 'unexpected restore call' >> "$BM_DOCKER_TRACE"
+exit 97
 """)
     result = _run_rollback(restore_lab, BM_REPLACEMENT=replacement)
     assert result.returncode == 2, result.stderr
-    assert "checksum mismatch or prepared archive replaced" in result.stderr
-    trace = restore_lab["trace"].read_text()
-    assert trace.count("pg_restore --list") == 1
-    assert "stop backend worker" not in trace
-    assert "pg_restore --clean" not in trace
-    assert restore_lab["marker"].is_file()
+    assert "snapshot-based legacy rollback is disabled" in result.stderr
+    assert not restore_lab["trace"].exists()
+    assert not restore_lab["marker"].exists()
     assert not list(restore_lab["marker"].parent.glob("restore.*"))
     assert (restore_lab["root"] / ".release-sha").read_text().strip() == "d" * 40
 
-
 @pytest.mark.parametrize("copy_failure", ["first", "second"])
-def test_rollback_copies_large_archive_once_and_cleans_partial_enospc(restore_lab, copy_failure):
-    backup = restore_lab["backup"]
-    backup.write_bytes(b"A" * (4 * 1024 * 1024))
-    backup.with_suffix(".dump.sha256").write_text(
-        f"{hashlib.sha256(backup.read_bytes()).hexdigest()}  {backup}\n"
-    )
-    copy_log = restore_lab["root"] / "copies"
+def test_snapshot_rollback_rejected_before_copy_and_enospc_shim(restore_lab, copy_failure):
     shim = restore_lab["root"] / "bin" / "cat"
     shim.write_text("""#!/usr/bin/env bash
-if [[ "${1:-}" == -- && "${2:-}" == *.dump ]]; then
-  if [[ "$BM_COPY_FAILURE" == first || -e "$BM_COPY_LOG" ]]; then
-    printf partial
-    echo 'No space left on device' >&2
-    exit 28
-  fi
-  printf 'copy\\n' >> "$BM_COPY_LOG"
-fi
-exec /bin/cat "$@"
+printf 'UNEXPECTED COPY' >> "$BM_DOCKER_TRACE"
+exit 28
 """)
     shim.chmod(0o755)
-    result = _run_rollback(
-        restore_lab, BM_COPY_FAILURE=copy_failure, BM_COPY_LOG=str(copy_log),
-    )
-    if copy_failure == "first":
-        assert result.returncode == 28, result.stderr
-        assert "No space left on device" in result.stderr
-        assert not restore_lab["trace"].exists()
-    else:
-        assert result.returncode == 0, result.stderr
-        assert copy_log.read_text() == "copy\n"
-        assert "pg_restore --clean" in restore_lab["trace"].read_text()
+    result = _run_rollback(restore_lab, BM_COPY_FAILURE=copy_failure)
+    assert result.returncode == 2, result.stderr
+    assert "snapshot-based legacy rollback is disabled" in result.stderr
+    assert not restore_lab["trace"].exists()
     assert not restore_lab["marker"].exists()
     assert not list(restore_lab["marker"].parent.glob("restore.*"))
     assert not list(restore_lab["root"].glob(".release*.rollback.*"))
-
 
 def test_malicious_prepare_stdout_cannot_redirect_rollback_cleanup(restore_lab):
     sentinel = restore_lab["root"] / "keep" / "archive.dump"
@@ -678,7 +648,8 @@ printf '%s\\n' "$BM_SENTINEL"
 """)
     result = _run_rollback(restore_lab, BM_SENTINEL=str(sentinel))
     assert result.returncode == 2, result.stderr
-    assert "invalid prepared archive receipt" in result.stderr
+    assert "snapshot-based legacy rollback is disabled" in result.stderr
+    assert not restore_lab["trace"].exists()
     assert sentinel.read_bytes() == b"keep"
     assert not restore_lab["marker"].exists()
     assert not list(restore_lab["marker"].parent.glob("restore.*"))
