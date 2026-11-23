@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, unquote
 
 
 _ROLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
-_SCHEMES = frozenset({"postgresql", "postgresql+psycopg", "postgresql+psycopg2"})
+_SCHEMES = frozenset({"postgresql", "postgresql+psycopg"})
 
 
 class RoleSplitError(ValueError):
