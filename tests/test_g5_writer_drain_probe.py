@@ -174,7 +174,7 @@ def test_read_only_collection_uses_passed_env_and_no_mutating_docker_commands(
         calls.append(argv)
         if argv[-3:] == ["config", "--format", "json"]:
             return json.dumps(config)
-        if argv[-3:] == ["ps", "--all", "--format", "json"]:
+        if argv[-4:] == ["ps", "--all", "--format", "json"]:
             return json.dumps(containers)
         assert "exec" in argv and "-Atqc" in argv
         return "0|0\n"
