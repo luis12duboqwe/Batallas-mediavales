@@ -118,6 +118,13 @@ if [[ -n "$ROLLBACK_BACKUP" && ! -f "$ROLLBACK_BACKUP" ]]; then
   echo "Rollback refused: database snapshot missing: $ROLLBACK_BACKUP" >&2
   exit 2
 fi
+# A legacy release may have committed writes since this archive was captured.
+# Even a valid digest and the deploy.lock do NOT prove a durable DB writer
+# barrier. There is intentionally no user-settable bypass for this safeguard.
+if [[ -n "$ROLLBACK_BACKUP" ]]; then
+  echo "Rollback refused: legacy database snapshot restore requires certified G5 writer barrier" >&2
+  exit 2
+fi
 
 # Keep the active configuration and release pointer unchanged until the restore
 # and smoke check have BOTH succeeded. The candidates live on the same filesystem
