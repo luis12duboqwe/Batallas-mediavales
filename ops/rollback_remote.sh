@@ -94,6 +94,17 @@ if [[ ! "$PREVIOUS_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Rollback refused: deployment has no previous release" >&2
   exit 2
 fi
+
+# A checksum proves the archive bytes, not that no acknowledged game writes
+# happened after its snapshot. Legacy rollback has no durable write barrier
+# covering all HTTP, Socket.IO, workers and external DB writers. Reject BEFORE
+# preflight, staging a release pointer, touching Docker, or preparing a restore.
+# No environment flag can bypass this check; only the certified G5 coordinator
+# may eventually authorize a database recovery against an exact manifest.
+if [[ -n "$ROLLBACK_BACKUP" ]]; then
+  echo "Rollback refused: snapshot-based legacy rollback is disabled until G5 writer-barrier certification" >&2
+  exit 2
+fi
 PREVIOUS_ENV="$STATE_DIR/releases/${PREVIOUS_RELEASE_SHA}.env"
 if [[ ! -f "$PREVIOUS_ENV" ]]; then
   echo "Rollback refused: previous release environment missing: $PREVIOUS_ENV" >&2
