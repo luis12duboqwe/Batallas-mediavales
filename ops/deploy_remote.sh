@@ -71,6 +71,18 @@ if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
   exit 2
 fi
 
+# An aborted rollback may have been unable to publish recovery-required
+# (ENOSPC, hostile race). A surviving recovery-required.* receipt is still
+# an unresolved incident, not permission to re-open game writers.
+if ! orphaned_recovery="$(find "$STATE_DIR" -maxdepth 1 -name 'recovery-required.*' -print -quit)"; then
+  echo "Deployment refused: cannot inspect orphaned recovery evidence" >&2
+  exit 2
+fi
+if [[ -n "$orphaned_recovery" ]]; then
+  echo "Deployment refused: orphaned recovery evidence requires operator certification ($orphaned_recovery)" >&2
+  exit 2
+fi
+
 # Never install EXIT cleanup against a caller-owned input file or symlink.
 if [[ -L "$NEXT_ENV" || ( -e "$NEXT_ENV" && "$BASE_ENV" -ef "$NEXT_ENV" ) ]]; then
   echo "Deployment refused: base env aliases a temporary candidate or candidate is a symlink" >&2
