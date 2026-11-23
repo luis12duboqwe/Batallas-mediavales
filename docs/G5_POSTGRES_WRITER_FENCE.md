@@ -21,9 +21,12 @@ antes de tomar el respaldo, incluso si reinicia un worker o muere el gestor.
    en privilegios globales peligrosos).
 3. Exige la base esperada con `datconnlimit` no bloqueado. Si ya figura
    bloqueada, considera el estado como incidente previo y rechaza rearmar.
-4. Ejecuta en ese orden `ALTER DATABASE <base> CONNECTION LIMIT 0`
-   y `ALTER ROLE <app> NOLOGIN`. Son cambios persistentes del catálogo
-   PostgreSQL y no dependen de mantener viva la conexión del coordinador.
+4. Ejecuta primero `ALTER DATABASE <base> CONNECTION LIMIT 0` con
+   **commit confirmado** y comprueba el valor 0 desde **una conexión nueva**.
+   Solo después ejecuta `ALTER ROLE <app> NOLOGIN`, también con commit
+   confirmado. Una lectura dentro de la misma transacción no demuestra que
+   el bloqueo sea durable y visible para nuevas conexiones. Los cambios de
+   catálogo permanecen tras la muerte del coordinador.
 5. Termina todas las sesiones conectadas a la base objetivo. Comprueba
    literalmente que no queda **ninguna** sesión ni transacción preparada,
    que `datconnlimit=0` y que la cuenta de aplicación tiene `NOLOGIN`.
