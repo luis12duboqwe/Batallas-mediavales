@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from urllib.parse import unquote, urlsplit
 
 WRITERS = frozenset({"backend", "worker", "migrate", "seed"})
 PASSIVE = frozenset({"database", "frontend", "nginx", "caddy"})
@@ -21,6 +22,72 @@ DB_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
 class ProbeError(RuntimeError):
     """Could not establish a trustworthy read-only inspection."""
+
+
+def _application_role(values: dict[str, str], postgres_admin: str) -> str:
+    """Find the runtime app identity without printing the URL or password."""
+    raw = values.get("DB_URL", "")
+    try:
+        url = urlsplit(raw)
+    except (TypeError, ValueError) as exc:
+        raise ProbeError("Application database role/URL is invalid") from exc
+    if url.scheme not in {"postgresql", "postgresql+psycopg", "postgresql+psycopg2"}:
+        raise ProbeError("Application DB_URL must use a supported PostgreSQL driver")
+    username = url.username
+    if not username:
+        raise ProbeError("Application DB_URL must contain a distinct login role")
+    app_role = unquote(username)
+    if (not DB_IDENTIFIER.fullmatch(app_role) or
+            not DB_IDENTIFIER.fullmatch(postgres_admin)):
+        raise ProbeError("Application or maintenance database role name is unsafe")
+    # A role audit against this Compose database proves nothing if a driver
+    # parameter, hostname or alternate database redirects the application.
+    expected_db = values.get("POSTGRES_DB", "")
+    try:
+        endpoint_is_local = (url.hostname == "database" and url.port in (None, 5432))
+    except ValueError as exc:
+        raise ProbeError("Application database endpoint is malformed") from exc
+    if (not DB_IDENTIFIER.fullmatch(expected_db) or not endpoint_is_local or
+            unquote(url.path) != "/" + expected_db or url.query or url.fragment):
+        raise ProbeError("Application database endpoint differs from audited Compose PostgreSQL")
+    if not url.password:
+        raise ProbeError("Application database password is missing")
+    if app_role == postgres_admin:
+        raise ProbeError(
+            "Application and maintenance database users are identical; G5 role isolation NO-GO"
+        )
+    return app_role
+
+
+def _require_unprivileged_app_role(compose: list[str], admin: str, app_role: str) -> None:
+    """Observe pg_roles and reject elevated roles or superuser membership.
+
+    This checks only privilege separation, not a durable write-admission gate.
+    """
+    # Role identifiers are validated before SQL interpolation.
+    if not DB_IDENTIFIER.fullmatch(admin) or not DB_IDENTIFIER.fullmatch(app_role):
+        raise ProbeError("Cannot validate PostgreSQL role identity")
+    sql = (
+        "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles AS app "
+        f"WHERE app.rolname='{app_role}' "
+        "AND app.rolcanlogin "
+        "AND NOT (app.rolsuper OR app.rolcreatedb OR app.rolcreaterole "
+        "OR app.rolreplication OR app.rolbypassrls) "
+        "AND NOT EXISTS (SELECT 1 FROM pg_roles AS privileged "
+        "WHERE (privileged.rolsuper OR privileged.rolname IN "
+        "('pg_write_all_data', 'pg_read_all_data', 'pg_execute_server_program', "
+        "'pg_read_server_files', 'pg_write_server_files')) "
+        "AND pg_has_role(app.oid, privileged.oid, 'MEMBER'))) "
+        "THEN 1 ELSE 0 END;"
+    )
+    result = _run(compose + [
+        "exec", "-T", "database", "psql", "-X", "-v", "ON_ERROR_STOP=1",
+        "-U", admin, "-d", "postgres", "-Atqc", sql,
+    ])
+    if result.strip() != "1":
+        raise ProbeError(
+            "Application PostgreSQL role is missing, elevated, or inherits superuser privileges"
+        )
 
 
 def decode_ps(raw: str) -> list[dict]:
@@ -180,11 +247,15 @@ def collect(env_file: Path, compose_files: list[Path], edge_dir: Path) -> list[s
     user = values.get("POSTGRES_USER", "")
     if not DB_IDENTIFIER.fullmatch(database) or not user:
         raise ProbeError("PostgreSQL identity missing or unsafe")
+    app_role = _application_role(values, user)
     cmd = ["docker", "compose", "--env-file", str(env_file)]
     for file in compose_files:
         cmd += ["-f", str(file)]
     config = json.loads(_run(cmd + ["config", "--format", "json"]))
     containers = decode_ps(_run(cmd + ["ps", "--all", "--format", "json"]))
+    # A read-only snapshot cannot become a revocable DB writer barrier when
+    # the game itself authenticates as PostgreSQL's maintenance superuser.
+    _require_unprivileged_app_role(cmd, user, app_role)
     sql = (
         "SELECT (SELECT count(*) FROM pg_stat_activity "
         f"WHERE datname='{database}' AND pid<>pg_backend_pid()), "

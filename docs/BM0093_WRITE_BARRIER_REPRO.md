@@ -44,10 +44,12 @@ Run the test with the repository's existing pytest setup:
 pytest -q tests/test_bm0093_write_barrier_postgres.py
 ```
 
-The GitHub merge gate requires **3 PASSED, 0 SKIPPED** for the three PostgreSQL
-tests. Run the command below to see that count separately from the 15 mocked
-unit cases in the same file. For the complete file, expect **18 passed,
-0 skipped**.
+The GitHub merge gate requires **0 SKIPPED** for the PostgreSQL tests,
+including the additional G5 role-separation assertions against real,
+disposable PostgreSQL 15 instances. The file now includes real SQL checks
+that reject privileged role flags and inherited PostgreSQL built-in roles,
+alongside the snapshot and advisory-lock tests. Test counts may grow with
+new regression cases; verify the full run rather than a hard-coded total.
 
 ```bash
 CI=true pytest -q tests/test_bm0093_write_barrier_postgres.py -k 'not (cleanup or setup_failure_policy or readiness)'
@@ -109,6 +111,8 @@ on 2026-11-22. The hardened PostgreSQL E2E tests still require execution in
 GitHub. The offline cases exercise cleanup, startup failure policy and
 readiness with mocked subprocesses.
 
-The database tests cover snapshot exclusion and advisory-lock ordering. Issue
-#174, G5, RPO/RTO, full deployment rollback and application-wide write-barrier
-coverage require separate evidence.
+The database tests cover snapshot exclusion, advisory-lock ordering and
+read-only privilege checks for an unprivileged application role on PostgreSQL 15.
+The checks **do not revoke roles, prevent new logins or block new writes**.
+Issue #174, G5, RPO/RTO, full deployment rollback and application-wide
+write-barrier coverage still require separate evidence.

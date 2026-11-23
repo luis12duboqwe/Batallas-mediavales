@@ -166,7 +166,8 @@ def test_read_only_collection_uses_passed_env_and_no_mutating_docker_commands(
 ):
     config, containers, edge = sample
     env = tmp_path / ".release.env"
-    env.write_text("POSTGRES_DB=medievol_db\nPOSTGRES_USER=medievol\n")
+    env.write_text("POSTGRES_DB=medievol_db\nPOSTGRES_USER=medievol\n"
+                   "DB_URL=postgresql+psycopg://game_user:test-secret@database:5432/medievol_db\n")
     compose = tmp_path / "docker-compose.deploy.yml"
     compose.write_text("services: {}\n")
     calls = []
@@ -178,7 +179,7 @@ def test_read_only_collection_uses_passed_env_and_no_mutating_docker_commands(
         if argv[-4:] == ["ps", "--all", "--format", "json"]:
             return json.dumps(containers)
         assert "exec" in argv and "-Atqc" in argv
-        return "0|0\n"
+        return "1" if "FROM pg_roles" in argv[-1] else "0|0\n"
 
     edge_checks = []
     runtime_checks = []
@@ -193,8 +194,9 @@ def test_read_only_collection_uses_passed_env_and_no_mutating_docker_commands(
     assert all(argv[:2] == ["docker", "compose"] for argv, _ in edge_checks)
     assert "/api/health" in edge_checks[0][1]
     assert "/socket.io/" in edge_checks[1][1]
-    assert len(calls) == 3
+    assert len(calls) == 4
     assert all(argv[:2] == ["docker", "compose"] for argv in calls)
+    assert "FROM pg_roles" in calls[2][-1]
     assert all(not any(part in {"stop", "up", "start", "restore", "rm"} for part in argv)
                for argv in calls)
     assert "medievol_db" in calls[-1][-1]

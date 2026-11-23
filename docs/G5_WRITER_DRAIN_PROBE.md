@@ -21,14 +21,31 @@ se ha activado en el VPS. Complementa las piezas ya integradas en PR #180
 3. Exige PostgreSQL y Nginx activos una sola vez y mounts G5 de solo lectura.
 4. Rechaza la presencia del marcador `edge-maintenance/open`, incluso si es
    un enlace colgante; rechaza directorios de mantenimiento enlazados.
-5. Ejecuta consultas de solo lectura a `pg_stat_activity` y
+5. Antes de declarar quiescencia, analiza la identidad del usuario
+   de la aplicación en `DB_URL` y la compara con el usuario de mantenimiento
+   `POSTGRES_USER`. Si coinciden, la observación **falla**: no es seguro
+   basar una futura barrera en bloquear permisos de una cuenta que también
+   administra PostgreSQL. Consulta `pg_roles` (solo lectura) y exige
+   `LOGIN`, sin `SUPERUSER`, `CREATEDB`, `CREATEROLE`,
+   `REPLICATION`, `BYPASSRLS` ni pertenencia a cuentas superusuario
+   o a roles integrados de acceso global a tablas y archivos del servidor
+   (`pg_write_all_data`, `pg_read_all_data`, `pg_execute_server_program`,
+   `pg_read_server_files`, `pg_write_server_files`).
+   También exige que `DB_URL` apunte exactamente al servicio Compose
+   `database` (puerto 5432) y a `POSTGRES_DB`; rechaza redirecciones
+   por URL, parámetros de conexión que alteren el destino, credenciales
+   de aplicación vacías y destinos alternativos. No debe confundirse la
+   cuenta inspeccionada con otro clúster PostgreSQL.
+   La herramienta **no imprime** la contraseña ni modifica roles.
+6. Ejecuta consultas de solo lectura a `pg_stat_activity` y
    `pg_prepared_xacts`: cero conexiones a la base objetivo y cero transacciones
    preparadas son requisitos para la **observación** (no una garantía futura).
-6. Desde el contenedor Nginx **en ejecución**, comprueba HTTP 503 real para
+7. Desde el contenedor Nginx **en ejecución**, comprueba HTTP 503 real para
    `/api/health` y para la entrada de Socket.IO (polling). Un fichero de
    configuración correcto por sí solo no prueba el cierre real del proxy.
-7. No detiene/arranca servicios, no adquiere locks de escritura, no ejecuta
-   migraciones, no hace copias de datos y no toca el marcador.
+8. No detiene/arranca servicios, no adquiere locks de escritura, no ejecuta
+   migraciones, no hace copias de datos, no revoca privilegios y no toca
+   el marcador.
 
 Ejemplo para un **entorno aislado de ensayo**, con identidad Compose correcta:
 
@@ -45,6 +62,13 @@ evidencia de escritores activos **en el instante consultado**.
 
 ## Hallazgos actuales que impiden la certificación
 
+- La configuración de referencia de despliegue utiliza habitualmente
+  las credenciales de `POSTGRES_USER` en `DB_URL`. Ese usuario se crea con
+  privilegios elevados por la imagen oficial de PostgreSQL; **no se puede
+  certificar una barrera revocable** hasta migrar la aplicación a un rol
+  propio de mínimo privilegio, con credenciales administradas fuera de GitHub
+  y comprobación de permisos efectiva en PostgreSQL 15 aislado. Esta rama
+  **solo audita**; no altera credenciales, roles ni despliegues existentes.
 - `docker-compose.deploy.yml` deja `backend` y `worker` en
   `restart: unless-stopped`; el overlay G5 actual solo cambia Nginx.
   Detenerlos una vez no demuestra que no reinicien tras un fallo o reboot.
@@ -57,6 +81,11 @@ evidencia de escritores activos **en el instante consultado**.
 - `ops/restore_postgres.sh` y el rollback no están integrados con
   `CutoverStore.verify_restore_allowed`; una ejecución del script de restore
   todavía no demuestra un snapshot seguro.
+- La separación de privilegios es una **condición necesaria, no suficiente**:
+  un usuario `LOGIN` con permisos ordinarios todavía puede escribir mientras
+  conserve acceso y sesiones abiertas. Esta inspección no revoca `CONNECT`,
+  no cambia `LOGIN` y no bloquea futuras conexiones; el coordinador debe
+  aportar una barrera permanente mientras dure el corte.
 - Una lectura de `pg_stat_activity` no impide nuevas conexiones posteriores.
   Verificar HTTP 503 en el Nginx activo tampoco termina WebSockets ni peticiones
   previas, ni cubre otros accesos a PostgreSQL. Verificar la política de reinicio
