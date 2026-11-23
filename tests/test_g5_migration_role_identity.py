@@ -80,6 +80,22 @@ def test_raw_at_sign_in_password_never_certifies_ambiguous_destination(
 
 
 @pytest.mark.parametrize("url_field", ["DB_URL", "G5_MIGRATION_DB_URL"])
+@pytest.mark.parametrize("replacement", [
+    "postgresql://",
+    "POSTGRESQL+PSYCOPG://",
+    " postgresql+psycopg://",
+    "postgresql+psycopg2://",
+    "postgresql+PSYCOPG://",
+])
+def test_exact_installed_psycopg3_dialect_required_for_both_urls(
+    values, url_field, replacement
+):
+    values[url_field] = values[url_field].replace("postgresql+psycopg://", replacement)
+    with pytest.raises(RoleSplitError, match="installed lowercase psycopg3 driver URL"):
+        validate_split(values)
+
+
+@pytest.mark.parametrize("url_field", ["DB_URL", "G5_MIGRATION_DB_URL"])
 @pytest.mark.parametrize("delimiter", ["#", "?"])
 def test_trailing_raw_fragment_or_query_delimiter_does_not_change_db_target(
     values, url_field, delimiter
