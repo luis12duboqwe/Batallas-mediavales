@@ -34,13 +34,33 @@ try {
     }
   });
   await openRoute('/map');
-  await page.getByTestId('map-load-error').waitFor({ state: 'visible', timeout: 15000 });
+  const mapError = page.getByTestId('map-load-error');
+  const mapIdle = page.locator('[data-testid="map-grid-panel"][aria-busy="false"]');
+  const retryMap = page.getByRole('button', { name: 'Reintentar mapa' });
+  await mapError.waitFor({ state: 'visible', timeout: 15000 });
+  await mapIdle.waitFor({ state: 'visible', timeout: 15000 });
   assert.equal(await page.getByTestId('map-empty').count(), 0, 'Map error must not be reported as empty');
+
+  // First retry also fails. Do not allow the stub to recover before the
+  // actual user click: a late city-centering request could otherwise succeed,
+  // remove the button, and make Playwright time out on a detached element.
+  const requestsBeforeRetry = mapRequests;
+  const retryFailure = page.waitForResponse(
+    (response) => response.url().includes('/map/tiles') && response.status() === 503,
+    { timeout: 15000 },
+  );
+  await retryMap.click();
+  await retryFailure;
+  await mapIdle.waitFor({ state: 'visible', timeout: 15000 });
+  await mapError.waitFor({ state: 'visible', timeout: 15000 });
+  assert.ok(mapRequests > requestsBeforeRetry, 'Failed retry must send another map request');
+
+  // No pending mocked successful response can clear the error before clicking.
   recoverMap = true;
-  await page.getByRole('button', { name: 'Reintentar mapa' }).click();
+  await retryMap.click();
   await page.getByTestId('map-empty').waitFor({ state: 'visible', timeout: 15000 });
-  assert.equal(await page.getByTestId('map-load-error').count(), 0);
-  assert.ok(mapRequests >= 2, 'Retry must send a new map request');
+  assert.equal(await mapError.count(), 0);
+  assert.ok(mapRequests >= requestsBeforeRetry + 2, 'Successful retry must send another map request');
   await page.unroute('**/map/tiles**');
 
   let inboxRequests = 0;
