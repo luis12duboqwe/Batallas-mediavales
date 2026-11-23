@@ -181,10 +181,14 @@ def test_read_only_collection_uses_passed_env_and_no_mutating_docker_commands(
         return "0|0\n"
 
     edge_checks = []
+    runtime_checks = []
     monkeypatch.setattr(probe, "_run", fake_run)
     monkeypatch.setattr(probe, "_require_closed_edge",
                         lambda argv, url: edge_checks.append((argv, url)))
+    monkeypatch.setattr(probe, "verify_runtime_writer_restart_policies",
+                        lambda rows: runtime_checks.append(rows))
     assert probe.collect(env, [compose], edge) == []
+    assert len(runtime_checks) == 1
     assert len(edge_checks) == 2
     assert all(argv[:2] == ["docker", "compose"] for argv, _ in edge_checks)
     assert "/api/health" in edge_checks[0][1]
@@ -235,6 +239,83 @@ def test_invalid_database_name_never_reaches_psql(sample, tmp_path, monkeypatch,
                         lambda argv: pytest.fail("Must not reach Docker with untrusted dbname"))
     with pytest.raises(probe.ProbeError):
         probe.collect(env, [compose], edge)
+
+
+def test_runtime_restart_policy_is_checked_for_each_writer_even_if_exited(
+    sample, monkeypatch
+):
+    _, containers, _ = sample
+    expected = {}
+    for index, row in enumerate(containers):
+        if row["Service"] in probe.WRITERS:
+            row["ID"] = format(index + 1, "012x")
+            expected[row["ID"]] = row["Service"]
+    calls = []
+
+    def fake_run(argv):
+        calls.append(argv)
+        assert argv[:4] == ["docker", "inspect", "--type", "container"]
+        assert argv[-2] == "{{.HostConfig.RestartPolicy.Name}}"
+        assert argv[-1] in expected
+        return "no"
+
+    monkeypatch.setattr(probe, "_run", fake_run)
+    probe.verify_runtime_writer_restart_policies(containers)
+    assert len(calls) == len(probe.WRITERS)
+    assert {c[-1] for c in calls} == set(expected)
+
+
+@pytest.mark.parametrize("unsafe_policy", ["always", "unless-stopped", "on-failure", "", "no\\nno"])
+def test_desired_restart_no_cannot_mask_unsafe_runtime_restart(
+    sample, monkeypatch, unsafe_policy
+):
+    _, containers, _ = sample
+    worker = next(row for row in containers if row["Service"] == "worker")
+    worker["ID"] = "a" * 12
+    monkeypatch.setattr(probe, "_run", lambda argv: unsafe_policy)
+    with pytest.raises(probe.ProbeError, match="runtime Docker restart policy"):
+        probe.verify_runtime_writer_restart_policies([worker])
+
+
+@pytest.mark.parametrize("identity", [None, "", "worker-01", "abc", "A" * 12, "a" * 11, "a" * 65, "a" * 12 + " --force"])
+def test_missing_malformed_or_untrusted_docker_ids_are_refused(
+    sample, monkeypatch, identity
+):
+    _, containers, _ = sample
+    worker = next(row for row in containers if row["Service"] == "worker")
+    worker["ID"] = identity
+    monkeypatch.setattr(
+        probe, "_run", lambda argv: pytest.fail("Unsafe ID must never reach Docker"),
+    )
+    with pytest.raises(probe.ProbeError, match="identity"):
+        probe.verify_runtime_writer_restart_policies([worker])
+
+
+def test_runtime_policy_probe_does_not_mutate_container_or_docker(
+    sample, monkeypatch
+):
+    _, containers, _ = sample
+    backend = next(row for row in containers if row["Service"] == "backend")
+    backend["ID"] = "b" * 12
+    args = []
+    monkeypatch.setattr(probe, "_run", lambda command: args.append(command) or "no")
+    probe.verify_runtime_writer_restart_policies([backend])
+    assert len(args) == 1
+    assert args[0][0:2] == ["docker", "inspect"]
+    assert not {"update", "start", "restart", "stop", "rm"} & set(args[0])
+
+
+def test_runtime_inspect_failure_is_a_hard_no_go(sample, monkeypatch):
+    _, containers, _ = sample
+    worker = next(row for row in containers if row["Service"] == "worker")
+    worker["ID"] = "c" * 12
+    monkeypatch.setattr(
+        probe, "_run", lambda argv: (_ for _ in ()).throw(
+            probe.ProbeError("Docker inspect returned nonzero")
+        )
+    )
+    with pytest.raises(probe.ProbeError, match="inspect"):
+        probe.verify_runtime_writer_restart_policies([worker])
 
 
 def test_successful_cli_observation_never_claims_cutover_authorization(
