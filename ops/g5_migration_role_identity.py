@@ -33,6 +33,11 @@ def _url(value: str, database: str, label: str) -> tuple[str, str]:
         raise RoleSplitError(f"{label} must have a literal PostgreSQL URL")
     try:
         parsed = urlsplit(value)
+        # SQLAlchemy and urllib can split ambiguous user-info differently:
+        # SQLAlchemy treats the *first* raw @ as the host separator, whereas
+        # urlsplit uses the last. Permit @ only when percent-encoded as %40.
+        if parsed.netloc.count("@") != 1:
+            raise RoleSplitError(f"{label} has ambiguous user-info delimiters")
         role = unquote(parsed.username or "")
         password = unquote(parsed.password or "")
         host = parsed.hostname
