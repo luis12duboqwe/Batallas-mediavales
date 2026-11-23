@@ -224,12 +224,13 @@ finally:
 PY
 }
 
-# SIGTERM/SIGINT to only the parent must not allow a live Compose up child to
-# start writers *after* EXIT cleanup has already stopped them. Await the child
-# first, then let the EXIT trap stop every possible writer.
+# Catch the ordinary termination signals, not just TERM: HUP, PIPE, USR*
+# and ALRM can also terminate the parent while the Compose child is still up.
+# Await that child BEFORE EXIT cleanup stops every possible writer. SIGKILL
+# and other uncatchable process/host failures remain outside this legacy gate.
 abort_after_compose() {
   local code="$1"
-  trap '' TERM INT
+  trap '' HUP INT QUIT PIPE TERM USR1 USR2 ALRM
   if [[ "$ROLLBACK_START_REQUESTED" == 1 ]]; then
     if [[ -n "$ROLLBACK_UP_PID" ]]; then
       wait "$ROLLBACK_UP_PID" || true
@@ -238,14 +239,20 @@ abort_after_compose() {
   fi
   exit "$code"
 }
-trap 'abort_after_compose 143' TERM
+trap 'abort_after_compose 129' HUP
 trap 'abort_after_compose 130' INT
+trap 'abort_after_compose 131' QUIT
+trap 'abort_after_compose 138' USR1
+trap 'abort_after_compose 140' USR2
+trap 'abort_after_compose 141' PIPE
+trap 'abort_after_compose 142' ALRM
+trap 'abort_after_compose 143' TERM
 
 cleanup() {
   local status=$?
   trap - EXIT
   # Repeated termination must not interrupt the fail-closed cleanup.
-  trap '' TERM INT
+  trap '' HUP INT QUIT PIPE TERM USR1 USR2 ALRM
   set +e
   if [[ "$ROLLBACK_START_REQUESTED" == 1 && "$ROLLBACK_VERIFIED" != 1 ]]; then
     echo "CRITICAL: rollback did not pass smoke and metadata/marker certification; stopping writers" >&2
