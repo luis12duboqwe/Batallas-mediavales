@@ -19,7 +19,10 @@ se ha activado en el VPS. Complementa las piezas ya integradas en PR #180
 5. Ejecuta consultas de solo lectura a `pg_stat_activity` y
    `pg_prepared_xacts`: cero conexiones a la base objetivo y cero transacciones
    preparadas son requisitos para la **observación** (no una garantía futura).
-6. No detiene/arranca servicios, no adquiere locks de escritura, no ejecuta
+6. Desde el contenedor Nginx **en ejecución**, comprueba HTTP 503 real para
+   `/api/health` y para la entrada de Socket.IO (polling). Un fichero de
+   configuración correcto por sí solo no prueba el cierre real del proxy.
+7. No detiene/arranca servicios, no adquiere locks de escritura, no ejecuta
    migraciones, no hace copias de datos y no toca el marcador.
 
 Ejemplo para un **entorno aislado de ensayo**, con identidad Compose correcta:
@@ -49,9 +52,10 @@ evidencia de escritores activos **en el instante consultado**.
 - `ops/restore_postgres.sh` y el rollback no están integrados con
   `CutoverStore.verify_restore_allowed`; una ejecución del script de restore
   todavía no demuestra un snapshot seguro.
-- Una lectura de `pg_stat_activity` no impide nuevas conexiones posteriores ni
-  verifica el comportamiento del proceso Nginx en ejecución. **No usar este
-  resultado como prueba RPO=0**.
+- Una lectura de `pg_stat_activity` no impide nuevas conexiones posteriores.
+  Verificar HTTP 503 en el Nginx activo tampoco termina WebSockets ni peticiones
+  previas, ni cubre otros accesos a PostgreSQL. **No usar este resultado como
+  prueba RPO=0**.
 
 ## Siguiente integración obligatoria antes de cerrar #174
 
