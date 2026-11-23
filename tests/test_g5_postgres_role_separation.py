@@ -50,7 +50,7 @@ def test_role_audit_rejects_database_endpoint_redirection(db_url):
 ])
 def test_shared_or_invalid_db_roles_fail_without_credential_leak(db_url, admin):
     with pytest.raises(probe.ProbeError) as failure:
-        probe._application_role({"DB_URL": db_url}, admin)
+        probe._application_role({"DB_URL": db_url, "POSTGRES_DB": "game"}, admin)
     assert "secret" not in str(failure.value)
 
 
