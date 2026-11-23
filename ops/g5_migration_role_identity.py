@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, unquote
 
 
 _ROLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
-_SCHEMES = frozenset({"postgresql", "postgresql+psycopg"})
+_SCHEMES = frozenset({"postgresql+psycopg"})
 
 
 class RoleSplitError(ValueError):
@@ -32,6 +32,11 @@ def _url(value: str, database: str, label: str) -> tuple[str, str]:
             any(char in value for char in ("$", "#", "?")) or
             any(ord(char) < 32 or ord(char) == 127 for char in value)):
         raise RoleSplitError(f"{label} must have a literal PostgreSQL URL")
+    # The shipped backend only installs psycopg v3, NOT psycopg2. SQLAlchemy
+    # does not normalize bare postgresql://, uppercase driver names or leading
+    # spaces the same way urllib.urlsplit does. Validate raw bytes first.
+    if not value.startswith("postgresql+psycopg://"):
+        raise RoleSplitError(f"{label} must use the installed lowercase psycopg3 driver URL")
     try:
         parsed = urlsplit(value)
         # SQLAlchemy and urllib can split ambiguous user-info differently:
