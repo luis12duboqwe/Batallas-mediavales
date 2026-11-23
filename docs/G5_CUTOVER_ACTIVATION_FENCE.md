@@ -24,8 +24,10 @@ gestor aún no publicó manifiesto ni guardó datos de rollback.
 - Adquirir `flock(LOCK_EX|LOCK_NB)` **sobre el mismo archivo** que emplean
   los scripts heredados de deploy/rollback/restore. Rechazar operaciones
   concurrentes y raíces/metadatos inseguros.
-- Rechazar manifiesto previo, marca G5 anterior o incidente
-  `recovery-required`, incluso si son directorios o symlinks rotos.
+- Rechazar manifiesto previo, marca G5 anterior, incidente
+  `recovery-required` y evidencia huérfana `recovery-required.*`,
+  incluso si son directorios o symlinks rotos. Una operación G5 no puede
+  saltarse las guardas de recibos huérfanos añadidas a legacy en PR #195.
 - Crear `g5-cutover-activated` con `O_EXCL|O_NOFOLLOW` y permisos 0600;
   escribir ID de operación; hacer `fsync` de archivo y directorio **antes
   de ceder el control al futuro coordinador**. Verificar inode y permiso.
