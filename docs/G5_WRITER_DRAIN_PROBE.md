@@ -28,6 +28,11 @@ se ha activado en el VPS. Complementa las piezas ya integradas en PR #180
    administra PostgreSQL. Consulta `pg_roles` (solo lectura) y exige
    `LOGIN`, sin `SUPERUSER`, `CREATEDB`, `CREATEROLE`,
    `REPLICATION`, `BYPASSRLS` ni pertenencia a cuentas superusuario.
+   También exige que `DB_URL` apunte exactamente al servicio Compose
+   `database` (puerto 5432) y a `POSTGRES_DB`; rechaza redirecciones
+   por URL, parámetros de conexión que alteren el destino, credenciales
+   de aplicación vacías y destinos alternativos. No debe confundirse la
+   cuenta inspeccionada con otro clúster PostgreSQL.
    La herramienta **no imprime** la contraseña ni modifica roles.
 6. Ejecuta consultas de solo lectura a `pg_stat_activity` y
    `pg_prepared_xacts`: cero conexiones a la base objetivo y cero transacciones
