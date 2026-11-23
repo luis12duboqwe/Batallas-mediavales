@@ -13,6 +13,11 @@ se ha activado en el VPS. Complementa las piezas ya integradas en PR #180
 1. Exige inventario **exacto** de servicios y rechaza escritores desconocidos.
 2. Rechaza backend, worker, migrate y seed todavía activos o en estados
    intermedios, y políticas de restart que puedan levantarlos automáticamente.
+   Comprueba **dos niveles**: la política deseada de Compose y, para cada
+   contenedor de escritor existente (incluido detenido), el valor real de
+   `HostConfig.RestartPolicy.Name` obtenido mediante `docker inspect`.
+   Un overlay que declare `restart: no` no basta si Docker aún conserva
+   `always` o `unless-stopped` en un contenedor anterior.
 3. Exige PostgreSQL y Nginx activos una sola vez y mounts G5 de solo lectura.
 4. Rechaza la presencia del marcador `edge-maintenance/open`, incluso si es
    un enlace colgante; rechaza directorios de mantenimiento enlazados.
@@ -54,8 +59,9 @@ evidencia de escritores activos **en el instante consultado**.
   todavía no demuestra un snapshot seguro.
 - Una lectura de `pg_stat_activity` no impide nuevas conexiones posteriores.
   Verificar HTTP 503 en el Nginx activo tampoco termina WebSockets ni peticiones
-  previas, ni cubre otros accesos a PostgreSQL. **No usar este resultado como
-  prueba RPO=0**.
+  previas, ni cubre otros accesos a PostgreSQL. Verificar la política de reinicio
+  real de Docker tampoco impide `docker compose up` manual o fuera del lock.
+  **No usar este resultado como prueba RPO=0**.
 
 ## Siguiente integración obligatoria antes de cerrar #174
 
