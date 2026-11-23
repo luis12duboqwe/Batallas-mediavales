@@ -27,7 +27,10 @@ se ha activado en el VPS. Complementa las piezas ya integradas en PR #180
    basar una futura barrera en bloquear permisos de una cuenta que también
    administra PostgreSQL. Consulta `pg_roles` (solo lectura) y exige
    `LOGIN`, sin `SUPERUSER`, `CREATEDB`, `CREATEROLE`,
-   `REPLICATION`, `BYPASSRLS` ni pertenencia a cuentas superusuario.
+   `REPLICATION`, `BYPASSRLS` ni pertenencia a cuentas superusuario
+   o a roles integrados de acceso global a tablas y archivos del servidor
+   (`pg_write_all_data`, `pg_read_all_data`, `pg_execute_server_program`,
+   `pg_read_server_files`, `pg_write_server_files`).
    También exige que `DB_URL` apunte exactamente al servicio Compose
    `database` (puerto 5432) y a `POSTGRES_DB`; rechaza redirecciones
    por URL, parámetros de conexión que alteren el destino, credenciales
