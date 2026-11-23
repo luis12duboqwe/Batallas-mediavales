@@ -62,6 +62,39 @@ def test_misrouted_credentials_and_injection_are_refused_without_secret_leaks(va
     assert "postgresql+psycopg" not in rendered
 
 
+@pytest.mark.parametrize("url_field,raw_url", [
+    ("DB_URL", "postgresql+psycopg://game_app:part1@part2@database:5432/game_db"),
+    ("G5_MIGRATION_DB_URL",
+     "postgresql+psycopg://game_admin:part1@part2@database:5432/game_db"),
+])
+def test_raw_at_sign_in_password_never_certifies_ambiguous_destination(
+    values, url_field, raw_url
+):
+    # urllib.split.hostname uses last @, SQLAlchemy's URL parser uses first.
+    # Both user-info URLs must refuse unsafe ambiguous delimiters.
+    values[url_field] = raw_url
+    if url_field == "G5_MIGRATION_DB_URL":
+        values["POSTGRES_PASSWORD"] = "part1@part2"
+    with pytest.raises(RoleSplitError, match="ambiguous user-info"):
+        validate_split(values)
+
+
+@pytest.mark.parametrize("url_field", ["DB_URL", "G5_MIGRATION_DB_URL"])
+def test_percent_encoded_at_in_password_can_be_unambiguously_routed(values, url_field):
+    if url_field == "DB_URL":
+        values[url_field] = (
+            "postgresql+psycopg://game_app:part1%40part2@database:5432/game_db"
+        )
+    else:
+        values[url_field] = (
+            "postgresql+psycopg://game_admin:part1%40part2@database:5432/game_db"
+        )
+        values["POSTGRES_PASSWORD"] = "part1@part2"
+    result = validate_split(values)
+    assert result.application == "game_app"
+    assert result.maintenance == "game_admin"
+
+
 def test_missing_and_malformed_env_values_are_refused(values):
     for field in values:
         missing = dict(values)
