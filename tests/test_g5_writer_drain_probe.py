@@ -1,5 +1,6 @@
 """BM-0093: read-only G5 writer drain probe regression contracts."""
 import json
+import subprocess
 from pathlib import Path
 import sys
 
@@ -179,13 +180,48 @@ def test_read_only_collection_uses_passed_env_and_no_mutating_docker_commands(
         assert "exec" in argv and "-Atqc" in argv
         return "0|0\n"
 
+    edge_checks = []
     monkeypatch.setattr(probe, "_run", fake_run)
+    monkeypatch.setattr(probe, "_require_closed_edge",
+                        lambda argv, url: edge_checks.append((argv, url)))
     assert probe.collect(env, [compose], edge) == []
+    assert len(edge_checks) == 2
+    assert all(argv[:2] == ["docker", "compose"] for argv, _ in edge_checks)
+    assert "/api/health" in edge_checks[0][1]
+    assert "/socket.io/" in edge_checks[1][1]
     assert len(calls) == 3
     assert all(argv[:2] == ["docker", "compose"] for argv in calls)
     assert all(not any(part in {"stop", "up", "start", "restore", "rm"} for part in argv)
                for argv in calls)
     assert "medievol_db" in calls[-1][-1]
+
+
+@pytest.mark.parametrize("status", [
+    "  HTTP/1.1 503 Service Unavailable",
+    "HTTP/1.0 503",
+    " HTTP/2 503",
+])
+def test_actual_nginx_503_is_required_even_with_wget_nonzero(monkeypatch, status):
+    monkeypatch.setattr(
+        probe.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 8, "", status + chr(10))
+    )
+    probe._require_closed_edge(["docker", "compose"], "http://127.0.0.1/api/health")
+
+
+@pytest.mark.parametrize("status", [
+    "", "Connection refused", "HTTP/1.1 200 OK",
+    "HTTP/1.1 500 Internal Error", "response body 503", "HTTP/1.1 5030",
+])
+def test_http_failures_and_false_statuses_never_count_as_closed(monkeypatch, status):
+    monkeypatch.setattr(
+        probe.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 1, "", status + chr(10))
+    )
+    with pytest.raises(probe.ProbeError, match="maintenance HTTP 503"):
+        probe._require_closed_edge(["docker", "compose"], "http://127.0.0.1/api/health")
 
 
 @pytest.mark.parametrize("dbname", ["x';DROP TABLE users;--", "", "a-b"])
