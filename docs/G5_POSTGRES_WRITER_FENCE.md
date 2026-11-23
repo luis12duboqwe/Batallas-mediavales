@@ -58,9 +58,15 @@ ambigüedad de identidad, SQL o sesiones.
   administradores/superusuarios externos. Tampoco sustituye el cierre real de
   HTTP/WebSocket, la parada de workers, el control de Docker ni la captura de
   backup bajo barrera.
-- La biblioteca no prueba una instalación PostgreSQL real. Las regresiones
-  `tests/test_g5_pg15_writer_fence.py` comprueban orden, rechazo y ausencia de
-  reversión con un stub aislado.
+- Las regresiones `tests/test_g5_pg15_writer_fence.py` comprueban
+  orden, rechazo y ausencia de reversión con un stub aislado. Además,
+  `ops/ci_g5_pg15_fence.py` debe ejecutarse obligatoriamente en el job
+  `G5 operations recovery` contra **PostgreSQL 15 real** en un contenedor
+  sintético `--network none`, sin puertos públicos ni volúmenes reales.
+  El ensayo verifica una escritura ya confirmada, una sesión viva antes
+  de la barrera, la terminación, la persistencia del bloqueo tras
+  construir otro objeto Python y el rechazo de una reconexión. No certifica
+  escritores superusuario o multiinstancia ni habilita datos reales.
 
 Referencias de PostgreSQL 15:
 - https://www.postgresql.org/docs/15/sql-alterdatabase.html
