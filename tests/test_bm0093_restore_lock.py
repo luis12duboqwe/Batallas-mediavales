@@ -160,6 +160,43 @@ def _configure_rollback_lab(lab):
     return current_sha, previous_sha
 
 
+
+@pytest.mark.parametrize("metadata", ["sha", "env", "both", "symlink"])
+def test_direct_destructive_restore_refused_for_managed_release_before_docker(
+    restore_lab, metadata
+):
+    root = restore_lab["root"]
+    if metadata in ("sha", "both"):
+        (root / ".release-sha").write_text("a" * 40 + "\n", encoding="utf-8")
+    if metadata in ("env", "both"):
+        (root / ".release.env").write_text(
+            restore_lab["env_file"].read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    elif metadata == "symlink":
+        (root / ".release.env").symlink_to(root / "missing-release")
+    result = _run(restore_lab, extra_env={"RESTORE_START_SERVICES": "0"})
+    assert result.returncode == 2, result.stderr
+    assert "managed release requires certified G5" in result.stderr
+    assert not restore_lab["trace"].exists()
+    assert not restore_lab["marker"].exists()
+
+
+@pytest.mark.parametrize("reason", [
+    "deployment_in_progress", "manual_rollback_in_progress",
+    "standalone_restore_requires_operator_certification", "unknown_incident"
+])
+def test_direct_restore_refuses_unresolved_incident_even_without_release(
+    restore_lab, reason
+):
+    contents = f"reason={reason}\n"
+    restore_lab["marker"].write_text(contents, encoding="utf-8")
+    result = _run(restore_lab)
+    assert result.returncode == 2
+    assert "unresolved recovery incident requires certified G5" in result.stderr
+    assert restore_lab["marker"].read_text(encoding="utf-8") == contents
+    assert not restore_lab["trace"].exists()
+
+
 def test_standalone_restore_refuses_while_release_operation_lock_is_held(restore_lab):
     with restore_lab["lock"].open("a+", encoding="utf-8") as holder:
         fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -330,7 +367,7 @@ def test_manual_rollback_uses_prepared_snapshot_with_real_restore_script(restore
     assert not list((restore_lab["root"] / ".ops-state").glob("restore.*"))
 
 
-def test_database_rollback_preserves_preexisting_recovery_marker(restore_lab):
+def test_database_rollback_refuses_preexisting_recovery_incident(restore_lab):
     current_sha, previous_sha = _configure_rollback_lab(restore_lab)
     marker_contents = "reason=operator_recovery_still_pending\n"
     restore_lab["marker"].write_text(marker_contents, encoding="utf-8")
@@ -350,9 +387,11 @@ def test_database_rollback_preserves_preexisting_recovery_marker(restore_lab):
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
-    assert (restore_lab["root"] / ".release-sha").read_text(encoding="utf-8") == previous_sha + "\n"
+    assert result.returncode == 2, result.stderr
+    assert "existing recovery incident requires certified G5" in result.stderr
+    assert (restore_lab["root"] / ".release-sha").read_text(encoding="utf-8") == current_sha + "\n"
     assert restore_lab["marker"].read_text(encoding="utf-8") == marker_contents
+    assert not restore_lab["trace"].exists()
 
 
 @pytest.mark.parametrize(
