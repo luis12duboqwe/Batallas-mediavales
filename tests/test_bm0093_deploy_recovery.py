@@ -597,7 +597,7 @@ def test_post_mutation_metadata_publish_failure_keeps_incident_and_stops_writers
     cp.write_text(
         "#!/usr/bin/env bash\n"
         'if [[ "$BM_METADATA_FAILURE" == "release_copy" '
-        '&& "${*: -1}" == .ops-state/releases/* ]]; then\n'
+        f'&& "${{*: -1}}" == ".ops-state/releases/{NEW_SHA}.env" ]]; then\n'
         "  exit 62\n"
         "fi\n"
         'exec /usr/bin/cp "$@"\n',
