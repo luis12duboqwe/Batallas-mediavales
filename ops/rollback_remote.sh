@@ -155,13 +155,97 @@ if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
   exit 2
 fi
 RECOVERY_MARKER_TMP=""
+ROLLBACK_UP_PID=""
 # Once Compose is asked to start the previous application, failure means it
 # may be serving players or executing workers while recovery remains uncertain.
 ROLLBACK_START_REQUESTED=0
 ROLLBACK_VERIFIED=0
+
+# Recreate a missing incident marker atomically under deploy.lock. Prefer the
+# original surviving hard link; if it too disappeared, write a new incident.
+# Never replace an existing (possibly foreign) marker.
+rearm_recovery_marker() {
+  python3 - "$STATE_DIR" "$RECOVERY_MARKER_TMP" "$CURRENT_RELEASE" <<'PY'
+import os
+import stat
+import sys
+
+state_dir, original, current_sha = sys.argv[1:]
+dir_fd = os.open(state_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    marker = "recovery-required"
+    try:
+        os.stat(marker, dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        source = os.path.basename(original)
+        linked = False
+        if original == f"{state_dir}/{source}" and source.startswith("recovery-required."):
+            try:
+                info = os.stat(source, dir_fd=dir_fd, follow_symlinks=False)
+                if (stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid()
+                        and info.st_mode & 0o077 == 0 and info.st_nlink == 1):
+                    try:
+                        os.link(source, marker, src_dir_fd=dir_fd, dst_dir_fd=dir_fd,
+                                follow_symlinks=False)
+                    except FileExistsError:
+                        pass
+                    linked = True
+            except FileNotFoundError:
+                pass
+        if not linked:
+            try:
+                fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=dir_fd)
+            except FileExistsError:
+                pass
+            else:
+                with os.fdopen(fd, "wb") as out:
+                    out.write(f"reason=rollback_recovery_marker_rearmed\ncurrent_release={current_sha}\n".encode("ascii"))
+                    out.flush()
+                    os.fsync(out.fileno())
+    info = os.stat(marker, dir_fd=dir_fd, follow_symlinks=False)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+            or info.st_mode & 0o077 or info.st_size == 0):
+        raise ValueError("unsafe recovery marker after rearm")
+    fd = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    try:
+        current = os.fstat(fd)
+        if (current.st_ino, current.st_dev) != (info.st_ino, info.st_dev):
+            raise ValueError("recovery marker replaced while fsyncing")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.fsync(dir_fd)
+except (OSError, ValueError) as exc:
+    print(f"CRITICAL: recovery marker could not be made durable ({exc})", file=sys.stderr)
+    sys.exit(1)
+finally:
+    os.close(dir_fd)
+PY
+}
+
+# SIGTERM/SIGINT to only the parent must not allow a live Compose up child to
+# start writers *after* EXIT cleanup has already stopped them. Await the child
+# first, then let the EXIT trap stop every possible writer.
+abort_after_compose() {
+  local code="$1"
+  trap '' TERM INT
+  if [[ "$ROLLBACK_START_REQUESTED" == 1 ]]; then
+    if [[ -n "$ROLLBACK_UP_PID" ]]; then
+      wait "$ROLLBACK_UP_PID" || true
+    fi
+    wait || true
+  fi
+  exit "$code"
+}
+trap 'abort_after_compose 143' TERM
+trap 'abort_after_compose 130' INT
+
 cleanup() {
   local status=$?
   trap - EXIT
+  # Repeated termination must not interrupt the fail-closed cleanup.
+  trap '' TERM INT
   set +e
   if [[ "$ROLLBACK_START_REQUESTED" == 1 && "$ROLLBACK_VERIFIED" != 1 ]]; then
     echo "CRITICAL: rollback did not pass smoke and metadata/marker certification; stopping writers" >&2
@@ -175,7 +259,17 @@ cleanup() {
     fi
     echo "CRITICAL: recovery requires operator certification; writers must remain closed" >&2
   fi
-  rm -f -- "$STAGED_ENV" "$STAGED_SHA" "$RECOVERY_MARKER_TMP"
+  local keep_original_marker=0
+  if [[ "$ROLLBACK_VERIFIED" != 1 && -n "$RECOVERY_MARKER_TMP" ]]; then
+    if ! rearm_recovery_marker; then
+      keep_original_marker=1
+      echo "CRITICAL: preserving original incident evidence at $RECOVERY_MARKER_TMP" >&2
+    fi
+  fi
+  rm -f -- "$STAGED_ENV" "$STAGED_SHA"
+  if [[ "$keep_original_marker" == 0 ]]; then
+    rm -f -- "$RECOVERY_MARKER_TMP"
+  fi
   if [[ -n "$PREPARED_DIR" ]]; then
     rm -rf -- "$PREPARED_DIR"
   fi
@@ -227,7 +321,10 @@ else
   # An application-only rollback must not silently rerun migration or seed.
   # Arm failure cleanup before Compose can partially start any writer.
   ROLLBACK_START_REQUESTED=1
-  docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" up --no-deps -d --remove-orphans backend worker frontend nginx caddy
+  docker compose --env-file "$STAGED_ENV" -f "$COMPOSE_FILE" up --no-deps -d --remove-orphans backend worker frontend nginx caddy &
+  ROLLBACK_UP_PID=$!
+  wait "$ROLLBACK_UP_PID"
+  ROLLBACK_UP_PID=""
 fi
 
 python3 ops/smoke_http.py --base-url "$PUBLIC_BASE_URL" --requests 20 --max-p95-ms 750
