@@ -15,7 +15,24 @@ from ops import g5_writer_drain_probe as probe
     ("postgresql+psycopg2://game_app:secret@database/game", "postgres_admin", "game_app"),
 ])
 def test_distinct_postgres_app_role_parses_without_password(db_url, admin, expected):
-    assert probe._application_role({"DB_URL": db_url}, admin) == expected
+    assert probe._application_role({"DB_URL": db_url, "POSTGRES_DB": "game"}, admin) == expected
+
+
+@pytest.mark.parametrize("db_url", [
+    "postgresql+psycopg://game_app:secret@elsewhere:5432/game",
+    "postgresql+psycopg://game_app:secret@database:5433/game",
+    "postgresql+psycopg://game_app:secret@database:noninteger/game",
+    "postgresql+psycopg://game_app:secret@database:5432/otherdb",
+    "postgresql+psycopg://game_app:secret@database:5432/game?host=elsewhere",
+    "postgresql+psycopg://game_app:secret@database:5432/game?dbname=otherdb",
+    "postgresql+psycopg://game_app:secret@database:5432/game#suffix",
+    "postgresql+psycopg://game_app@database:5432/game",
+])
+def test_role_audit_rejects_database_endpoint_redirection(db_url):
+    with pytest.raises(probe.ProbeError, match="endpoint|password"):
+        probe._application_role(
+            {"DB_URL": db_url, "POSTGRES_DB": "game"}, "postgres_admin"
+        )
 
 
 @pytest.mark.parametrize("db_url,admin", [
