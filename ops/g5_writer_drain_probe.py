@@ -138,8 +138,9 @@ def _require_closed_edge(compose: list[str], url: str) -> None:
         raise ProbeError("Cannot verify actual Nginx maintenance response") from exc
     # BusyBox wget returns nonzero for 503; trust the HTTP status line,
     # not the exit status, which could represent a DNS or transport failure.
-    if not re.search(r"(?m)^\\s*HTTP/(?:1\\.[01]|2)\\s+503(?:\\s|$)",
-                     response.stderr):
+    lines = (line.strip().split() for line in response.stderr.splitlines())
+    if not any(len(parts) >= 2 and parts[0] in {"HTTP/1.0", "HTTP/1.1", "HTTP/2"}
+               and parts[1] == "503" for parts in lines):
         raise ProbeError("Running Nginx did not prove maintenance HTTP 503")
 
 
