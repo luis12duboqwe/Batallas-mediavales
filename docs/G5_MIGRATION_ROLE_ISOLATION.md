@@ -27,7 +27,38 @@ para revisar datos sin ejecutar Docker ni SQL. Exige que ambas URL:
 - asignen `DB_URL` a una cuenta de aplicación distinta del administrador;
 - asignen `G5_MIGRATION_DB_URL` al usuario `POSTGRES_USER` y a su secreto;
 - no contengan destino alternativo, parámetros que cambien conexión, fragmentos,
-  interpolación `$` ni caracteres de control.
+  interpolación `# BM-0093/G5 — Identidad separada de migraciones y aplicación
+
+**Estado: overlay opt-in de laboratorio, NO-GO para staging y producción.**
+No se agregó a `ops/deploy_remote.sh` ni a workflows de despliegue.
+Esta etapa no crea roles, no cambia credenciales y no activa un corte real.
+
+## Problema
+
+La configuración `docker-compose.deploy.yml` conecta `backend`, `worker`,
+`migrate` y `seed` con la misma variable `DB_URL`. Un futuro G5 que
+deshabilita `LOGIN` para la cuenta de juego bloquearía también la ejecución
+controlada de migraciones. Peor aún, la configuración de referencia reutiliza
+la cuenta elevada `POSTGRES_USER` para todos los procesos.
+
+## Diseño opt-in
+
+`docker-compose.g5-migration.yml` cambia `DATABASE_URL` **exclusivamente**
+en los servicios de una ejecución `migrate` y `seed` para usar
+`G5_MIGRATION_DB_URL`. `backend` y `worker` retienen la cuenta de juego
+en `DB_URL`. El overlay no se instala automáticamente.
+
+`ops/g5_migration_role_identity.py` proporciona `validate_split(values)`
+para revisar datos sin ejecutar Docker ni SQL. Exige que ambas URL:
+
+- utilicen PostgreSQL y el mismo destino `database:5432/POSTGRES_DB`;
+- tengan usuarios y contraseñas explícitos y distintos;
+- asignen `DB_URL` a una cuenta de aplicación distinta del administrador;
+- asignen `G5_MIGRATION_DB_URL` al usuario `POSTGRES_USER` y a su secreto;
+ ni caracteres de control;
+- no contengan un `@` crudo adicional en el user-info. Las contraseñas con `@`
+  deben codificarse como `%40`, pues `urlsplit` y SQLAlchemy pueden elegir
+  distintos separadores de host ante delimitadores sin escape.
 
 La validación evita imprimir contraseñas o URL completas.
 
