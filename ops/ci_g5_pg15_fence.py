@@ -13,7 +13,7 @@ import sys
 import time
 from uuid import uuid4
 
-from ops.g5_pg15_writer_fence import Pg15FenceTarget, Pg15PersistentFence
+from ops.g5_pg15_writer_fence import FenceError, Pg15FenceTarget, Pg15PersistentFence
 
 
 def run(args: list[str], *, timeout: int = 40, check: bool = True) -> subprocess.CompletedProcess:
@@ -60,15 +60,56 @@ def main() -> int:
         started = True
         for _ in range(80):
             ready = run(["docker", "exec", name, "pg_isready", "-U", "postgres"], check=False)
+            # The official image starts a *temporary* socket-only PostgreSQL
+            # during initdb. It accepts local pg_isready but listen_addresses
+            # is empty. The final server has listen_addresses='*'. With
+            # --network none the loopback interface may be DOWN, so a TCP
+            # readiness check would falsely reject a valid final server.
             if ready.returncode == 0:
-                break
+                final = run([
+                    "docker", "exec", name, "psql", "-X", "-U", "postgres",
+                    "-d", "postgres", "-Atqc", "SHOW listen_addresses;",
+                ], check=False)
+                if final.returncode == 0 and final.stdout.strip() == "*":
+                    break
             time.sleep(0.25)
         else:
-            raise RuntimeError("isolated PG15 server did not become ready")
+            raise RuntimeError("isolated PG15 final postmaster did not become ready")
 
         admin = CIOnlyAdmin(name)
-        admin.execute_committed("CREATE ROLE game_app LOGIN;")
+        # NOINHERIT is intentional: PG15 can still SET ROLE to a directly
+        # or transitively granted elevated group. Membership itself is unsafe.
+        admin.execute_committed("CREATE ROLE game_app LOGIN NOINHERIT;")
         admin.execute_committed("CREATE DATABASE medievol_db OWNER game_app;")
+        admin.execute_committed("CREATE ROLE elevated_group CREATEROLE NOLOGIN;")
+        admin.execute_committed("CREATE ROLE intermediate_group NOLOGIN;")
+        target = Pg15FenceTarget("medievol_db", "game_app", "postgres")
+        gate = Pg15PersistentFence(target, admin)
+
+        def assert_membership_refused():
+            try:
+                gate.engage()
+            except FenceError:
+                pass
+            else:
+                raise RuntimeError("elevated role membership bypassed PG15 fence preflight")
+            if admin.query_fresh(
+                "SELECT datconnlimit FROM pg_database WHERE datname='medievol_db';"
+            ) != "-1":
+                raise RuntimeError("preflight mutated database with elevated app member")
+            if admin.query_fresh(
+                "SELECT rolcanlogin FROM pg_roles WHERE rolname='game_app';"
+            ) != "t":
+                raise RuntimeError("preflight altered login of elevated app member")
+
+        admin.execute_committed("GRANT elevated_group TO game_app;")
+        assert_membership_refused()  # direct elevated membership
+        admin.execute_committed("REVOKE elevated_group FROM game_app;")
+        admin.execute_committed("GRANT elevated_group TO intermediate_group;")
+        admin.execute_committed("GRANT intermediate_group TO game_app;")
+        assert_membership_refused()  # indirect membership even with NOINHERIT
+        admin.execute_committed("REVOKE intermediate_group FROM game_app;")
+
         admin._psql(
             "CREATE TABLE durable_probe (id integer PRIMARY KEY, marker text NOT NULL); "
             "INSERT INTO durable_probe VALUES (1, 'commit-before-fence');",
