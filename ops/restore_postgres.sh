@@ -13,6 +13,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_DIR"
 
+# G5 cutover state is authoritative. No legacy entrypoint understands
+# the verified backup FD or durable writer barrier. Check once on entry
+# and again after obtaining the shared release lock to close the entry race.
+guard_legacy_g5_cutover() {
+  if [[ -L .ops-state || ( -e .ops-state && ! -d .ops-state ) ]]; then
+    echo "Legacy G5 operation refused: unsafe .ops-state directory" >&2
+    exit 2
+  fi
+  local g5_state
+  for g5_state in .ops-state/g5-cutover.json .ops-state/g5-cutover-activated; do
+    if [[ -e "$g5_state" || -L "$g5_state" ]]; then
+      echo "Legacy G5 operation refused: cutover state exists ($g5_state); certified coordinator required" >&2
+      exit 2
+    fi
+  done
+}
+guard_legacy_g5_cutover
+
 if [[ -z "$BACKUP_FILE" || $# -gt 5 ]]; then
   echo "Usage: $0 <env-file> <backup.dump> RESTORE:<database>" >&2
   exit 2
@@ -57,6 +75,8 @@ else
     exit 2
   fi
 fi
+
+guard_legacy_g5_cutover
 
 RECOVERY_REQUIRED="$STATE_DIR/recovery-required"
 validate_recovery_marker() {
