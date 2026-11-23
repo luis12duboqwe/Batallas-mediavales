@@ -90,6 +90,23 @@ validate_recovery_marker() {
 }
 validate_recovery_marker
 
+# A direct legacy restore during an unresolved incident, or with an active
+# managed release, can discard commits made after the archive was captured.
+# No durable G5 write barrier authorizes that destructive operation yet.
+# PREPARE_ONLY is read-only; nested restore is owned by the caller's deploy
+# lock and remains a separately tracked G5 risk until the coordinator lands.
+if [[ "$RESTORE_PREPARE_ONLY" == 0 && "$NESTED_RESTORE" == 0 ]]; then
+  if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
+    echo "Restore refused: unresolved recovery incident requires certified G5 coordinator" >&2
+    exit 2
+  fi
+  if [[ -e .release-sha || -L .release-sha ||
+        -e .release.env || -L .release.env ]]; then
+    echo "Restore refused: managed release requires certified G5 writer barrier" >&2
+    exit 2
+  fi
+fi
+
 RESTORE_TMP_DIR=""
 RESTORE_MARKER_TMP=""
 cleanup_restore() {

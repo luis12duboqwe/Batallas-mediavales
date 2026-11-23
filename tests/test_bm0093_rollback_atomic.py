@@ -234,7 +234,7 @@ def test_success_commits_both_release_pointers_after_smoke(rollback_lab):
     assert not list(rollback_lab["root"].glob(".release-sha.rollback.*"))
 
 
-def test_successful_application_only_rollback_preserves_existing_recovery_marker(rollback_lab):
+def test_application_only_rollback_refuses_existing_recovery_incident(rollback_lab):
     rollback_lab["manifest"].write_text(
         json.dumps({"previous_release_sha": PREVIOUS_SHA, "rollback_backup": None}),
         encoding="utf-8",
@@ -244,9 +244,10 @@ def test_successful_application_only_rollback_preserves_existing_recovery_marker
 
     result = _run(rollback_lab)
 
-    assert result.returncode == 0, result.stderr
-    assert _trace(rollback_lab)[-1] == "smoke"
-    assert (rollback_lab["root"] / ".release-sha").read_text(encoding="utf-8") == PREVIOUS_SHA + "\n"
+    assert result.returncode == 2, result.stderr
+    assert "existing recovery incident requires certified G5" in result.stderr
+    assert _trace(rollback_lab) == []
+    _assert_active_unchanged(rollback_lab)
     assert marker.read_text(encoding="utf-8") == "reason=database_recovery_still_pending\n"
 
 

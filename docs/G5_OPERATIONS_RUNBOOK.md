@@ -62,7 +62,7 @@ El archivo de entorno puede prepararse tomando `ops/staging.env.example`, reempl
 - DNS `A`/`AAAA` de `PUBLIC_HOST` apuntando al servidor antes del primer despliegue protegido;
 - SMTP funcional para verificación/recuperación de cuenta.
 
-Caddy necesita alcanzar públicamente el dominio para emitir el certificado. El deploy espera hasta 120 segundos por `https://PUBLIC_HOST/health`; si TLS no queda operativo, falla y activa rollback cuando existe una release previa.
+Caddy necesita alcanzar públicamente el dominio para emitir el certificado. El deploy espera hasta 120 segundos por `https://PUBLIC_HOST/health`. Si TLS no queda operativo después de iniciar mutaciones, el gestor **no restaura automáticamente**: intenta detener escritores y mantiene `recovery-required` para una recuperación supervisada.
 
 ## 4. Contrato de entorno protegido
 
@@ -116,29 +116,26 @@ Un entorno existente sin `.release.env` y `.release-sha` **no es una instalació
 
 **Prohibido** crear a mano un archivo `.release-sha` o renombrar `.env` para eludir las protecciones. Tampoco ejecutar un `docker compose up` del nuevo bundle directamente sobre el stack antiguo. Si la primera release detecta una base poblada, queda marcada como incidente de recuperación para inspección, sin aplicar migraciones ni imágenes nuevas. No certificar G5 únicamente por superar pruebas con Docker simulado.
 
-## 6. Rollback automático
+## 6. Fallo de despliegue: recuperación **no automática**
 
-`ops/deploy_remote.sh` mantiene un trap de error durante backup, migración, arranque, TLS, smoke y carga.
+El gestor `ops/deploy_remote.sh` mantiene un trap de error durante la fase de mutación del release y hasta publicar sus metadatos finales.
 
-Si una release falla después de haber tomado snapshot:
+**No restaura un snapshot de PostgreSQL antiguo después de empezar mutaciones.** Esa restauración podría borrar transacciones confirmadas después del backup. En su lugar, ante un fallo:
 
-- restaura el `.env` de la release anterior;
-- restaura el snapshot de PostgreSQL previo al deploy;
-- vuelve a levantar las imágenes anteriores;
-- vuelve a levantar Nginx + Caddy;
-- conserva `.release-sha` apuntando a la última release válida.
+- intenta detener `backend`, `worker`, `migrate` y `seed`;
+- conserva la base actual, los snapshots y el estado `recovery-required`;
+- registra el error original y **no** arranca automáticamente versiones anteriores ni reabre admisión;
+- impide nuevos despliegues legacy hasta la reconciliación supervisada.
 
-Los volúmenes TLS de Caddy no se eliminan durante rollback. Si es el primer despliegue y no existe release anterior, no se inventa rollback: los servicios quedan disponibles para diagnóstico y el deploy termina con error.
+Si la detención de escritores falla, tampoco se considera recuperado. Es posible que exista indisponibilidad o incompatibilidad temporal de esquema. **No usar este procedimiento como evidencia de RPO=0**, ni ejecutar el deploy sobre datos reales sin el coordinador G5 y su aprobación. Los volúmenes TLS de Caddy no son borrados por este manejo de incidentes.
 
-## 7. Rollback manual
+## 7. Rollback manual — **NO-GO sin protocolo G5**
 
-Identificar el SHA actual desde `.release-sha` y ejecutar:
+**No ejecutar** `ops/rollback_remote.sh` sobre una release con datos reales mientras siga abierto el P1 #174. Un rollback que restaure el backup anterior puede descartar commits posteriores al snapshot, aunque el archivo tenga un checksum válido.
 
-```bash
-bash ops/rollback_remote.sh <SHA_ACTUAL> ROLLBACK:<SHA_ACTUAL>
-```
+El script legacy exige identidad y metadatos de release, pero **rechaza ahora un `recovery-required` preexistente**, también si el rollback solo cambiaría imágenes. Ese incidente debe conservarse para diagnóstico supervisado; no se debe borrar el marcador para eludir el rechazo. Tampoco editar manualmente `.release-sha` o `.release.env`.
 
-El script exige manifest de despliegue, release anterior válida, entorno archivado, snapshot cuando corresponde, preflight de destino y smoke HTTPS posterior. Nunca editar manualmente `.release-sha` para simular un rollback.
+Los ensayos de recuperación deben usar una copia/instancia PostgreSQL aislada y datos sintéticos hasta que un coordinador certificado conserve la barrera de escritores durante snapshot, migración, restauración y reapertura.
 
 ## 8. Backups
 
@@ -158,21 +155,17 @@ Cada backup:
 - aplica permisos restrictivos;
 - elimina backups más antiguos que `BACKUP_RETENTION_DAYS`.
 
-Para G5, staging debe demostrar al menos un ciclo backup→mutación→restore. CI ya reproduce ese ciclo sobre PostgreSQL real mediante `G5 operations recovery`; falta repetirlo en staging real.
+Para G5, staging debe demostrar backup y restauración controlada **bajo una barrera transaccional certificada**. El job `G5 operations recovery` comprueba el backup de PostgreSQL y, tras una inyección de fallo que deja un incidente, verifica el contenido del dump restaurándolo en **otra base desechable**, sin sobrescribir la fuente ni borrar el marcador. Eso **no** certifica RPO=0, restauración operativa o staging real.
 
 Se recomienda copiar backups fuera del mismo disco/host. La beta no debe depender de un único volumen como única copia recuperable.
 
-## 9. Restauración
+## 9. Restauración — prohibida directamente sobre releases administradas
 
-Restaurar es destructivo y requiere confirmación explícita:
+Una restauración con `pg_restore --clean --create` reemplaza contenido y puede perder commits confirmados tras el snapshot. **No ejecutar una restauración directa contra un release administrado o un incidente sin resolver.** El script `ops/restore_postgres.sh` rechaza ahora ese camino cuando existen `.release-sha`, `.release.env` o `.ops-state/recovery-required`.
 
-```bash
-bash ops/restore_postgres.sh .release.env /ruta/backup.dump RESTORE:<POSTGRES_DB>
-```
+La preparación `RESTORE_PREPARE_ONLY=1` comprueba el archivo sin restaurarlo. La validación del contenido debe hacerse en una base PostgreSQL 15 **distinta y desechable**, como en el ensayo de CI. Una restauración anidada desde rollback legacy y las restauraciones de instalaciones no administradas todavía necesitan protección adicional; no se autoriza su uso sobre datos reales.
 
-El script valida entorno y checksum, detiene escritores, termina conexiones, ejecuta `pg_restore --clean --if-exists --create --exit-on-error` y vuelve a levantar la release seleccionada con Nginx + Caddy. El operador debe ejecutar smoke antes de cerrar mantenimiento.
-
-`RESTORE_START_SERVICES=0` existe únicamente para el drill automatizado de CI.
+No eliminar los marcadores de incidente ni reutilizar el backup directamente para recuperar producción. Antes de cualquier restore real es obligatorio probar un protocolo que cierre admisión, drene y bloquee todas las escrituras, conserve el manifiesto y verifique el estado de la base y de la release.
 
 ## 10. Smoke, carga y SLO iniciales
 
@@ -243,7 +236,7 @@ Ante P0/P1:
 1. congelar nuevos despliegues;
 2. registrar SHA activo y hora;
 3. revisar salud de contenedores y logs;
-4. si coincide con un deploy, rollback inmediato;
+4. si coincide con un deploy, **no restaurar un backup antiguo**: mantener el incidente y comenzar diagnóstico supervisado;
 5. si hay sospecha de datos, preservar evidencia antes de limpiar;
 6. rotar secretos si aplica;
 7. validar recuperación con smoke;
