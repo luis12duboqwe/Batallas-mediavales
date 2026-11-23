@@ -13,7 +13,9 @@ para que una futura implementación certificada ejecute esta secuencia bajo un
 
 1. Prevalida identidad de release, operación, proyecto, base de datos y rutas.
 2. `arm_cutover` publica el bloqueo legacy y lo sincroniza a disco **antes**
-   de dar control al adaptador. El bloqueo no se borra, ni siquiera ante fallo.
+   de dar control al adaptador. También rechaza evidencias huérfanas
+   `.ops-state/recovery-required.*` antes de activar G5. El bloqueo no se borra,
+   ni siquiera ante un fallo.
 3. `close_admission()`: debe cerrar **nuevas** peticiones HTTP y Socket.IO.
 4. `fence_database_writes()`: debe mantener una barrera persistente contra
    conexiones nuevas y existentes de la cuenta de escritura y otros escritores.
