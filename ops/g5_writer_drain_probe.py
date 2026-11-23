@@ -144,6 +144,31 @@ def _require_closed_edge(compose: list[str], url: str) -> None:
         raise ProbeError("Running Nginx did not prove maintenance HTTP 503")
 
 
+CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
+
+
+def verify_runtime_writer_restart_policies(containers: list[dict]) -> None:
+    """Inspect *actual* Docker restart policy, not only Compose desired config.
+
+    A newly applied overlay can say restart=no while old worker containers still
+    carry unless-stopped. Those could relaunch after a crash and write again.
+    """
+    for row in containers:
+        if row.get("Service") not in WRITERS:
+            continue
+        identity = row.get("ID")
+        if not isinstance(identity, str) or not CONTAINER_ID_RE.fullmatch(identity):
+            raise ProbeError("Writer container identity is missing or unsafe")
+        result = _run([
+            "docker", "inspect", "--type", "container",
+            "--format", "{{.HostConfig.RestartPolicy.Name}}", identity
+        ])
+        if result.strip() != "no":
+            raise ProbeError(
+                f"{row['Service']}: runtime Docker restart policy is not no"
+            )
+
+
 def collect(env_file: Path, compose_files: list[Path], edge_dir: Path) -> list[str]:
     if not env_file.is_file() or any(not p.is_file() for p in compose_files):
         raise ProbeError("Environment or Compose file is missing")
@@ -173,6 +198,9 @@ def collect(env_file: Path, compose_files: list[Path], edge_dir: Path) -> list[s
     blockers = inspect(config, containers, counts, edge_dir)
     if blockers:
         return blockers
+    # Desired Compose restart=no is insufficient if the existing container
+    # still has a persistent restart policy from the previous release.
+    verify_runtime_writer_restart_policies(containers)
     # Verify both the HTTP API and a new Socket.IO polling handshake.
     # This still cannot drain pre-existing connections or external writers.
     _require_closed_edge(cmd, "http://127.0.0.1/api/health")
