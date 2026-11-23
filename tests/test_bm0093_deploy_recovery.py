@@ -579,28 +579,28 @@ def test_post_mutation_metadata_publish_failure_keeps_incident_and_stops_writers
     bin_dir = Path(deploy_lab["env"]["PATH"].split(os.pathsep)[0])
     python = bin_dir / "python3"
     python.write_text(
-        "#!/usr/bin/env bash\\n"
-        'if [[ "$1:$2" == "-:https://staging.example.invalid" ]]; then\\n'
-        "  cat >/dev/null\\n"
-        "  exit 0\\n"
-        "fi\\n"
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1:$2" == "-:https://staging.example.invalid" ]]; then\n'
+        "  cat >/dev/null\n"
+        "  exit 0\n"
+        "fi\n"
         'if [[ "$1" == "-" && "$2" == .ops-state/deployments/*'
-        ' && "$BM_METADATA_FAILURE" == "manifest" ]]; then\\n'
-        "  cat >/dev/null\\n"
-        "  exit 61\\n"
-        "fi\\n"
-        f'exec {shlex.quote(sys.executable)} "$@"\\n',
+        ' && "$BM_METADATA_FAILURE" == "manifest" ]]; then\n'
+        "  cat >/dev/null\n"
+        "  exit 61\n"
+        "fi\n"
+        f'exec {shlex.quote(sys.executable)} "$@"\n',
         encoding="utf-8",
     )
     python.chmod(0o755)
     cp = bin_dir / "cp"
     cp.write_text(
-        "#!/usr/bin/env bash\\n"
+        "#!/usr/bin/env bash\n"
         'if [[ "$BM_METADATA_FAILURE" == "release_copy" '
-        '&& "${*: -1}" == .ops-state/releases/* ]]; then\\n'
-        "  exit 62\\n"
-        "fi\\n"
-        'exec /usr/bin/cp "$@"\\n',
+        '&& "${*: -1}" == .ops-state/releases/* ]]; then\n'
+        "  exit 62\n"
+        "fi\n"
+        'exec /usr/bin/cp "$@"\n',
         encoding="utf-8",
     )
     cp.chmod(0o755)
@@ -616,7 +616,7 @@ def test_post_mutation_metadata_publish_failure_keeps_incident_and_stops_writers
     assert any(" up -d --remove-orphans" in line for line in trace)
     assert any("stop -t 120 backend worker migrate seed" in line for line in trace)
     assert not any(line.startswith("restore:") or "pg_restore --clean" in line for line in trace)
-    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\\n"
+    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
     retry = _run(deploy_lab)
     assert retry.returncode == 2
     assert "unresolved recovery incident" in retry.stderr
