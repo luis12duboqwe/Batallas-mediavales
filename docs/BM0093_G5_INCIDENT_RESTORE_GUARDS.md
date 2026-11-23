@@ -64,7 +64,12 @@ puede convertir un checksum correcto en permiso para descartar escrituras.
   o crear un incidente nuevo con creación exclusiva (`O_EXCL`), fsync del
   archivo y del directorio; nunca sobrescribe un incidente ajeno. Si no puede
   certificar la persistencia, conserva el archivo de evidencia original
-  cuando existe y emite un error crítico. No se deshacen escrituras ya confirmadas.
+  cuando existe y emite un error crítico. Los tres puntos de entrada
+  legacy (`deploy_remote.sh`, `rollback_remote.sh` y `restore_postgres.sh`)
+  rechazan también una evidencia huérfana `.ops-state/recovery-required.*`
+  cuando falta el marcador canónico, sin seguir enlaces simbólicos ni crear
+  otro deployment sobre un incidente no certificado. No se deshacen
+  escrituras ya confirmadas.
 
 **Pendiente P1 #174:** la restauración anidada bajo lock en
 `restore_postgres.sh` y el restore directo en instalaciones no administradas
