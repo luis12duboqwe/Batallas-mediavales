@@ -402,7 +402,9 @@ python3 ops/load_smoke.py \
   --max-p95-ms "$MAX_P95_MS" \
   --max-error-rate "$MAX_ERROR_RATE"
 
-trap - ERR
+# Preserve fail-closed incident handling during release metadata publication.
+# A failed copy, manifest write, pointer update or marker removal after startup
+# is still a post-mutation incident and must stop writers.
 cp "$CURRENT_ENV" "$RELEASES_DIR/${RELEASE_SHA}.env"
 chmod 600 "$RELEASES_DIR/${RELEASE_SHA}.env"
 python3 - "$DEPLOYMENTS_DIR/${RELEASE_SHA}.json" "$RELEASE_SHA" "$previous_release_sha" "$rollback_backup" <<'PY'
@@ -422,4 +424,5 @@ rm -f "$PREVIOUS_ENV"
 echo "$RELEASE_SHA" > .release-sha
 chmod 600 .release-sha
 clear_recovery_marker
+trap - ERR
 echo "Deployment succeeded: ${RELEASE_SHA}"
