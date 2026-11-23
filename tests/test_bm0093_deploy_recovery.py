@@ -163,6 +163,10 @@ exec /usr/bin/mktemp "$@"
 if [[ "$*" == *'.release.env.recovery.'* && -n "${BM_RECOVERY_MV_EXIT:-}" ]]; then
   exit "$BM_RECOVERY_MV_EXIT"
 fi
+if [[ -n "${BM_CURRENT_MV_EXIT:-}" && "$*" == *".release.env.next .release.env"* ]]; then
+  if [[ "${BM_CURRENT_MV_AFTER_RENAME:-0}" == 1 ]]; then /usr/bin/mv "$@"; fi
+  exit "$BM_CURRENT_MV_EXIT"
+fi
 exec /usr/bin/mv "$@"
 """,
         encoding="utf-8",
@@ -276,6 +280,28 @@ def test_failed_mutation_preserves_incident_and_blocks_redeploy(deploy_lab):
     assert second.returncode == 2
     assert "unresolved recovery incident" in second.stderr
     assert _trace(deploy_lab) == before
+
+@pytest.mark.parametrize("after_rename", [False, True])
+def test_uncertain_release_metadata_publish_keeps_incident_and_never_restores(
+    deploy_lab, after_rename
+):
+    result = _run(deploy_lab, {
+        "BM_CURRENT_MV_EXIT": "57",
+        "BM_CURRENT_MV_AFTER_RENAME": "1" if after_rename else "0",
+    })
+    assert result.returncode == 57, result.stderr
+    assert _marker(deploy_lab).is_file()
+    trace = _trace(deploy_lab)
+    assert not any(" up -d --remove-orphans" in line for line in trace)
+    assert any("stop -t 120 backend worker migrate seed" in line for line in trace)
+    assert not any("pg_restore --clean" in line or line.startswith("restore:") for line in trace)
+    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
+    current = (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8")
+    assert ("new@example.invalid" if after_rename else "active@example.invalid") in current
+    retried = _run(deploy_lab)
+    assert retried.returncode == 2
+    assert "unresolved recovery incident" in retried.stderr
+
 
 def test_missing_previous_release_sha_is_refused_before_docker(deploy_lab):
     (deploy_lab["root"] / ".release-sha").unlink()
