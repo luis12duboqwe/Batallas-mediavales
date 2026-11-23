@@ -43,12 +43,14 @@ class Pg15FenceTarget:
 class Pg15SqlSession(Protocol):
     """An audited, privileged connection to the *postgres* maintenance DB.
 
-    query() must issue exactly one SQL statement, raise on any SQL/transport
-    error, and return one unadorned psql scalar. Credentials must never be
-    printed, interpolated into SQL, or exposed by exceptions.
+    query_fresh() must execute one SELECT in a NEW committed PostgreSQL
+    session and return one scalar. execute_committed() must commit exactly
+    one DDL statement durably before returning. Neither may reuse an open
+    transaction or a pooled transaction snapshot. Errors must raise and
+    credentials must never be surfaced in diagnostics.
     """
-    def query(self, sql: str) -> str: ...
-    def execute(self, sql: str) -> None: ...
+    def query_fresh(self, sql: str) -> str: ...
+    def execute_committed(self, sql: str) -> None: ...
 
 
 class Pg15PersistentFence:
@@ -68,7 +70,7 @@ class Pg15PersistentFence:
 
     def _scalar(self, sql: str) -> str:
         try:
-            result = self.session.query(sql)
+            result = self.session.query_fresh(sql)
         except Exception as exc:
             # Do not print a connection string, SQL diagnostics or credentials.
             raise FenceError("PostgreSQL writer-fence statement failed") from None
@@ -78,7 +80,7 @@ class Pg15PersistentFence:
 
     def _execute(self, sql: str) -> None:
         try:
-            result = self.session.execute(sql)
+            result = self.session.execute_committed(sql)
         except Exception as exc:
             raise FenceError("PostgreSQL write-fence DDL failed") from None
         if result is not None:
@@ -147,6 +149,12 @@ class Pg15PersistentFence:
         # Identifiers are strict ASCII-simple names, so quoted identifiers
         # cannot contain double quotes, whitespace or SQL metacharacters.
         self._execute(f'ALTER DATABASE "{database}" CONNECTION LIMIT 0;')
+        self._expect(
+            "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_database "
+            f"WHERE datname='{database}' AND datconnlimit=0) "
+            "THEN 1 ELSE 0 END;",
+            "1", "database connection fence was not durably committed",
+        )
         self._execute(f'ALTER ROLE "{app}" NOLOGIN;')
         self._expect(
             "SELECT COALESCE(bool_and(pg_terminate_backend(pid)), true) "
