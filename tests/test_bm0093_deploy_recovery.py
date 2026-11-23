@@ -133,6 +133,7 @@ fi
         "  [[ \"$(cat)\" == 'fixture database dump' ]] || exit 91\n"
         "  exit 0\n"
         "fi\n"
+        "if [[ \"$*\" == *'stop -t 120 backend worker migrate seed'* ]]; then exit \"${BM_STOP_EXIT:-0}\"; fi\n"
         "if [[ \"$*\" == *'up -d --remove-orphans backend worker frontend nginx caddy'* ]]; then exit 0; fi\n"
         "if [[ \"$*\" == *'up -d --remove-orphans'* ]]; then\n"
         "  if [[ \"${BM_REMOVE_SOURCE_ON_START:-0}\" == 1 ]]; then\n"
@@ -256,10 +257,26 @@ def test_database_start_failure_does_not_start_migration_dependencies(deploy_lab
     assert not list(deploy_lab["root"].glob(".release.env.recovery.*"))
 
 
-@pytest.mark.parametrize("extra_env", [
-    {"BM_RESTORE_EXIT": "42"},
-    {"BM_SMOKE_EXIT": "43"},
-])
+
+def test_failed_mutation_preserves_incident_and_blocks_redeploy(deploy_lab):
+    first = _run(deploy_lab, {"BM_RELEASE_START_EXIT": "41"})
+    assert first.returncode == 41, first.stderr
+    assert "database restore is NOT SAFE" in first.stderr
+    assert "recovery marker retained" in first.stderr
+    assert _marker(deploy_lab).is_file()
+    assert "failed_release=" + NEW_SHA in _marker(deploy_lab).read_text(encoding="utf-8")
+    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
+    assert "new@example.invalid" in (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8")
+    trace = _trace(deploy_lab)
+    assert any("stop -t 120 backend worker migrate seed" in line for line in trace)
+    assert not any(line.startswith("restore:") or "pg_restore --clean" in line for line in trace)
+    _assert_temporary_files_cleaned(deploy_lab)
+    before = list(trace)
+    second = _run(deploy_lab)
+    assert second.returncode == 2
+    assert "unresolved recovery incident" in second.stderr
+    assert _trace(deploy_lab) == before
+
 def test_failed_automatic_rollback_flags_incident_and_blocks_redeploy(deploy_lab, extra_env):
     first = _run(deploy_lab, {**extra_env, "BM_RELEASE_START_EXIT": "41"})
     assert first.returncode == 41, first.stderr
@@ -296,22 +313,21 @@ def test_existing_recovery_incident_refuses_deployment_early(deploy_lab):
     assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
 
 
-def test_recovery_smoke_targets_previous_origin_not_new_origin(deploy_lab):
-    # Changing the public URL must not make rollback verify the new release.
-    old_base = "https://staging.example.invalid"
-    new_base = "https://new.example.invalid"
+
+def test_failed_mutation_does_not_reopen_previous_or_new_origin(deploy_lab):
     base = deploy_lab["base"]
     base.write_text(
         base.read_text(encoding="utf-8").replace(
             "staging.example.invalid", "new.example.invalid"
-        ),
-        encoding="utf-8",
+        ), encoding="utf-8",
     )
     result = _run(deploy_lab, {"BM_RELEASE_START_EXIT": "41"})
     assert result.returncode == 41, result.stderr
-    assert _trace(deploy_lab)[-1] == "smoke:" + old_base
-    assert not _marker(deploy_lab).exists()
-
+    trace = _trace(deploy_lab)
+    assert not any(line.startswith("smoke:") for line in trace)
+    assert not any(line.startswith("restore:") for line in trace)
+    assert any("stop -t 120 backend worker migrate seed" in line for line in trace)
+    assert _marker(deploy_lab).is_file()
 
 def test_database_identity_change_requires_separate_migration(deploy_lab):
     base = deploy_lab["base"]
@@ -328,10 +344,19 @@ def test_database_identity_change_requires_separate_migration(deploy_lab):
     assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
 
 
-@pytest.mark.parametrize("failed_recovery_step", [
-    {"BM_MKTEMP_EXIT": "28"},
-    {"BM_RECOVERY_MV_EXIT": "29"},
-])
+
+def test_writer_stop_failure_preserves_original_error_and_incident(deploy_lab):
+    result = _run(deploy_lab, {"BM_STOP_EXIT": "42", "BM_RELEASE_START_EXIT": "41"})
+    assert result.returncode == 41, result.stderr
+    assert "writer stop failed" in result.stderr
+    assert _marker(deploy_lab).is_file()
+    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
+    assert "new@example.invalid" in (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8")
+    assert not any(line.startswith("restore:") for line in _trace(deploy_lab))
+    again = _run(deploy_lab)
+    assert again.returncode == 2
+    assert "unresolved recovery incident" in again.stderr
+
 def test_recovery_internal_failure_preserves_incident_marker_and_original_error(
     deploy_lab, failed_recovery_step
 ):
@@ -482,26 +507,25 @@ def test_confirmed_empty_database_can_take_first_install_path(deploy_lab):
     assert _marker(deploy_lab).exists()
 
 
-def test_deploy_restores_exact_new_backup_not_newest_directory_file(deploy_lab):
+
+def test_failed_deploy_keeps_exact_backup_without_auto_restore(deploy_lab):
     backup_dir = deploy_lab["root"] / "backups"
     decoy = backup_dir / "batalla_ci-20991231T235959Z-Z9Z9Z9Z9.dump"
     decoy.write_bytes(b"unrelated backup with a newer filename")
     (backup_dir / (decoy.name + ".sha256")).write_text("decoy", encoding="utf-8")
-    result = _run(deploy_lab, {
-        "BM_RELEASE_START_EXIT": "53",
-    })
+    result = _run(deploy_lab, {"BM_RELEASE_START_EXIT": "53"})
     assert result.returncode == 53, result.stderr
     trace = _trace(deploy_lab)
     prepared, = [line for line in trace if line.startswith("prepare:")]
-    restored, = [line for line in trace if line.startswith("restore:")]
     candidate_up, = [line for line in trace if " up -d --remove-orphans" in line]
+    stopped, = [line for line in trace if "stop -t 120 backend worker migrate seed" in line]
     assert prepared.endswith("/batalla_ci-20261120T123456Z-A1b2C3d4.dump")
-    assert restored.endswith("/archive.dump")
-    assert trace.index(prepared) < trace.index(candidate_up) < trace.index(restored)
+    assert trace.index(prepared) < trace.index(candidate_up) < trace.index(stopped)
+    assert not any(line.startswith("restore:") or "pg_restore --clean" in line for line in trace)
+    assert (backup_dir / BACKUP_NAME).read_bytes() == b"fixture database dump"
     assert decoy.exists()
     assert not list((deploy_lab["root"] / ".ops-state").glob("backup-receipt.*"))
-    assert not _marker(deploy_lab).exists()
-
+    assert _marker(deploy_lab).is_file()
 
 @pytest.mark.parametrize(("fault", "diagnostic"), [
     ("receipt", "invalid prepared archive receipt"),
@@ -535,23 +559,23 @@ def test_prepare_failure_preserves_active_release_without_starting_services(
     _assert_temporary_files_cleaned(deploy_lab)
 
 
-def test_real_auto_restore_reuses_prepared_copy_after_source_disappears(deploy_lab):
+
+def test_missing_source_archive_never_triggers_unsafe_restore(deploy_lab):
     _use_real_restore(deploy_lab)
     result = _run(deploy_lab, {"BM_RELEASE_START_EXIT": "53", "BM_REMOVE_SOURCE_ON_START": "1"})
     assert result.returncode == 53, result.stderr
     trace = _trace(deploy_lab)
     copy, = [i for i, line in enumerate(trace) if line.startswith("copy:")]
-    prepare_list, restore_list = [i for i, line in enumerate(trace) if "pg_restore --list" in line]
-    candidate_up, previous_up = [i for i, line in enumerate(trace) if " up -d --remove-orphans" in line]
-    restore, = [i for i, line in enumerate(trace) if "pg_restore --clean" in line]
-    assert copy < prepare_list < candidate_up < restore_list < restore < previous_up
-    assert "--env-file .release.env.previous " in trace[prepare_list]
-    assert "backend worker frontend nginx caddy" in trace[previous_up]
-    assert (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8") == deploy_lab["active"]
+    prepare_list, = [i for i, line in enumerate(trace) if "pg_restore --list" in line]
+    candidate_up, = [i for i, line in enumerate(trace) if " up -d --remove-orphans" in line]
+    stop, = [i for i, line in enumerate(trace) if "stop -t 120 backend worker migrate seed" in line]
+    assert copy < prepare_list < candidate_up < stop
+    assert not any("pg_restore --clean" in line for line in trace)
+    assert not any(line.startswith("restore:") for line in trace)
+    assert "new@example.invalid" in (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8")
     assert not (deploy_lab["root"] / "backups" / BACKUP_NAME).exists()
-    assert not _marker(deploy_lab).exists()
+    assert _marker(deploy_lab).is_file()
     _assert_temporary_files_cleaned(deploy_lab)
-
 
 def test_successful_deploy_cleans_private_copy_and_keeps_original_backup_in_manifest(deploy_lab):
     python = deploy_lab["root"] / "bin" / "python3"
@@ -649,8 +673,9 @@ def test_deployment_fails_before_mutation_if_operation_lock_is_held(deploy_lab):
     assert retried.returncode == 55
     assert "already running" not in retried.stderr
 
-def test_https_edge_timeout_activates_rollback_instead_of_simple_exit(deploy_lab):
-    """Adversarial regression: explicit exit 1 must not bypass ERR rollback trap."""
+
+def test_https_edge_timeout_stops_writers_without_reverting_database(deploy_lab):
+    """An HTTPS timeout is a post-mutation incident; dump restore is forbidden."""
     bin_dir = Path(deploy_lab["env"]["PATH"].split(os.pathsep)[0])
     python_shim = bin_dir / "python3"
     python_shim.write_text(
@@ -666,30 +691,27 @@ def test_https_edge_timeout_activates_rollback_instead_of_simple_exit(deploy_lab
     sleep_shim = bin_dir / "sleep"
     sleep_shim.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     sleep_shim.chmod(0o755)
-    result = _run(deploy_lab, {
-        "BM_RELEASE_START_EXIT": "0",
-    })
+    result = _run(deploy_lab, {"BM_RELEASE_START_EXIT": "0"})
     trace = _trace(deploy_lab)
     assert result.returncode != 0
-    assert any(s.startswith("restore:") for s in trace), (
-        "HTTPS timeout exited without attempting automatic rollback; "
-        "stderr=" + result.stderr + ", trace=" + repr(trace)
-    )
+    assert any("stop -t 120 backend worker migrate seed" in line for line in trace)
+    assert not any(line.startswith("restore:") for line in trace)
+    assert _marker(deploy_lab).is_file()
 
-def test_auto_rollback_forces_restore_mode_after_inherited_environment(deploy_lab):
-    """The parent must override inherited preflight and no-start flags."""
+
+def test_inherited_restore_flags_cannot_enable_auto_restore(deploy_lab):
     result = _run(deploy_lab, {
         "BM_RELEASE_START_EXIT": "41",
         "RESTORE_PREPARE_ONLY": "invalid",
         "RESTORE_START_SERVICES": "invalid",
     })
     assert result.returncode == 41, result.stderr
-    assert not _marker(deploy_lab).exists(), result.stderr
-    assert any(s.startswith("restore:") for s in _trace(deploy_lab))
+    assert _marker(deploy_lab).is_file()
+    assert any("stop -t 120 backend worker migrate seed" in s for s in _trace(deploy_lab))
+    assert not any(s.startswith("restore:") for s in _trace(deploy_lab))
 
 
-def test_edge_timeout_with_failed_restore_retains_recovery_marker(deploy_lab):
-    """The recovery marker must remain when HTTPS timeout rollback itself fails."""
+def test_https_timeout_with_failed_writer_stop_stays_fail_closed(deploy_lab):
     bin_dir = Path(deploy_lab["env"]["PATH"].split(os.pathsep)[0])
     python_shim = bin_dir / "python3"
     python_shim.write_text(
@@ -704,14 +726,12 @@ def test_edge_timeout_with_failed_restore_retains_recovery_marker(deploy_lab):
     sleep_shim = bin_dir / "sleep"
     sleep_shim.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     sleep_shim.chmod(0o755)
-    result = _run(deploy_lab, {
-        "BM_RELEASE_START_EXIT": "0",
-        "BM_RESTORE_EXIT": "42",
-    })
+    result = _run(deploy_lab, {"BM_RELEASE_START_EXIT": "0", "BM_STOP_EXIT": "42"})
     assert result.returncode != 0
-    assert _marker(deploy_lab).is_file(), result.stderr
-    assert any(s.startswith("restore:") for s in _trace(deploy_lab))
-
+    assert "writer stop failed" in result.stderr
+    assert _marker(deploy_lab).is_file()
+    assert any("stop -t 120 backend worker migrate seed" in s for s in _trace(deploy_lab))
+    assert not any(s.startswith("restore:") or "pg_restore --clean" in s for s in _trace(deploy_lab))
 
 @pytest.mark.parametrize("dangling", [True, False])
 def test_marker_symlink_always_blocks_deploy(deploy_lab, dangling):
