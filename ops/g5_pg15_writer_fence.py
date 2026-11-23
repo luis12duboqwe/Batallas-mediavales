@@ -157,7 +157,7 @@ class Pg15PersistentFence:
         )
         self._execute(f'ALTER ROLE "{app}" NOLOGIN;')
         self._expect(
-            "SELECT COALESCE(bool_and(pg_terminate_backend(pid)), true) "
+            "SELECT COALESCE(bool_and(pg_terminate_backend(pid, 5000)), true) "
             "FROM pg_stat_activity "
             f"WHERE datname='{database}' AND pid<>pg_backend_pid();",
             "t", "PostgreSQL refused to terminate an active connection",
