@@ -241,9 +241,8 @@ def test_invalid_database_name_never_reaches_psql(sample, tmp_path, monkeypatch,
         probe.collect(env, [compose], edge)
 
 
-@pytest.mark.parametrize("service", ["backend", "worker", "migrate", "seed"])
 def test_runtime_restart_policy_is_checked_for_each_writer_even_if_exited(
-    sample, monkeypatch, service
+    sample, monkeypatch
 ):
     _, containers, _ = sample
     expected = {}
@@ -258,7 +257,7 @@ def test_runtime_restart_policy_is_checked_for_each_writer_even_if_exited(
         assert argv[:4] == ["docker", "inspect", "--type", "container"]
         assert argv[-2] == "{{.HostConfig.RestartPolicy.Name}}"
         assert argv[-1] in expected
-        return "no\\n"
+        return "no"
 
     monkeypatch.setattr(probe, "_run", fake_run)
     probe.verify_runtime_writer_restart_policies(containers)
