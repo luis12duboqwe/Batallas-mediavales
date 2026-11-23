@@ -46,6 +46,8 @@ def inspect(
 ) -> list[str]:
     """Return blockers. Empty only means this instant's evidence is consistent."""
     errors: list[str] = []
+    if not isinstance(config, dict):
+        return ["Malformed Compose configuration"]
     services = config.get("services")
     if not isinstance(services, dict) or set(services) != SERVICES:
         return ["Unexpected or missing Compose services; writer topology is unknown"]
@@ -55,21 +57,27 @@ def inspect(
         if not isinstance(spec, dict) or spec.get("restart") != "no":
             errors.append(f"{service}: restart policy must be no during drain")
 
-    mounts = services["nginx"].get("volumes", [])
+    nginx = services["nginx"]
+    mounts = nginx.get("volumes", []) if isinstance(nginx, dict) else None
     if not isinstance(mounts, list):
         errors.append("Nginx G5 mount inventory is missing")
     else:
         expected = {
-            "/etc/nginx/nginx.conf": "nginx.g5.conf",
-            "/etc/nginx/edge-maintenance": "edge-maintenance",
+            "/etc/nginx/nginx.conf": edge_dir.parent.parent / "nginx.g5.conf",
+            "/etc/nginx/edge-maintenance": edge_dir,
         }
-        for target, basename in expected.items():
+        for target, expected_source in expected.items():
             matches = [m for m in mounts if isinstance(m, dict) and m.get("target") == target]
-            if (len(matches) != 1 or matches[0].get("read_only") is not True
-                or Path(str(matches[0].get("source", ""))).name != basename):
+            if len(matches) != 1:
                 errors.append(f"Missing read-only G5 Nginx mount: {target}")
+                continue
+            mount = matches[0]
+            source = Path(str(mount.get("source", "")))
+            if (mount.get("read_only") is not True or source.is_symlink()
+                or source.resolve() != expected_source.resolve()):
+                errors.append(f"Unsafe or misplaced G5 Nginx mount: {target}")
 
-    if edge_dir.is_symlink() or not edge_dir.is_dir():
+    if edge_dir.is_symlink() or edge_dir.parent.is_symlink() or not edge_dir.is_dir():
         errors.append("Edge maintenance directory absent or unsafe")
     elif (edge_dir / "open").exists() or (edge_dir / "open").is_symlink():
         errors.append("Edge maintenance admission is open or unsafe")
