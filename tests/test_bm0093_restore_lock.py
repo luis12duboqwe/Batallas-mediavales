@@ -343,33 +343,22 @@ def test_prepared_snapshot_can_be_restored_by_the_real_restore_script(restore_la
     assert not snapshot.parent.exists()
 
 
-def test_manual_rollback_uses_prepared_snapshot_with_real_restore_script(restore_lab):
+@pytest.mark.parametrize("archive_present", [True, False])
+def test_manual_snapshot_rollback_is_refused_before_preparing_restore(restore_lab, archive_present):
     current_sha, previous_sha = _configure_rollback_lab(restore_lab)
-    list_input = restore_lab["root"] / "rollback-list.input"
-    clean_input = restore_lab["root"] / "rollback-clean.input"
-    env = dict(restore_lab["env"])
-    env.update({
-        "BM_LIST_INPUT": str(list_input),
-        "BM_CLEAN_INPUT": str(clean_input),
-    })
-
+    if not archive_present:
+        restore_lab["backup"].unlink()
     result = subprocess.run(
         ["bash", "ops/rollback_remote.sh", current_sha, f"ROLLBACK:{current_sha}"],
-        cwd=restore_lab["root"],
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=20,
-        check=False,
+        cwd=restore_lab["root"], env=restore_lab["env"], text=True,
+        capture_output=True, timeout=20, check=False,
     )
-
-    assert result.returncode == 0, result.stderr
-    assert list_input.read_bytes() == restore_lab["backup"].read_bytes()
-    assert clean_input.read_bytes() == restore_lab["backup"].read_bytes()
-    assert (restore_lab["root"] / ".release-sha").read_text(encoding="utf-8") == previous_sha + "\n"
+    assert result.returncode == 2, result.stderr
+    assert "snapshot-based legacy rollback is disabled" in result.stderr
+    assert (restore_lab["root"] / ".release-sha").read_text() == current_sha + "\n"
     assert not restore_lab["marker"].exists()
+    assert not restore_lab["trace"].exists()
     assert not list((restore_lab["root"] / ".ops-state").glob("restore.*"))
-
 
 def test_database_rollback_refuses_preexisting_recovery_incident(restore_lab):
     current_sha, previous_sha = _configure_rollback_lab(restore_lab)
@@ -428,7 +417,7 @@ def test_rollback_rejects_bad_snapshot_before_creating_recovery_marker(
     )
 
     assert result.returncode != 0
-    assert expected_error in result.stderr
+    assert "snapshot-based legacy rollback is disabled" in result.stderr
     assert not restore_lab["marker"].exists()
     trace = restore_lab["trace"].read_text(encoding="utf-8").splitlines() if restore_lab["trace"].exists() else []
     assert not any("stop backend worker" in line for line in trace)
