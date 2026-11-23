@@ -376,6 +376,10 @@ jobs:
           python-version: "3.11"
       - name: Verify deployment, backup, restore and load probes
         run: bash ops/ci_verify.sh
+      - name: Rehearse persistent PostgreSQL 15 G5 writer fence on isolated container
+        env:
+          CI: "true"
+        run: python3 -m ops.ci_g5_pg15_fence
 
   images:
     name: Container images
