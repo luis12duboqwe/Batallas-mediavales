@@ -136,6 +136,13 @@ validate_recovery_marker() {
   fi
 }
 validate_recovery_marker
+# A prior recovery incident has unknown post-snapshot commits. Never allow
+# this legacy rollback path to reinterpret it as authorization to restore
+# an older database snapshot (nor to reopen services in app-only mode).
+if [[ -e "$RECOVERY_REQUIRED" || -L "$RECOVERY_REQUIRED" ]]; then
+  echo "Rollback refused: existing recovery incident requires certified G5 coordinator" >&2
+  exit 2
+fi
 RECOVERY_MARKER_TMP=""
 cleanup() {
   rm -f -- "$STAGED_ENV" "$STAGED_SHA" "$RECOVERY_MARKER_TMP"
