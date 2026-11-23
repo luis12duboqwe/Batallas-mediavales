@@ -74,7 +74,9 @@ def _require_unprivileged_app_role(compose: list[str], admin: str, app_role: str
         "AND NOT (app.rolsuper OR app.rolcreatedb OR app.rolcreaterole "
         "OR app.rolreplication OR app.rolbypassrls) "
         "AND NOT EXISTS (SELECT 1 FROM pg_roles AS privileged "
-        "WHERE privileged.rolsuper "
+        "WHERE (privileged.rolsuper OR privileged.rolname IN "
+        "('pg_write_all_data', 'pg_read_all_data', 'pg_execute_server_program', "
+        "'pg_read_server_files', 'pg_write_server_files')) "
         "AND pg_has_role(app.oid, privileged.oid, 'MEMBER'))) "
         "THEN 1 ELSE 0 END;"
     )
