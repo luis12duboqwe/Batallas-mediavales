@@ -25,7 +25,7 @@ class FakePg:
         self.fail_ddl = None
         self.calls = []
 
-    def query(self, sql: str) -> str:
+    def query_fresh(self, sql: str) -> str:
         self.calls.append(("query", sql))
         if "current_database()" in sql:
             return "1" if self.admin else "0"
@@ -43,9 +43,11 @@ class FakePg:
                 self.limit == 0 and not self.login and
                 self.sessions == 0 and self.prepared == 0
             ) else "0"
+        if "FROM pg_database" in sql and "datconnlimit=0" in sql:
+            return "1" if self.limit == 0 else "0"
         raise AssertionError(f"Unexpected synthetic query: {sql}")
 
-    def execute(self, sql: str) -> None:
+    def execute_committed(self, sql: str) -> None:
         self.calls.append(("execute", sql))
         if self.fail_ddl is not None and self.fail_ddl in sql:
             raise ValueError("driver connection diagnostic: simulated password=SECRET")
@@ -77,8 +79,9 @@ def test_pg15_barrier_is_one_way_and_ordered(target):
     assert strings[1].startswith("SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles AS app")
     assert strings[2].startswith("SELECT datconnlimit FROM pg_database")
     assert strings[3] == 'ALTER DATABASE "medievol_db" CONNECTION LIMIT 0;'
-    assert strings[4] == 'ALTER ROLE "game_app" NOLOGIN;'
-    assert "pg_terminate_backend" in strings[5]
+    assert "datconnlimit=0" in strings[4]
+    assert strings[5] == 'ALTER ROLE "game_app" NOLOGIN;'
+    assert "pg_terminate_backend" in strings[6]
     assert "pg_prepared_xacts" in strings[-1]
     barrier.assert_closed()
     # Re-activation without a reconciliation protocol must fail closed.
@@ -161,16 +164,16 @@ def test_remaining_prepared_transactions_or_sessions_refuse_barrier(target, prep
 
 def test_false_scalar_and_bad_ddl_result_never_pass_as_proof(target):
     class FuzzyPg(FakePg):
-        def query(self, sql: str):
+        def query_fresh(self, sql: str):
             if "current_database()" in sql:
                 return "1\n1"
-            return super().query(sql)
+            return super().query_fresh(sql)
     with pytest.raises(FenceError, match="ambiguous"):
         Pg15PersistentFence(target, FuzzyPg()).engage()
 
     class MisleadingDDL(FakePg):
-        def execute(self, sql: str):
-            super().execute(sql)
+        def execute_committed(self, sql: str):
+            super().execute_committed(sql)
             return "looks good"
     with pytest.raises(FenceError, match="ambiguous"):
         Pg15PersistentFence(target, MisleadingDDL()).engage()
