@@ -126,6 +126,23 @@ def _run(argv: list[str]) -> str:
     return proc.stdout
 
 
+def _require_closed_edge(compose: list[str], url: str) -> None:
+    """Observe HTTP 503 from the *running* G5 Nginx, never config alone."""
+    try:
+        response = subprocess.run(
+            compose + ["exec", "-T", "nginx", "wget", "-S", "-O", "/dev/null",
+                       "-T", "3", url],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ProbeError("Cannot verify actual Nginx maintenance response") from exc
+    # BusyBox wget returns nonzero for 503; trust the HTTP status line,
+    # not the exit status, which could represent a DNS or transport failure.
+    if not re.search(r"(?m)^\\s*HTTP/(?:1\\.[01]|2)\\s+503(?:\\s|$)",
+                     response.stderr):
+        raise ProbeError("Running Nginx did not prove maintenance HTTP 503")
+
+
 def collect(env_file: Path, compose_files: list[Path], edge_dir: Path) -> list[str]:
     if not env_file.is_file() or any(not p.is_file() for p in compose_files):
         raise ProbeError("Environment or Compose file is missing")
@@ -152,7 +169,14 @@ def collect(env_file: Path, compose_files: list[Path], edge_dir: Path) -> list[s
         "exec", "-T", "database", "psql", "-X", "-v", "ON_ERROR_STOP=1",
         "-U", user, "-d", "postgres", "-Atqc", sql
     ])
-    return inspect(config, containers, counts, edge_dir)
+    blockers = inspect(config, containers, counts, edge_dir)
+    if blockers:
+        return blockers
+    # Verify both the HTTP API and a new Socket.IO polling handshake.
+    # This still cannot drain pre-existing connections or external writers.
+    _require_closed_edge(cmd, "http://127.0.0.1/api/health")
+    _require_closed_edge(cmd, "http://127.0.0.1/socket.io/?EIO=4&transport=polling")
+    return []
 
 
 def main() -> int:
