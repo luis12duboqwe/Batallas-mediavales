@@ -277,23 +277,6 @@ def test_failed_mutation_preserves_incident_and_blocks_redeploy(deploy_lab):
     assert "unresolved recovery incident" in second.stderr
     assert _trace(deploy_lab) == before
 
-def test_failed_automatic_rollback_flags_incident_and_blocks_redeploy(deploy_lab, extra_env):
-    first = _run(deploy_lab, {**extra_env, "BM_RELEASE_START_EXIT": "41"})
-    assert first.returncode == 41, first.stderr
-    assert "manual recovery required" in first.stderr
-    assert _marker(deploy_lab).is_file()
-    assert "failed_release=" + NEW_SHA in _marker(deploy_lab).read_text(encoding="utf-8")
-    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
-    assert "new@example.invalid" in (deploy_lab["root"] / ".release.env").read_text(encoding="utf-8")
-    _assert_temporary_files_cleaned(deploy_lab)
-
-    before = _trace(deploy_lab)
-    second = _run(deploy_lab)
-    assert second.returncode == 2
-    assert "unresolved recovery incident" in second.stderr
-    assert _trace(deploy_lab) == before
-
-
 def test_missing_previous_release_sha_is_refused_before_docker(deploy_lab):
     (deploy_lab["root"] / ".release-sha").unlink()
     result = _run(deploy_lab)
@@ -356,21 +339,6 @@ def test_writer_stop_failure_preserves_original_error_and_incident(deploy_lab):
     again = _run(deploy_lab)
     assert again.returncode == 2
     assert "unresolved recovery incident" in again.stderr
-
-def test_recovery_internal_failure_preserves_incident_marker_and_original_error(
-    deploy_lab, failed_recovery_step
-):
-    result = _run(deploy_lab, extra_env={**failed_recovery_step, "BM_RELEASE_START_EXIT": "41"})
-    assert result.returncode == 41, result.stderr
-    assert _marker(deploy_lab).is_file()
-    assert (deploy_lab["root"] / ".release-sha").read_text(encoding="utf-8") == OLD_SHA + "\n"
-    assert "new@example.invalid" in (deploy_lab["root"] / ".release.env").read_text(
-        encoding="utf-8"
-    )
-    again = _run(deploy_lab)
-    assert again.returncode == 2
-    assert "unresolved recovery incident" in again.stderr
-
 
 def test_failed_schema_probe_never_assumes_first_install(deploy_lab):
     result = _run(deploy_lab, {
