@@ -51,10 +51,13 @@ puede convertir un checksum correcto en permiso para descartar escrituras.
   smoke y publicación final de metadatos. El marcador de recuperación no
   se elimina por error y el código de salida original se conserva aunque
   falle el stop; en ese caso emite alerta crítica para inspección.
-- El arranque Compose se espera como hijo supervisado; `SIGTERM`/
-  `SIGINT` dirigidos al shell deben esperar a que termine el arranque antes
-  del stop final, para que el stop no ocurra antes de que un escritor aparezca.
-  Un `SIGKILL` o caída total de host no es recuperable con traps de shell.
+- El arranque Compose se espera como hijo supervisado. Las señales
+  operativas atrapables `SIGHUP`, `SIGTERM`, `SIGINT`, `SIGQUIT`, `SIGPIPE`,
+  `SIGUSR1`, `SIGUSR2` y `SIGALRM` dirigidas al shell deben esperar
+  la finalización del hijo antes del stop final, incluso si se repiten,
+  para que el stop no ocurra antes de que un escritor aparezca.
+  Un `SIGKILL`, `SIGSTOP`, fallo fatal o caída total de host no es
+  recuperable con traps de shell.
 - Si el marcador de incidente cambia o desaparece justo antes de dar éxito,
   el rollback falla y también intenta cerrar escritores, en vez de publicar
   éxito silenciosamente. Si desaparece, intenta recuperar el hardlink original
