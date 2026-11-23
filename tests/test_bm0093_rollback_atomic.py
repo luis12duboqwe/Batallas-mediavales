@@ -363,6 +363,31 @@ def test_application_only_rollback_never_starts_migrate_or_seed(rollback_lab):
     assert (rollback_lab["root"] / ".release-sha").read_text().strip() == PREVIOUS_SHA
 
 
+@pytest.mark.parametrize("receipt_kind", ["file", "symlink", "directory"])
+def test_orphaned_incident_evidence_blocks_deploy_and_app_only_rollback(
+    rollback_lab, receipt_kind
+):
+    orphan = rollback_lab["root"] / ".ops-state/recovery-required.orphaned"
+    sentinel = rollback_lab["root"] / "external-sentinel"
+    sentinel.write_text("do not alter\\n", encoding="utf-8")
+    if receipt_kind == "file":
+        orphan.write_text("reason=failed_rearm\\n", encoding="utf-8")
+    elif receipt_kind == "symlink":
+        orphan.symlink_to(sentinel)
+    else:
+        orphan.mkdir()
+    rollback = _run(rollback_lab)
+    deploy = _run_deploy(rollback_lab)
+    assert rollback.returncode == 2, rollback.stderr
+    assert deploy.returncode == 2, deploy.stderr
+    assert "orphaned recovery evidence" in rollback.stderr
+    assert "orphaned recovery evidence" in deploy.stderr
+    assert _trace(rollback_lab) == []
+    assert sentinel.read_text() == "do not alter\\n"
+    _assert_active_unchanged(rollback_lab)
+    assert orphan.is_symlink() if receipt_kind == "symlink" else orphan.exists()
+
+
 def test_application_only_rollback_refuses_existing_recovery_incident(rollback_lab):
     rollback_lab["manifest"].write_text(
         json.dumps({"previous_release_sha": PREVIOUS_SHA, "rollback_backup": None}),
