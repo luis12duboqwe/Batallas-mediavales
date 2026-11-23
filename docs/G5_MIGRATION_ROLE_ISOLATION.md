@@ -58,7 +58,10 @@ para revisar datos sin ejecutar Docker ni SQL. Exige que ambas URL:
  ni caracteres de control;
 - no contengan un `@` crudo adicional en el user-info. Las contraseñas con `@`
   deben codificarse como `%40`, pues `urlsplit` y SQLAlchemy pueden elegir
-  distintos separadores de host ante delimitadores sin escape.
+  distintos separadores de host ante delimitadores sin escape;
+- usen el **nombre de base sin codificación porcentual** en la ruta. SQLAlchemy
+  2.0 mantiene el path de database codificado aunque `urllib.unquote` lo
+  convierta a otro texto; no puede certificarse como el mismo destino.
 
 La validación evita imprimir contraseñas o URL completas.
 
