@@ -227,8 +227,12 @@ def test_restore_inherits_lock_from_deploy_or_rollback(restore_lab):
         assert refused.returncode == 2
         assert "another deploy, rollback or restore is already running" in refused.stderr
 
+    # The nested restore left a durable incident. Releasing the file lock
+    # alone must never turn that incident into permission for a second restore.
     retried = _run(restore_lab)
-    assert retried.returncode == 0, retried.stderr
+    assert retried.returncode == 2, retried.stderr
+    assert "unresolved recovery incident requires certified G5" in retried.stderr
+    assert restore_lab["marker"].is_file()
 
 
 def test_restore_inherits_lock_through_bash_descriptor(restore_lab):
