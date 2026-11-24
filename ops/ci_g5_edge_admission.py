@@ -62,8 +62,11 @@ with socket.create_connection(("nginx", 80), timeout=5) as conn:
     )
     stream = conn.makefile("rb")
     assert stream.readline().split()[1] == b"101"
-    while stream.readline() != b"\r\n":
-        pass
+    while True:
+        header = stream.readline()
+        if header == b"\r\n":
+            break
+        assert header, "truncated WebSocket handshake"
     print("READY", flush=True)
     assert sys.stdin.readline().strip() == "ping"
     conn.sendall(bytes.fromhex("898001020304"))
