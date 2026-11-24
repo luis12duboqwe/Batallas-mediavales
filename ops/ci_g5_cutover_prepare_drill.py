@@ -213,11 +213,12 @@ def _prove_snapshot(admin: CIOnlyAdmin, container: str, port: CIOnlyPreparationP
     )
     if restored.returncode != 0:
         raise RuntimeError("isolated snapshot failed to restore")
-    value = admin._psql(
-        "SELECT marker FROM durable_probe WHERE id=1;", database="isolated_restore_probe"
-    ).stdout.strip()
-    if value != "commit-before-cutover":
-        raise RuntimeError("confirmed pre-fence transaction missing from restored snapshot")
+    values = admin._psql(
+        "SELECT marker FROM durable_probe WHERE id IN (1,9) ORDER BY id;",
+        database="isolated_restore_probe",
+    ).stdout.strip().splitlines()
+    if values != ["commit-before-cutover", "app-commit-before-cutover"]:
+        raise RuntimeError("confirmed admin/app transactions missing from restored snapshot")
 
 
 def _run_cases(container: str, admin: CIOnlyAdmin, root: Path) -> None:
