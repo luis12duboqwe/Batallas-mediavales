@@ -246,6 +246,62 @@ def _run_cases(container: str, admin: CIOnlyAdmin, root: Path) -> None:
     else:
         raise RuntimeError("failed G5 preparation permitted unsafe retry")
 
+    # Third case: the database fence stays closed but an incorrect snapshot
+    # receipt MUST NOT become a PREPARED manifest, even after pg_dump works.
+    request, state, _ = _fresh_case(root, "game_tamper", "game_tamper_app", admin)
+
+    class CorruptReceiptPort(CIOnlyPreparationPort):
+        def capture_snapshot(self) -> BackupReceipt:
+            receipt = super().capture_snapshot()
+            return BackupReceipt(receipt.path, "f" * 64)
+
+    port = CorruptReceiptPort(admin, container, request)
+    try:
+        G5Preparation().prepare(request, port)
+    except StateError as exc:
+        if "checksum" not in str(exc):
+            raise
+    else:
+        raise RuntimeError("invalid snapshot receipt created PREPARED")
+    if not (state / MARKER).is_file() or (state / MANIFEST).exists():
+        raise RuntimeError("corrupt backup reopened G5 or created valid manifest")
+    port.fence.assert_closed()
+    _assert_reconnect_denied(container, "game_tamper_app", "game_tamper")
+
+    # Fourth case: a privileged external SQL session can bypass datconnlimit
+    # and NOLOGIN. The post-fence drain observation MUST fail; a real G5
+    # cannot authorize snapshot until ALL privileged paths are excluded.
+    request, state, _ = _fresh_case(root, "game_rogue", "game_rogue_app", admin)
+
+    class RoguePrivilegedWriterPort(CIOnlyPreparationPort):
+        def stop_writers(self) -> None:
+            super().stop_writers()
+            run([
+                "docker", "exec", "-d", self.container, "psql", "-X",
+                "-U", "postgres", "-d", self.request.postgres_db,
+                "-Atqc", "SELECT pg_sleep(90);",
+            ])
+            for _ in range(40):
+                active = self.admin.query_fresh(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    f"WHERE datname='{self.request.postgres_db}' AND usename='postgres';"
+                )
+                if active == "1":
+                    return
+                time.sleep(0.25)
+            raise RuntimeError("privileged synthetic writer did not start")
+
+    port = RoguePrivilegedWriterPort(admin, container, request)
+    try:
+        G5Preparation().prepare(request, port)
+    except FenceError:
+        pass
+    else:
+        raise RuntimeError("privileged writer bypassed cutover verification")
+    if not (state / MARKER).is_file() or (state / MANIFEST).exists():
+        raise RuntimeError("privileged writer was not fail-closed")
+    _assert_reconnect_denied(container, "game_rogue_app", "game_rogue")
+
 
 def main() -> int:
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("CI") != "true":
