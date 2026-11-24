@@ -32,10 +32,14 @@ Usa los componentes reales del repositorio, NO copias de sus algoritmos:
 
 ## Ensayos adversariales obligatorios
 
-1. **Éxito:** una sesión de `game_success_app` está viva antes del corte.
-   La barrera la termina, rechaza nuevos `INSERT` antes y después del dump,
-   se conserva la transacción original, se publica `PREPARED`, y los
-   entrypoints legacy quedan bloqueados por el marcador persistente.
+1. **Éxito:** se concede a `game_success_app` el permiso SQL `INSERT`
+   real sobre la tabla auditada y se comprueba que la cuenta confirma una
+   escritura antes del corte; también mantiene una sesión activa. La barrera
+   termina esa sesión, rechaza nuevos `INSERT` antes y después del dump
+   sobre la **misma tabla con permiso de INSERT comprobado**, conserva en
+   la restauración tanto la escritura administrativa como la de la propia
+   aplicación, publica `PREPARED` y mantiene bloqueados los entrypoints
+   legacy mediante el marcador persistente.
 2. **Fallo de snapshot:** se inyecta un error después del fence SQL real;
    no existe `PREPARED`, se mantiene la marca irreversible y el login app
    sigue prohibido. Un reintento no puede armar otro corte por accidente.
