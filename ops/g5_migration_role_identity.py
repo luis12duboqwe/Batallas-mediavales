@@ -1,0 +1,99 @@
+"""Read-only G5 database connection split preflight, without a deployment CLI.
+
+The legacy Compose bundle still uses DB_URL for migrate/seed. This validator
+is ONLY for opt-in docker-compose.g5-migration.yml and does not mutate roles.
+All validation messages omit passwords and full connection strings.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+import re
+from urllib.parse import urlsplit, unquote
+
+
+_ROLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
+_SCHEMES = frozenset({"postgresql+psycopg"})
+
+
+class RoleSplitError(ValueError):
+    """G5 database routing must not be enabled on this environment."""
+
+
+@dataclass(frozen=True)
+class SplitRoles:
+    application: str
+    maintenance: str
+    database: str
+
+
+def _url(value: str, database: str, label: str) -> tuple[str, str]:
+    if (not isinstance(value, str) or not value or
+            any(char in value for char in ("$", "#", "?")) or
+            any(ord(char) < 32 or ord(char) == 127 for char in value)):
+        raise RoleSplitError(f"{label} must have a literal PostgreSQL URL")
+    # The shipped backend only installs psycopg v3, NOT psycopg2. SQLAlchemy
+    # does not normalize bare postgresql://, uppercase driver names or leading
+    # spaces the same way urllib.urlsplit does. Validate raw bytes first.
+    if not value.startswith("postgresql+psycopg://"):
+        raise RoleSplitError(f"{label} must use the installed lowercase psycopg3 driver URL")
+    try:
+        parsed = urlsplit(value)
+        # SQLAlchemy and urllib can split ambiguous user-info differently:
+        # SQLAlchemy treats the *first* raw @ as the host separator, whereas
+        # urlsplit uses the last. Permit @ only when percent-encoded as %40.
+        if parsed.netloc.count("@") != 1:
+            raise RoleSplitError(f"{label} has ambiguous user-info delimiters")
+        role = unquote(parsed.username or "")
+        password = unquote(parsed.password or "")
+        host = parsed.hostname
+        port = parsed.port
+    except RoleSplitError:
+        # This is also a ValueError; never discard a specific fail-closed
+        # ambiguity diagnostic by catching it as a parser error.
+        raise
+    except (TypeError, ValueError):
+        raise RoleSplitError(f"{label} has malformed connection identity") from None
+    if (parsed.scheme not in _SCHEMES or host != "database" or
+            port not in (None, 5432) or
+            # SQLAlchemy 2.0 leaves the database name URL path encoded;
+            # only username/password are percent-decoded there. Do not
+            # certify a different target under urllib's unquote semantics.
+            parsed.path != "/" + database or
+            parsed.query or parsed.fragment or
+            not _ROLE.fullmatch(role) or
+            not password or any(ord(ch) < 32 for ch in password)):
+        raise RoleSplitError(f"{label} does not target the audited Compose PostgreSQL")
+    return role, password
+
+
+def validate_split(values: dict[str, str]) -> SplitRoles:
+    """Require app and migration identities separate on the SAME PG15 database.
+
+    This is static routing attestation only. It does not prove the app role
+    exists, its privilege membership, or that the DB is currently fenced.
+    """
+    if not isinstance(values, dict):
+        raise RoleSplitError("G5 environment is not a mapping")
+    database = values.get("POSTGRES_DB", "")
+    admin = values.get("POSTGRES_USER", "")
+    if (not isinstance(database, str) or not _ROLE.fullmatch(database)
+            or not isinstance(admin, str) or not _ROLE.fullmatch(admin)
+            or admin == "PUBLIC" or admin.startswith("pg_")):
+        raise RoleSplitError("G5 database/maintenance identity is invalid")
+    app, app_password = _url(values.get("DB_URL"), database, "DB_URL")
+    migration, migration_password = _url(
+        values.get("G5_MIGRATION_DB_URL"), database, "G5_MIGRATION_DB_URL"
+    )
+    if app in {admin, "postgres", "PUBLIC"} or app.startswith("pg_"):
+        raise RoleSplitError("G5 application must use a separate non-administrative role")
+    if migration != admin:
+        raise RoleSplitError("G5 migration role does not match the inspected maintenance identity")
+    raw_admin_password = values.get("POSTGRES_PASSWORD")
+    if not isinstance(raw_admin_password, str) or not raw_admin_password:
+        raise RoleSplitError("G5 maintenance database credential is missing")
+    if raw_admin_password != migration_password:
+        raise RoleSplitError("G5 migration credential differs from the maintenance identity")
+    if app_password == migration_password:
+        raise RoleSplitError("G5 application and migration passwords must be distinct")
+    return SplitRoles(app, migration, database)

@@ -1,0 +1,11 @@
+# Opt-in only for an isolated G5 cutover after the role split is certified.
+# Do NOT include this overlay in legacy deploy_remote.sh or on the VPS.
+# The application DB_URL remains on backend/worker. Only these two one-shot
+# orchestration services may use the maintenance/migration database identity.
+services:
+  migrate:
+    environment:
+      DATABASE_URL: ${G5_MIGRATION_DB_URL:?G5 separate migration URL required}
+  seed:
+    environment:
+      DATABASE_URL: ${G5_MIGRATION_DB_URL:?G5 separate migration URL required}

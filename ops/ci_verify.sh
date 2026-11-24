@@ -14,6 +14,7 @@ BACKUP_RECEIPT=""
 COMPOSE_FILE="docker-compose.deploy.yml"
 PROJECT_NAME="bm-g5-ci"
 SMOKE_PID=""
+ROLE_SPLIT_ENV=""
 
 cleanup() {
   if [[ -n "$SMOKE_PID" ]]; then
@@ -21,6 +22,7 @@ cleanup() {
   fi
   docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1 || true
   rm -rf "$BACKUP_DIR" "$ENV_FILE" "$BAD_ENV_FILE" "$BAD_TLS_ENV_FILE"
+  if [[ -n "$ROLE_SPLIT_ENV" ]]; then rm -f -- "$ROLE_SPLIT_ENV"; fi
   if [[ -n "$FAKE_DOCKER_DIR" ]]; then rm -rf "$FAKE_DOCKER_DIR"; fi
   if [[ -n "$FAKE_DATE_DIR" ]]; then rm -rf "$FAKE_DATE_DIR"; fi
   if [[ -n "$BACKUP_RECEIPT" ]]; then rm -f -- "$BACKUP_RECEIPT"; fi
@@ -81,6 +83,43 @@ done
 python3 -m compileall -q ops
 
 docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config -q
+
+# G5 role routing stays opt-in and MUST NEVER silently reuse DB_URL for
+# migrate/seed. Verify actual Docker Compose interpolation, not source text.
+ROLE_SPLIT_ENV="$(mktemp /tmp/bm-g5-role-split.XXXXXXXX)"
+cp "$ENV_FILE" "$ROLE_SPLIT_ENV"
+sed -i 's#^DB_URL=.*#DB_URL=postgresql+psycopg://game_app:synthetic-game-credential@database:5432/batalla_ci#' "$ROLE_SPLIT_ENV"
+printf '%s\n' 'G5_MIGRATION_DB_URL=postgresql+psycopg://batalla:ci-password@database:5432/batalla_ci' >> "$ROLE_SPLIT_ENV"
+python3 - "$ROLE_SPLIT_ENV" <<'PY'
+import sys
+from pathlib import Path
+from ops.g5_migration_role_identity import validate_split
+from ops.preflight import read_env
+identity = validate_split(read_env(Path(sys.argv[1])))
+if identity.application != "game_app" or identity.maintenance != "batalla":
+    raise SystemExit("Isolated G5 role split preflight returned wrong identities")
+PY
+if docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" \
+  -f "$COMPOSE_FILE" -f docker-compose.g5-migration.yml config -q >/dev/null 2>&1; then
+  echo "Unsafe G5 overlay rendered without dedicated migration URL" >&2
+  exit 1
+fi
+docker compose -p "$PROJECT_NAME" --env-file "$ROLE_SPLIT_ENV" \
+  -f "$COMPOSE_FILE" -f docker-compose.g5-migration.yml config --format json |
+python3 -c '
+import json, sys
+from urllib.parse import urlsplit
+services=json.load(sys.stdin)["services"]
+urls={name:services[name]["environment"]["DATABASE_URL"]
+      for name in ("backend","worker","migrate","seed")}
+if not (urls["backend"]==urls["worker"] and
+        urls["migrate"]==urls["seed"] and
+        urlsplit(urls["backend"]).username=="game_app" and
+        urlsplit(urls["migrate"]).username=="batalla"):
+    raise SystemExit("G5 composed services did not keep app/migration identities separate")
+print("G5 opt-in migration role routing verified (no services started)")
+'
+
 
 docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d database
 postgres_ready=0
