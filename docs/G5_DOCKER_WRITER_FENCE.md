@@ -27,3 +27,10 @@ desechables, sin puertos/redes externas/montajes reales. El ensayo
 incluye dos réplicas de backend, worker, migrate, seed detenido,
 servicios pasivos, un proyecto ajeno y un reinicio manual que debe
 detectarse. Ninguna modificación de roles, backups o servicios reales.
+
+La membresía se enumera nuevamente después de cada lote de inspecciones;
+una réplica creada dentro de esa ventana impide certificar el cierre.
+El fixture etiqueta los contenedores antes de crearlos, recupera los IDs
+por etiqueta incluso si se pierde la respuesta del daemon y elimina sus
+volúmenes anónimos con comprobación posterior. CI inyecta una creación
+real seguida de pérdida de respuesta y exige limpieza completa.
