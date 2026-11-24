@@ -93,7 +93,7 @@ class DockerWriterFence:
             raise DockerFenceError("ambiguous Docker response")
         return result
 
-    def _inventory(self) -> dict[str, Container]:
+    def _membership(self) -> set[str]:
         output = self._command([
             "ps", "--all", "--no-trunc", "--filter",
             f"label=com.docker.compose.project={self.project}", "--format", "{{.ID}}",
@@ -102,6 +102,10 @@ class DockerWriterFence:
         if (not ids or len(ids) != len(set(ids))
                 or not all(_ID.fullmatch(identity) for identity in ids)):
             raise DockerFenceError("empty or malformed Docker project inventory")
+        return set(ids)
+
+    def _inventory(self) -> dict[str, Container]:
+        ids = self._membership()
         records = {}
         for identity in sorted(ids):
             raw = self._command([
@@ -130,6 +134,8 @@ class DockerWriterFence:
             if (len(matches) != 1 or matches[0].status != "running"
                     or not matches[0].running or matches[0].paused or matches[0].restarting):
                 raise DockerFenceError("expected exactly one live database and nginx")
+        if self._membership() != ids:
+            raise DockerFenceError("Compose inventory changed during inspection")
         return records
 
     def _same_inventory(self) -> dict[str, Container]:
