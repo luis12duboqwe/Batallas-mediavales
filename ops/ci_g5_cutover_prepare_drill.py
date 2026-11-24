@@ -51,9 +51,23 @@ def _fresh_case(root: Path, database: str, role: str, admin: CIOnlyAdmin):
     admin.execute_committed(f'CREATE DATABASE "{database}" OWNER "{role}";')
     admin._psql(
         "CREATE TABLE durable_probe (id integer PRIMARY KEY, marker text NOT NULL);"
-        " INSERT INTO durable_probe VALUES (1, 'commit-before-cutover');",
+        " INSERT INTO durable_probe VALUES (1, 'commit-before-cutover');"
+        f' GRANT INSERT, SELECT ON TABLE durable_probe TO "{role}";',
         database=database,
     )
+    # The game's role must be able to commit to this exact table BEFORE the
+    # fence. Otherwise a negative INSERT probe could be just a permissions
+    # error and would not demonstrate that the fence prevented a valid write.
+    run([
+        "docker", "exec", admin.container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
+        "-U", role, "-d", database, "-Atqc",
+        "INSERT INTO durable_probe VALUES (9, 'app-commit-before-cutover');",
+    ])
+    app_commit = admin._psql(
+        "SELECT marker FROM durable_probe WHERE id=9;", database=database
+    ).stdout.strip()
+    if app_commit != "app-commit-before-cutover":
+        raise RuntimeError("synthetic app writer was not able to confirm a transaction")
     request = PreparationRequest(
         host_root=str(host),
         backup_root=str(backup_root),
