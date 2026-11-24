@@ -128,3 +128,63 @@ def test_empty_inventory_and_unsafe_project_fail_closed():
     for name in ("", "../other", "-flag", "UPPER"):
         with pytest.raises(DockerFenceError):
             DockerWriterFence(name, docker.run)
+
+
+@pytest.mark.parametrize("when", ["initial", "final"])
+def test_replica_created_after_listing_during_inspect_is_refused(when):
+    docker = FakeDocker()
+    gate = DockerWriterFence("game_ci", docker.run)
+    if when == "final":
+        gate.engage()
+    original = docker.run
+    added = False
+
+    def race(args):
+        nonlocal added
+        result = original(args)
+        if args[0] == "ps" and not added:
+            added = True
+            docker.add(8, "worker")
+        return result
+
+    gate._run = race
+    with pytest.raises(DockerFenceError, match="inventory changed"):
+        (gate.engage if when == "initial" else gate.assert_closed)()
+    if when == "initial":
+        assert not docker.mutations
+
+
+def test_cleanup_recovers_lost_response_and_removes_anonymous_volumes():
+    from ops.ci_g5_docker_writer_fence import cleanup_fixture, create
+    fixture = "bm-g5-writer-" + "a" * 32
+    identity = "b" * 64
+    containers = set()
+    volumes = set()
+    commands = []
+
+    def daemon(args):
+        commands.append(args)
+        if args[0] == "run":
+            assert "medievol.g5.fixture=" + fixture in args
+            containers.add(identity)
+            volumes.add("anonymous")
+            raise DockerFenceError("response lost after create")
+        if args[0] == "ps":
+            assert "label=medievol.g5.fixture=" + fixture in args
+            return "\n".join(containers)
+        if args[0] == "inspect":
+            assert args[-1] == identity
+            return json.dumps([{"Type": "volume", "Name": "anonymous"}])
+        if args[0] == "rm":
+            assert args == ["rm", "--force", "--volumes", identity]
+            containers.clear()
+            volumes.clear()
+            return ""
+        if args[:2] == ["volume", "ls"]:
+            return "\n".join(volumes)
+        raise AssertionError(args)
+
+    with pytest.raises(DockerFenceError):
+        create(fixture, "worker", run=daemon)
+    cleanup_fixture(fixture, run=daemon)
+    assert not containers and not volumes
