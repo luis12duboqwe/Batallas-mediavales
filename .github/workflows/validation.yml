@@ -380,6 +380,10 @@ jobs:
         env:
           CI: "true"
         run: python3 -m ops.ci_g5_pg15_fence
+      - name: Rehearse integrated G5 activation, SQL fence and PREPARED snapshot on isolated PG15
+        env:
+          CI: "true"
+        run: python3 -m ops.ci_g5_cutover_prepare_drill
 
   images:
     name: Container images
