@@ -116,6 +116,11 @@ class CIOnlyPreparationPort:
         if not self.edge_closed or not self.workers_stopped:
             raise RuntimeError("synthetic admission/worker gate is not closed")
         self.fence.assert_closed()  # REAL PG15 role, limit, sessions, prepared xacts
+        # Verify a real post-fence INSERT cannot commit BEFORE taking the
+        # snapshot (and again after it). This is not just a metadata probe.
+        _assert_reconnect_denied(
+            self.container, self.request.postgres_db + "_app", self.request.postgres_db
+        )
         return True
 
     def capture_snapshot(self) -> BackupReceipt:
