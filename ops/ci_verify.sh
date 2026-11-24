@@ -372,4 +372,10 @@ fi
 python3 ops/smoke_http.py --base-url http://127.0.0.1:18765 --allow-http --requests 10 --max-p95-ms 750
 python3 ops/load_smoke.py --base-url http://127.0.0.1:18765 --allow-http --duration-seconds 2 --concurrency 4 --max-p95-ms 750 --max-error-rate 0
 
+# The isolated writer shutdown fixture is mandatory in GitHub CI, where
+# it uses only disposable containers in a random synthetic project.
+if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+  CI=true python3 -m ops.ci_g5_docker_writer_fence
+fi
+
 echo "G5 operations verification passed"
