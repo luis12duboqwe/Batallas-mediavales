@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import select
+import re
 import shutil
 import subprocess
 import sys
@@ -112,13 +113,40 @@ def expect_line(proc, expected):
         raise RuntimeError("WebSocket fixture failed: expected " + expected)
 
 
+def cleanup_fixture(project: str) -> None:
+    if not re.fullmatch(r"bm-g5-edge-[0-9a-f]{32}", project):
+        raise RuntimeError("invalid isolated fixture identity")
+    label = "label=medievol.g5.edge-fixture=" + project
+
+    def ids(kind):
+        args = (["ps", "--all"] if kind == "container" else ["network", "ls"])
+        result = run([*args, "--no-trunc", "--filter", label, "--format", "{{.ID}}"])
+        found = result.splitlines()
+        if len(set(found)) != len(found) or any(not re.fullmatch(r"[0-9a-f]{64}", i) for i in found):
+            raise RuntimeError("invalid CI fixture inventory")
+        return found
+
+    # Discover by the label attached before creation, not a successful
+    # response from docker run/network create. Include anonymous volumes.
+    try:
+        containers = ids("container")
+        if containers:
+            run(["rm", "--force", "--volumes", *containers])
+        if ids("container"):
+            raise RuntimeError("CI edge containers survived cleanup")
+    finally:
+        networks = ids("network")
+        if networks:
+            run(["network", "rm", *networks])
+        if ids("network"):
+            raise RuntimeError("CI edge network survived cleanup")
+
+
 def main() -> int:
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("CI") != "true":
         print("CI-only G5 Nginx rehearsal", file=sys.stderr)
         return 2
     project = "bm-g5-edge-" + uuid4().hex
-    containers = []
-    network = None
     client = None
     with tempfile.TemporaryDirectory(prefix="bm-g5-edge-") as temp:
         root = Path(temp).resolve()
@@ -134,15 +162,16 @@ def main() -> int:
 
         def start(service, args):
             identity = run([
-                "run", "-d", "--network", network, "--network-alias", service,
+                "run", "-d", "--network", project, "--network-alias", service,
+                "--label", "medievol.g5.edge-fixture=" + project,
                 "--label", "com.docker.compose.project=" + project,
                 "--label", "com.docker.compose.service=" + service, *args,
             ]).strip()
-            containers.append(identity)
             return identity
 
         try:
-            network = run(["network", "create", "--internal", project]).strip()
+            run(["network", "create", "--internal", "--label",
+                 "medievol.g5.edge-fixture=" + project, project])
             backend = start("backend", ["python:3.11-alpine", "python", "-u", "-c", SERVER])
             frontend = start("frontend", ["python:3.11-alpine", "python", "-m", "http.server", "80"])
             nginx = start("nginx", [
@@ -187,10 +216,7 @@ def main() -> int:
             if client is not None and client.poll() is None:
                 client.kill()
                 client.wait(timeout=10)
-            if containers:
-                run(["rm", "-f", *containers])
-            if network:
-                run(["network", "rm", network])
+            cleanup_fixture(project)
 
 
 if __name__ == "__main__":
