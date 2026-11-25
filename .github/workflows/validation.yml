@@ -388,6 +388,10 @@ jobs:
         env:
           CI: "true"
         run: python3 -m ops.ci_g5_cutover_prepare_drill
+      - name: Rehearse combined real G5 edge, SQL, Docker and PREPARED recovery
+        env:
+          CI: "true"
+        run: python3 -m ops.ci_g5_integrated_runtime
 
   images:
     name: Container images
