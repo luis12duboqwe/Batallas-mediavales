@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -78,9 +79,16 @@ class Port:
             return False
         return True
 
+    def locked_phase(self, expected):
+        # Read the persisted fixture receipt, not a recursive store lock.
+        payload = json.loads((self.state / "g5-cutover.json").read_text())["manifest"]
+        assert payload["phase"] == expected.value
+        with pytest.raises(BlockingIOError):
+            self.store.show()
+
     def migrate(self, identity):
         self.step("migrate")
-        assert self.store.show().phase is Phase.MIGRATING
+        self.locked_phase(Phase.MIGRATING)
         self.data = b"candidate schema mutations"
         if self.fail in {"rejected", "rejected_lost_barrier", "tampered_archive",
                          "restore_error", "previous_unverified"}:
@@ -97,7 +105,7 @@ class Port:
 
     def publish_candidate(self, identity):
         self.step("publish")
-        assert self.store.show().phase is Phase.VERIFIED_READONLY
+        self.locked_phase(Phase.VERIFIED_READONLY)
         self.publication = identity.candidate_sha
 
     def restore_previous(self, identity, verified_fd):
@@ -116,11 +124,11 @@ class Port:
 
     def reopen_writers(self, identity):
         self.step("reopen")
-        assert self.store.show().phase is Phase.COMMITTED_WRITERS_ALLOWED
+        self.locked_phase(Phase.COMMITTED_WRITERS_ALLOWED)
         assert self.publication == identity.candidate_sha
-        with pytest.raises(StateError, match="forbids"):
+        with pytest.raises(BlockingIOError):
             with self.store.verify_restore_allowed(identity, self.request.backup_root):
-                pytest.fail("committed operation still permits restore")
+                pytest.fail("competing restore acquired lock during reopen")
 
 
 def test_commit_before_reopen_with_same_lease(request_scope):
@@ -280,3 +288,46 @@ def test_archive_phase_argument_rejects_non_enum(request_scope):
             manifest.identity, request_scope.backup_root, expected_phase="PREPARED"
         ):
             pytest.fail("non-enum expected phase accepted")
+
+
+@pytest.mark.parametrize("expected,action", [
+    (Phase.MIGRATING, "migrate"),
+    (Phase.VERIFIED_READONLY, "publish"),
+])
+def test_phase_race_before_sensitive_mutation_is_refused(request_scope, monkeypatch, expected, action):
+    port = Port(request_scope)
+    original = CutoverStore.hold_phase
+    raced = False
+
+    def interleave(store, identity, phase):
+        nonlocal raced
+        if not raced and phase is expected:
+            raced = True
+            store.advance(identity, phase, Phase.RECOVERY_REQUIRED)
+        return original(store, identity, phase)
+
+    monkeypatch.setattr(CutoverStore, "hold_phase", interleave)
+    with pytest.raises(StateError, match="unexpected exact cutover phase"):
+        G5Lifecycle().execute(request_scope, port)
+    assert raced
+    assert port.store.show().phase is Phase.RECOVERY_REQUIRED
+    assert action not in port.calls
+    assert "restore" not in port.calls and "reopen" not in port.calls
+
+
+@pytest.mark.parametrize("method,phase", [
+    ("migrate", Phase.MIGRATING),
+    ("publish_candidate", Phase.VERIFIED_READONLY),
+    ("reopen_writers", Phase.COMMITTED_WRITERS_ALLOWED),
+])
+def test_competing_manifest_writer_is_excluded_through_callback(request_scope, method, phase):
+    port = Port(request_scope)
+    original = getattr(port, method)
+
+    def compete(identity):
+        with pytest.raises(BlockingIOError):
+            port.store.advance(identity, phase, Phase.RECOVERY_REQUIRED)
+        original(identity)
+
+    setattr(port, method, compete)
+    assert G5Lifecycle().execute(request_scope, port).phase is Phase.COMMITTED_WRITERS_ALLOWED
