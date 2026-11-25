@@ -331,3 +331,28 @@ def test_competing_manifest_writer_is_excluded_through_callback(request_scope, m
 
     setattr(port, method, compete)
     assert G5Lifecycle().execute(request_scope, port).phase is Phase.COMMITTED_WRITERS_ALLOWED
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="Linux flock/fork regression")
+def test_forked_child_cannot_release_parent_activation_lease(request_scope):
+    context = arm_cutover(request_scope.host_root, request_scope.operation_id)
+    lease = context.__enter__()
+    try:
+        pid = os.fork()
+        if pid == 0:
+            try:
+                context.__exit__(None, None, None)
+            except StateError:
+                os._exit(0)
+            except BaseException:
+                os._exit(2)
+            os._exit(1)
+        _, status = os.waitpid(pid, 0)
+        assert os.waitstatus_to_exitcode(status) == 0
+        lease()
+        lock = Path(request_scope.host_root) / ".ops-state" / "deploy.lock"
+        with lock.open("a+") as competitor:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        context.__exit__(None, None, None)
