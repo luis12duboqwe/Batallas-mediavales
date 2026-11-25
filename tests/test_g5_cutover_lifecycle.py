@@ -76,8 +76,6 @@ class Port:
             return ["not established"]
         if self.fail == "lost_barrier" and "migrate" in self.calls:
             return False
-        if self.fail == "drift_after_commit" and self.publication is not None and self.continuity_checks >= 9:
-            return False
         return True
 
     def migrate(self, identity):
@@ -209,8 +207,33 @@ def test_tampered_authority_before_reopen_never_reopens(request_scope, drift):
     assert "restore" not in port.calls and "reopen" not in port.calls
 
 
-def test_activation_lease_rejects_content_change_and_use_after_exit(request_scope):
+def test_activation_lease_rejects_use_after_exit(request_scope):
     with arm_cutover(request_scope.host_root, request_scope.operation_id) as lease:
         lease()
     with pytest.raises(StateError, match="no longer active"):
         lease()
+
+
+def test_continuity_lost_after_commit_but_before_login_is_not_rollback_permission(request_scope):
+    port = Port(request_scope)
+    original = port.verify_continuity
+
+    def drift(identity):
+        if port.publication and port.store.show().phase is Phase.COMMITTED_WRITERS_ALLOWED:
+            return False
+        return original(identity)
+
+    port.verify_continuity = drift
+    with pytest.raises(StateError, match="continuous"):
+        G5Lifecycle().execute(request_scope, port)
+    assert port.store.show().phase is Phase.COMMITTED_WRITERS_ALLOWED
+    assert "reopen" not in port.calls and "restore" not in port.calls
+
+
+def test_lease_checks_marker_changes_during_active_context(request_scope):
+    with pytest.raises(StateError, match="marker changed"):
+        with arm_cutover(request_scope.host_root, request_scope.operation_id) as lease:
+            marker = Path(request_scope.host_root) / ".ops-state" / MARKER
+            marker.write_text("version=1\noperation_id=another\n")
+            with pytest.raises(StateError, match="marker changed"):
+                lease()
