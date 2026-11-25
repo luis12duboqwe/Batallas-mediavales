@@ -8,6 +8,7 @@ This exercises PREPARED and fail-closed drift, not a production RPO guarantee.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -23,7 +24,7 @@ from ops.ci_g5_edge_admission import (
 )
 from ops.g5_activation_fence import MARKER
 from ops.g5_cutover_prepare import BackupReceipt, G5Preparation, PreparationRequest
-from ops.g5_cutover_state import CutoverStore, MANIFEST, Phase, StateError
+from ops.g5_cutover_state import CutoverStore, MANIFEST, Manifest, Phase, StateError
 from ops.g5_cutover_lifecycle import G5Lifecycle, MigrationRejected, RecoveryRequired
 from ops.g5_docker_writer_fence import DockerFenceError, DockerWriterFence
 from ops.g5_edge_admission import EdgeAdmission
@@ -227,9 +228,15 @@ class RuntimeLifecyclePort(RuntimePreparationPort):
         )
 
     def reopen_writers(self, identity):
-        store = CutoverStore(self.request.host_root)
-        if store.show().phase is not Phase.COMMITTED_WRITERS_ALLOWED:
-            raise RuntimeError("attempted fixture login before terminal commit")
+        # The coordinator holds the exclusive manifest lock during this
+        # callback. Read the already persisted receipt without reacquiring it.
+        raw = (Path(self.request.host_root) / ".ops-state" / MANIFEST).read_text()
+        receipt = json.loads(raw)
+        payload = receipt["manifest"]
+        expected = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        if (receipt["sha256"] != hashlib.sha256(expected).hexdigest()
+                or payload != Manifest(identity, Phase.COMMITTED_WRITERS_ALLOWED).payload()):
+            raise RuntimeError("attempted fixture login before exact durable terminal commit")
         if self.published.read_text().strip() != identity.candidate_sha:
             raise RuntimeError("candidate metadata mismatch")
         # Only a controlled SQL login in this disposable fixture. Do not
