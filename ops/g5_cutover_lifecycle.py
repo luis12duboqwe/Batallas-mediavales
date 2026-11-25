@@ -36,6 +36,8 @@ class LifecyclePort(PreparationPort, Protocol):
         """
         ...
 
+    # Phase-sensitive actions execute under the exclusive manifest lock.
+    # They must not call CutoverStore.show/advance/restore recursively.
     def migrate(self, identity: Identity) -> None:
         """Run only the isolated maintenance executor, await its exit."""
         ...
@@ -94,6 +96,13 @@ class G5Lifecycle:
                 phase(target)
                 return updated
 
+            def mutate(expected: Phase, action):
+                require_continuity(expected)
+                with store.hold_phase(identity, expected):
+                    lease()
+                    action(identity)
+                    lease()
+
             def incident():
                 # Never downgrade COMMITTED, even if a writer start failed.
                 # If metadata/lease is uncertain, preserve evidence and do not
@@ -139,9 +148,8 @@ class G5Lifecycle:
                     if port.verify_continuity(identity) is not True:
                         raise StateError("writer exclusion lost before migration")
                 advance(Phase.PREPARED, Phase.MIGRATING)
-                require_continuity(Phase.MIGRATING)
                 try:
-                    port.migrate(identity)
+                    mutate(Phase.MIGRATING, port.migrate)
                 except MigrationRejected:
                     restore_rejected()
                 require_continuity(Phase.MIGRATING)
@@ -149,14 +157,12 @@ class G5Lifecycle:
                     raise StateError("candidate release verification failed")
                 require_continuity(Phase.MIGRATING)
                 advance(Phase.MIGRATING, Phase.VERIFIED_READONLY)
-                require_continuity(Phase.VERIFIED_READONLY)
-                port.publish_candidate(identity)
+                mutate(Phase.VERIFIED_READONLY, port.publish_candidate)
                 require_continuity(Phase.VERIFIED_READONLY)
                 # Publication is not writer authorization. Persist COMMITTED
                 # before any app login, Docker start or edge admission.
                 result = advance(Phase.VERIFIED_READONLY, Phase.COMMITTED_WRITERS_ALLOWED)
-                require_continuity(Phase.COMMITTED_WRITERS_ALLOWED)
-                port.reopen_writers(identity)
+                mutate(Phase.COMMITTED_WRITERS_ALLOWED, port.reopen_writers)
                 phase(Phase.COMMITTED_WRITERS_ALLOWED)
                 return result
             except BaseException:
