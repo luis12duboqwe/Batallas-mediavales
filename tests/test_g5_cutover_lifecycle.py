@@ -237,3 +237,46 @@ def test_lease_checks_marker_changes_during_active_context(request_scope):
             marker.write_text("version=1\noperation_id=another\n")
             with pytest.raises(StateError, match="marker changed"):
                 lease()
+
+
+@pytest.mark.parametrize("race", ["before_restore", "before_backup_verification"])
+def test_exact_phase_is_checked_inside_archive_lock(request_scope, monkeypatch, race):
+    port = Port(request_scope, "rejected" if race == "before_restore" else None)
+    original = CutoverStore.verify_restore_allowed
+    raced = False
+
+    def interleave(store, identity, backup_root, *, expected_phase=None):
+        nonlocal raced
+        if not raced and (
+            (race == "before_restore" and expected_phase is Phase.MIGRATING)
+            or (race == "before_backup_verification" and expected_phase is Phase.PREPARED)
+        ):
+            raced = True
+            successor = {
+                Phase.MIGRATING: Phase.VERIFIED_READONLY,
+                Phase.PREPARED: Phase.MIGRATING,
+            }[expected_phase]
+            store.advance(identity, expected_phase, successor)
+        return original(store, identity, backup_root, expected_phase=expected_phase)
+
+    monkeypatch.setattr(CutoverStore, "verify_restore_allowed", interleave)
+    with pytest.raises(StateError, match="unexpected exact restore phase"):
+        G5Lifecycle().execute(request_scope, port)
+    assert raced
+    assert port.store.show().phase is Phase.RECOVERY_REQUIRED
+    assert "restore" not in port.calls and "reopen" not in port.calls
+    if race == "before_restore":
+        assert port.data == b"candidate schema mutations"
+    else:
+        assert "migrate" not in port.calls
+
+
+def test_archive_phase_argument_rejects_non_enum(request_scope):
+    port = Port(request_scope)
+    from ops.g5_cutover_prepare import G5Preparation
+    manifest = G5Preparation().prepare(request_scope, port)
+    with pytest.raises(StateError, match="invalid expected restore phase"):
+        with port.store.verify_restore_allowed(
+            manifest.identity, request_scope.backup_root, expected_phase="PREPARED"
+        ):
+            pytest.fail("non-enum expected phase accepted")
