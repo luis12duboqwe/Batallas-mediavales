@@ -12,7 +12,7 @@ import os
 import re
 import stat
 
-from ops.g5_cutover_state import CutoverStore, StateError
+from ops.g5_cutover_state import CutoverStore, StateError, _stamp
 
 
 MARKER = "g5-cutover-activated"
@@ -42,7 +42,7 @@ def _check_lock(directory: int, lock_fd: int) -> None:
 
 def _check_marker(directory: int, expected) -> None:
     current = _entry(directory, MARKER)
-    if (current is None or _identity(current) != _identity(expected)
+    if (current is None or _stamp(current) != _stamp(expected)
         or not stat.S_ISREG(current.st_mode) or
         stat.S_IMODE(current.st_mode) != 0o600 or
         current.st_uid != os.geteuid() or current.st_nlink != 1):
@@ -114,14 +114,26 @@ def arm_cutover(host_root: str, operation_id: str):
                 _check_lock(directory, lock_fd)
                 if _identity(os.fstat(directory)) != state_identity:
                     raise StateError("state directory changed during activation")
-                try:
-                    yield
-                finally:
-                    # Never remove the marker, even after an exception.
-                    # Existing legacy entrypoints will continue to refuse.
+                owner_pid = os.getpid()
+                active = True
+
+                def assert_active():
+                    if not active or os.getpid() != owner_pid:
+                        raise StateError("G5 activation lease is no longer active in this process")
                     _check_marker(directory, expected)
                     _check_lock(directory, lock_fd)
                     store._check_directory(directory, state_identity)
+
+                try:
+                    assert_active()
+                    yield assert_active
+                finally:
+                    # Never remove the marker, even after an exception.
+                    # Existing legacy entrypoints will continue to refuse.
+                    try:
+                        assert_active()
+                    finally:
+                        active = False
             finally:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
         finally:
