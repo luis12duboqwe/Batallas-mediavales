@@ -110,7 +110,9 @@ class G5Lifecycle:
                 # barrier, same identity, verified archive and phase are all
                 # required. Keep the manifest lock while consuming the FD.
                 require_continuity(Phase.MIGRATING)
-                with store.verify_restore_allowed(identity, request.backup_root) as fd:
+                with store.verify_restore_allowed(
+                    identity, request.backup_root, expected_phase=Phase.MIGRATING
+                ) as fd:
                     lease()
                     if port.verify_continuity(identity) is not True:
                         raise StateError("writer exclusion lost before restore")
@@ -130,7 +132,9 @@ class G5Lifecycle:
             try:
                 require_continuity(Phase.PREPARED)
                 # Revalidate archive before authorizing migration mutations.
-                with store.verify_restore_allowed(identity, request.backup_root):
+                with store.verify_restore_allowed(
+                    identity, request.backup_root, expected_phase=Phase.PREPARED
+                ):
                     lease()
                     if port.verify_continuity(identity) is not True:
                         raise StateError("writer exclusion lost before migration")
