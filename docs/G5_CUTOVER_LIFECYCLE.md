@@ -54,3 +54,16 @@ backend/Socket.IO real. Falta la exclusión de rutas privilegiadas en host
 real, inventario y preservación durable de parámetros originales para
 reapertura, publicación de metadatos real, reinicio/recuperación desde
 crash y pruebas controladas de staging. No declarar RPO=0 ni cerrar #174.
+
+## Exclusión de carreras de fase
+
+El acceso al FD exige fase exacta (PREPARED para verificación inicial,
+MIGRATING para restore) bajo el lock del manifiesto. Migración, publicación
+y reapertura también retienen el lock exclusivo durante todo el callback;
+una transición competidora anterior al lock impide ejecutar el callback.
+Los adaptadores no deben adquirir recursivamente locks de CutoverStore.
+El ensayo de reapertura verifica directamente la identidad y checksum del
+recibo durable de COMMITTED mientras ese lock está en posesión del
+coordinador. Se añaden regresiones de las dos ventanas de carrera, escrituras
+concurrentes durante acciones y salida del contexto en un proceso hijo
+forked (no puede desbloquear la concesión del padre).
