@@ -374,6 +374,10 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+      - name: Rehearse real Nginx admission and pre-existing WebSocket disconnect
+        env:
+          CI: "true"
+        run: python3 -m ops.ci_g5_edge_admission
       - name: Verify deployment, backup, restore and load probes
         run: bash ops/ci_verify.sh
       - name: Rehearse persistent PostgreSQL 15 G5 writer fence on isolated container
