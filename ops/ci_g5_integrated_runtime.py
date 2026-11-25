@@ -32,7 +32,7 @@ from ops.g5_pg15_writer_fence import Pg15FenceTarget, Pg15PersistentFence
 DB = "game_ci"
 APP = "game_app"
 APP_PASSWORD = "synthetic-app-ci-only"
-ROWS = "1|committed-before\n2|worker-committed"
+ROWS = "1|committed-before\n2|worker-committed\n5|app-positive-control"
 
 
 class IsolatedAdmin:
@@ -214,7 +214,7 @@ def run_case(*, drift):
                       f" GRANT SELECT, INSERT ON durable_probe TO {APP};"
                       " INSERT INTO durable_probe VALUES (1,'committed-before');", DB)
             # Positive control of the exact post-fence SQL path.
-            run(app_command(database, "INSERT INTO durable_probe VALUES (2,'worker-committed');"))
+            run(app_command(database, "INSERT INTO durable_probe VALUES (5,'app-positive-control');"))
             backend = start("backend", ["python:3.11-alpine", "python", "-u", "-c", SERVER])
             start("backend", ["python:3.11-alpine", "python", "-u", "-c", SERVER])
             frontend = start("frontend", ["python:3.11-alpine", "python", "-m", "http.server", "80"])
@@ -223,6 +223,8 @@ def run_case(*, drift):
             start("worker", [
                 "-e", "PGPASSWORD=" + APP_PASSWORD, "--entrypoint", "/bin/sh",
                 "postgres:15-alpine", "-c",
+                "psql -X -w -v ON_ERROR_STOP=1 -h database -U game_app -d game_ci "
+                "-c \"INSERT INTO durable_probe VALUES (2,'worker-committed');\" && "
                 "psql -X -w -v ON_ERROR_STOP=1 -h database -U game_app -d game_ci "
                 "-c \"BEGIN; INSERT INTO durable_probe VALUES (3,'uncommitted'); "
                 "SELECT pg_sleep(300); COMMIT;\" || true; exec sleep 300",
@@ -297,6 +299,9 @@ def run_case(*, drift):
                     raise RuntimeError("restored snapshot lost commits or included uncommitted data")
                 if admin.sql("SELECT id, marker FROM durable_probe ORDER BY id;", DB) != ROWS:
                     raise RuntimeError("restore changed protected source")
+                if admin.sql("SELECT has_table_privilege('game_app', 'durable_probe', 'INSERT');",
+                             "isolated_restore_probe") != "t":
+                    raise RuntimeError("restored snapshot lost application role grants")
                 port.assert_barriers()
         finally:
             try:
