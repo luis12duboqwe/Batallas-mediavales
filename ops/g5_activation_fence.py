@@ -60,6 +60,7 @@ def arm_cutover(host_root: str, operation_id: str):
     if not isinstance(operation_id, str) or not OPERATION_ID.fullmatch(operation_id):
         raise StateError("invalid G5 operation ID")
 
+    owner_pid = os.getpid()
     store = CutoverStore(os.fspath(host_root))
     with store._state_directory() as directory:
         state_identity = _identity(os.fstat(directory))
@@ -114,7 +115,6 @@ def arm_cutover(host_root: str, operation_id: str):
                 _check_lock(directory, lock_fd)
                 if _identity(os.fstat(directory)) != state_identity:
                     raise StateError("state directory changed during activation")
-                owner_pid = os.getpid()
                 active = True
 
                 def assert_active():
@@ -135,6 +135,9 @@ def arm_cutover(host_root: str, operation_id: str):
                     finally:
                         active = False
             finally:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                # A forked child inherits the same open file description.
+                # It must not unlock the parent's active deployment lease.
+                if os.getpid() == owner_pid:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
         finally:
             os.close(lock_fd)
