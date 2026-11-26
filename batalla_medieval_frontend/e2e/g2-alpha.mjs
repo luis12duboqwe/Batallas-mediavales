@@ -6,15 +6,11 @@ const USERNAME = 'g2_browser';
 const PASSWORD = 'G2-Browser-Test-2026!';
 
 const failures = [];
-let realtimeConnected = false;
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 
 page.on('console', (message) => {
   const text = message.text();
-  if (text.includes('Socket connected')) {
-    realtimeConnected = true;
-  }
   if (message.type() === 'error') {
     failures.push(`console.error: ${text}`);
   }
@@ -40,8 +36,17 @@ async function login() {
   const inputs = page.locator('form input');
   await inputs.nth(0).fill(USERNAME);
   await inputs.nth(1).fill(PASSWORD);
-  await page.getByRole('button', { name: 'Entrar' }).click();
-  await page.waitForURL(`${BASE_URL}/`, { timeout: 15000 });
+  // Register before submitting, then wait for the real Socket.IO connect
+  // event instead of sampling a boolean after an arbitrary one-second sleep.
+  // Each login (including re-login) requires its own acknowledgement.
+  await Promise.all([
+    page.waitForEvent('console', {
+      predicate: (message) => message.type() === 'log' && message.text() === 'Socket connected',
+      timeout: 15000,
+    }),
+    page.waitForURL(`${BASE_URL}/`, { timeout: 15000 }),
+    page.getByRole('button', { name: 'Entrar' }).click(),
+  ]);
 }
 
 async function durableSnapshot() {
@@ -69,10 +74,6 @@ async function durableSnapshot() {
 
 try {
   await login();
-  await page.waitForTimeout(1000);
-  if (!realtimeConnected) {
-    failures.push('Authenticated Socket.IO connection was not established after login');
-  }
 
   const initialSnapshot = await durableSnapshot();
   if (!initialSnapshot.worldId || initialSnapshot.cityIds.length === 0) {
