@@ -585,17 +585,18 @@ class ActualReopenPort:
                           f"AND owner_id={user} AND world_id={world};", DATABASE) != "1":
             raise StateError("player city write did not persist")
         quotes = self._player_call("available", {"world": world, "city": city, "token": token})
-        quote = next((item for item in quotes if item.get("name") == "woodcutter"
+        # Warehouse is canonical, available at level zero and has no prerequisites.
+        quote = next((item for item in quotes if item.get("name") == "warehouse"
                       and item.get("can_upgrade") is True), None)
         if quote is None:
-            raise StateError("fixture woodcutter upgrade unavailable")
+            raise StateError("fixture warehouse upgrade unavailable")
         queue = self._player_call("upgrade", {"world": world, "city": city,
-                                  "token": token, "building": "woodcutter"})
+                                  "token": token, "building": "warehouse"})
         qid, level = queue.get("id"), queue.get("target_level")
         if any(type(value) is not int or value <= 0 for value in (qid, level)):
             raise StateError("player building queue not established")
         if self.admin.sql(f"SELECT count(*) FROM building_queue WHERE id={qid} "
-                          f"AND city_id={city} AND building_type='woodcutter' "
+                          f"AND city_id={city} AND building_type='warehouse' "
                           f"AND target_level={level};", DATABASE) != "1":
             raise StateError("player queue write did not persist")
         # Move only this known fixture deadline. Do not run the worker
@@ -606,7 +607,7 @@ class ActualReopenPort:
         wait_until(lambda: self.admin.sql(
             f"SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM building_queue WHERE id={qid}) "
             f"AND EXISTS (SELECT 1 FROM buildings WHERE city_id={city} "
-            f"AND name='woodcutter' AND level={level}) THEN 1 ELSE 0 END;", DATABASE) == "1",
+            f"AND name='warehouse' AND level={level}) THEN 1 ELSE 0 END;", DATABASE) == "1",
             "real dedicated worker did not complete the player queue")
         self.player_worker_verified = True
 
@@ -628,6 +629,17 @@ class ActualReopenPort:
             self.postcommit_write = True
             if self.scenario == "midreopen":
                 raise InjectedFailure("injected midway reopen failure")
+            if self.scenario == "drift":
+                original = next(item for item in self.originals if item.service == "backend")
+                run(["update", "--restart=always", original.identity])
+                try:
+                    original.assert_fenced_identity(inspect_container(original.identity),
+                                                    self.request.compose_project)
+                except StateError as exc:
+                    if str(exc) != "fenced container identity, configuration, policy or state drifted":
+                        raise
+                    raise InjectedFailure("actual restart policy drift rejected") from None
+                raise StateError("unexpectedly accepted restart policy drift")
             for service in ("backend", "worker"):
                 original = next(item for item in self.originals if item.service == service)
                 original.assert_fenced_identity(inspect_container(original.identity), self.request.compose_project)
@@ -651,6 +663,18 @@ class ActualReopenPort:
                 if self.scenario == "lost-response" and service == "backend":
                     raise InjectedFailure("injected lost response after backend start and policy update")
             backend = self.writers["backend"]
+            if self.scenario == "health":
+                # Stop the actual backend after it was started. Confirm the
+                # running state and failed health probe, then re-restrict
+                # all writers without rolling back committed data.
+                run(["update", "--restart=no", backend])
+                run(["stop", "--time", "10", backend])
+                if inspect_container(backend)["State"]["Running"] is not False:
+                    raise StateError("health fault did not stop candidate")
+                if probe(["exec", backend, "python", "-c",
+                          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=2)"])[0] == 0:
+                    raise StateError("health fault was not established")
+                raise InjectedFailure("actual candidate health unavailable")
             wait_until(lambda: probe(["exec", backend, "python", "-c",
                        "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=2)"])[0] == 0,
                        "candidate backend health failed")
@@ -672,7 +696,7 @@ def run_case(scenario, workspace):
     """Run exactly one disposable scenario; no public ports or external DB."""
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("CI") != "true":
         raise StateError("actual reopen fixture is GitHub CI only")
-    if scenario not in {"precommit", "midreopen", "lost-response", "incomplete", "success"}:
+    if scenario not in {"precommit", "midreopen", "lost-response", "incomplete", "success", "health", "drift"}:
         raise StateError("unknown fixture scenario")
     if not isinstance(workspace, str) or not os.path.isabs(workspace):
         raise StateError("an absolute pre-existing fixture workspace is required")
@@ -823,7 +847,7 @@ def run_case(scenario, workspace):
 def main():
     if len(sys.argv) != 3:
         print("usage: python -m ops.ci_g5_actual_reopen "
-              "{precommit,midreopen,lost-response,incomplete,success} WORKSPACE", file=sys.stderr)
+              "{precommit,midreopen,lost-response,incomplete,success,health,drift} WORKSPACE", file=sys.stderr)
         return 2
     run_case(sys.argv[1], sys.argv[2])
     return 0

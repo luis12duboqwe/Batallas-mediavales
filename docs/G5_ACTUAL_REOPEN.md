@@ -1,7 +1,7 @@
 # G5 — ensayo de reapertura real: certificación pendiente
 
 **NO-GO.** El fixture es exclusivo de GitHub CI, no autoriza staging ni
-producción. El escenario positivo y tres fallos están integrados en
+producción. El escenario positivo y cinco fallos están integrados en
 Validation, pero todavía no cuentan con evidencia de ejecución en este HEAD.
 
 El adaptador de ensayo usa `G5Lifecycle`, las barreras existentes de Nginx,
@@ -27,7 +27,7 @@ directorio privado existente (modo 0700) fuera del checkout, por ejemplo
 `python -m ops.ci_g5_actual_reopen precommit "$WORKSPACE_PRIVADO"`. Requiere
 las imágenes `medievol-g5-backend:ci`, `postgres:15-alpine` y
 `nginx:1.28-alpine`. El fixture crea y elimina recursos etiquetados propios;
-Validation exige los tres fallos y el caso positivo sin omitir ninguno.
+Validation exige los cinco fallos y el caso positivo sin omitir ninguno.
 
 ## Evidencia de esta sesión
 
@@ -57,12 +57,12 @@ Validation exige los tres fallos y el caso positivo sin omitir ninguno.
 
 Falta validar en CI la reapertura con edge al final, HTTP y Socket.IO
 autenticados, escritura de jugador y del worker y la correspondencia de
-imagen y checkout. Faltan adversarios adicionales de salud y de deriva de
-identidad/configuración. También falta volver a ejecutar y revisar todos los
+imagen y checkout. Se agregaron adversarios runtime de salud y deriva de política de reinicio;
+falta certificar su ejecución. También falta volver a ejecutar y revisar todos los
 casos adversarios en el HEAD definitivo, incluida la preservación de escrituras
 confirmadas tras COMMITTED. No se trata el rechazo de migración como permiso
 para restaurar en este fixture; la restauración de #206 sigue independiente.
-La rama se sincronizó con #208 y #209.
+La rama se sincronizó con #208, #209 y #206.
 
 No se afirma recuperación automática tras un crash, exclusión de administradores
 privilegiados fuera del fixture ni RPO=0. No se cierra #174.
@@ -78,4 +78,17 @@ real (solo se adelanta el deadline de la cola sintética). Se comprueba el
 ID de imagen de backend/worker contra la etiqueta construida y se registra
 el SHA del checkout; eso no demuestra una transición entre dos binarios
 distintos, ni procedencia criptográfica de la etiqueta. Falta ejecución
-integral, adversarios adicionales de salud/deriva y revisión.
+integral y revisión.
+
+## Evidencia CI y corrección posterior
+
+Validation 45911445243: precommit, midreopen y lost-response pasaron;
+el positivo llegó a registro, verificación, login, Socket.IO y ciudad,
+pero rechazó la construcción `woodcutter`, inexistente en el catálogo.
+Se usa `warehouse` (sin prerrequisitos) y se conserva la comprobación de
+cola persistida y consumo por worker real. Se agregaron fallos de salud
+(parada real del backend y probe negativo) y deriva de política de reinicio
+(cambio Docker real y rechazo de identidad/configuración). Ambos deben
+mantener COMMITTED, re-cerrar todas las barreras y conservar el write SQL
+confirmado. Los seis escenarios deben ejecutarse de nuevo en CI; el éxito
+no se presume. #206 se mantiene en Validation, sin quitar sus compuertas.

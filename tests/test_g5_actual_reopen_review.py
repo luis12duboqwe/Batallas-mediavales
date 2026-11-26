@@ -116,8 +116,8 @@ def test_cleanup_failure_preserves_workspace_and_reports_project(tmp_path, monke
     assert str(roots[0]) in error
 
 
-def test_removed_health_scenario_is_rejected(monkeypatch, tmp_path):
+def test_unknown_scenario_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("CI", "true")
     with pytest.raises(StateError, match="unknown fixture scenario"):
-        reopen.run_case("health", str(tmp_path))
+        reopen.run_case("unsupported", str(tmp_path))
