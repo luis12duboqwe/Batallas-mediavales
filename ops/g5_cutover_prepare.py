@@ -106,37 +106,47 @@ class G5Preparation:
         if not isinstance(request, PreparationRequest):
             raise StateError("invalid G5 preparation request")
         store = CutoverStore(request.host_root)
-        with arm_cutover(request.host_root, request.operation_id):
-            # The legacy deploy lock and persistent marker are active BEFORE
-            # the edge, role, Docker, or snapshot operation is attempted.
-            port.close_admission()
-            port.fence_database_writes()
-            port.stop_writers()
+        with arm_cutover(request.host_root, request.operation_id) as assert_active:
+            return self._prepare_armed(request, port, store, assert_active)
 
-            # Only a certified durable barrier can make a point-in-time
-            # observation meaningful. Exact bool True, not a truthy object,
-            # avoids interpreting a list of blockers as a successful probe.
-            if port.verify_drain() is not True:
-                raise StateError("G5 durable writer barrier was not certified")
-            receipt = port.capture_snapshot()
-            if type(receipt) is not BackupReceipt:
-                raise StateError("G5 backup did not provide a verified receipt")
-            if port.verify_drain() is not True:
-                raise StateError("G5 writer barrier changed during backup")
+    def _prepare_armed(self, request, port, store, assert_active):
+        """Internal preparation while the caller retains the activation lease."""
+        # The legacy deploy lock and persistent marker are active BEFORE
+        # the edge, role, Docker, or snapshot operation is attempted.
+        for action in (port.close_admission, port.fence_database_writes, port.stop_writers):
+            assert_active()
+            action()
+            assert_active()
 
-            identity = Identity(
-                operation_id=request.operation_id,
-                previous_sha=request.previous_sha,
-                candidate_sha=request.candidate_sha,
-                backup_sha256=receipt.sha256,
-                backup_path=receipt.path,
-                compose_project=request.compose_project,
-                postgres_db=request.postgres_db,
-            )
-            # This checks the actual disk archive (identity, inode, hash,
-            # path, ownership and size) and writes a durable PREPARED manifest.
-            # No subsequent step is allowed to reopen application writers.
-            manifest = store.prepare(identity, request.backup_root)
-            if manifest.phase is not Phase.PREPARED:
-                raise StateError("G5 preparation did not persist PREPARED")
-            return manifest
+        # Only a certified durable barrier can make a point-in-time
+        # observation meaningful. Exact bool True, not a truthy object,
+        # avoids interpreting a list of blockers as a successful probe.
+        assert_active()
+        if port.verify_drain() is not True:
+            raise StateError("G5 durable writer barrier was not certified")
+        assert_active()
+        receipt = port.capture_snapshot()
+        assert_active()
+        if type(receipt) is not BackupReceipt:
+            raise StateError("G5 backup did not provide a verified receipt")
+        if port.verify_drain() is not True:
+            raise StateError("G5 writer barrier changed during backup")
+
+        identity = Identity(
+            operation_id=request.operation_id,
+            previous_sha=request.previous_sha,
+            candidate_sha=request.candidate_sha,
+            backup_sha256=receipt.sha256,
+            backup_path=receipt.path,
+            compose_project=request.compose_project,
+            postgres_db=request.postgres_db,
+        )
+        # This checks the actual disk archive (identity, inode, hash,
+        # path, ownership and size) and writes a durable PREPARED manifest.
+        # No subsequent step is allowed to reopen application writers.
+        assert_active()
+        manifest = store.prepare(identity, request.backup_root)
+        assert_active()
+        if manifest.phase is not Phase.PREPARED:
+            raise StateError("G5 preparation did not persist PREPARED")
+        return manifest

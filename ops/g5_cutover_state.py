@@ -341,12 +341,40 @@ class CutoverStore:
             return updated
 
     @contextmanager
-    def verify_restore_allowed(self, identity, backup_root):
-        """Yield the verified backup FD while holding the exclusive manifest lock."""
+    def hold_phase(self, identity, expected_phase):
+        """Retain the exclusive manifest lock across a phase-sensitive action.
+
+        Adapter callbacks must not acquire CutoverStore locks recursively.
+        All cooperating manifest writers are excluded until action exit.
+        """
+        if not isinstance(expected_phase, Phase):
+            raise StateError("invalid expected cutover phase")
+        with self._locked() as directory:
+            manifest, stamp = self._matching(directory, identity)
+            if manifest.phase is not expected_phase:
+                raise StateError("unexpected exact cutover phase")
+            os.fsync(directory)
+            self._check_entry(directory, stamp)
+            try:
+                yield manifest
+            finally:
+                self._check_entry(directory, stamp)
+
+    @contextmanager
+    def verify_restore_allowed(self, identity, backup_root, *, expected_phase=None):
+        """Yield a verified FD under the lock, optionally requiring an exact phase.
+
+        The lifecycle always supplies its expected phase. Older read-only
+        verification callers may inspect any restore-eligible phase.
+        """
+        if expected_phase is not None and not isinstance(expected_phase, Phase):
+            raise StateError("invalid expected restore phase")
         with self._locked() as directory:
             manifest, stamp = self._matching(directory, identity)
             if manifest.phase not in RESTORE_PHASES:
                 raise StateError("cutover phase forbids snapshot restore")
+            if expected_phase is not None and manifest.phase is not expected_phase:
+                raise StateError("unexpected exact restore phase")
             with self._backup(identity, backup_root) as (backup_fd, check_backup):
                 os.fsync(directory)
                 self._check_entry(directory, stamp)
