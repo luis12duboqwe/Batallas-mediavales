@@ -67,3 +67,12 @@ recibo durable de COMMITTED mientras ese lock está en posesión del
 coordinador. Se añaden regresiones de las dos ventanas de carrera, escrituras
 concurrentes durante acciones y salida del contexto en un proceso hijo
 forked (no puede desbloquear la concesión del padre).
+
+## Clasificación de rechazo y guardas
+
+Solo una excepción `MigrationRejected` originada directamente en `port.migrate`
+puede habilitar la ruta de restore. El coordinador comprueba además la salida
+correcta de las guardas de fase y lease antes de usar esa clasificación. Una
+excepción del mismo tipo en continuidad, entrada o salida del lock constituye
+incertidumbre: RECOVERY_REQUIRED, sin restore ni reapertura. Las regresiones
+incluyen el rechazo legítimo seguido de un fallo de guarda.
