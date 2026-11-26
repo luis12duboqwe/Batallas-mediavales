@@ -438,3 +438,18 @@ jobs:
             exit 1
           fi
           echo "Packaged frontend HTTP and asset-readability smoke passed"
+      - name: Rehearse actual game reopen after durable commit
+        timeout-minutes: 20
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          docker pull postgres:15-alpine
+          docker pull nginx:1.28-alpine
+          workspace="$(mktemp -d)"
+          trap 'rmdir "$workspace" || true' EXIT
+          failed=0
+          for scenario in precommit midreopen lost-response success; do
+            python3 -m ops.ci_g5_actual_reopen "$scenario" "$workspace" || failed=1
+          done
+          test "$failed" -eq 0

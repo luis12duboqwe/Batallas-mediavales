@@ -1,10 +1,10 @@
-# G5 — reapertura real: implementación incompleta
+# G5 — ensayo de reapertura real: certificación pendiente
 
 **NO-GO.** El fixture es exclusivo de GitHub CI, no autoriza staging ni
-producción y todavía no demuestra una reapertura completa. No se ha
-integrado en workflows.
+producción. El escenario positivo y tres fallos están integrados en
+Validation, pero todavía no cuentan con evidencia de ejecución en este HEAD.
 
-El adaptador parcial usa `G5Lifecycle`, las barreras existentes de Nginx,
+El adaptador de ensayo usa `G5Lifecycle`, las barreras existentes de Nginx,
 PostgreSQL y Docker, PostgreSQL 15 y la imagen backend construida. Crea una
 red interna desechable con direcciones fijadas y verifica sus identidades;
 no publica puertos ni usa datos reales. Guarda un recibo durable de identidad,
@@ -20,13 +20,14 @@ SQL confirmada como rol app después de `COMMITTED` y vuelven a restringir
 los escritores sin restaurar el snapshot. La pérdida de respuesta es una
 excepción inyectada después de iniciar el backend, no una desconexión real
 del transporte. El caso `incomplete` se detiene deliberadamente sin abrir
-el edge; **ningún caso demuestra todavía una reapertura exitosa**.
+el edge. El caso `success` exige reapertura y escrituras reales; falta
+validarlo en CI.
 Para ejecutar un caso en GitHub CI se pasa su nombre y una ruta absoluta a un
 directorio privado existente (modo 0700) fuera del checkout, por ejemplo
 `python -m ops.ci_g5_actual_reopen precommit "$WORKSPACE_PRIVADO"`. Requiere
 las imágenes `medievol-g5-backend:ci`, `postgres:15-alpine` y
 `nginx:1.28-alpine`. El fixture crea y elimina recursos etiquetados propios;
-la integración en CI y la ejecución del código final siguen pendientes.
+Validation exige los tres fallos y el caso positivo sin omitir ninguno.
 
 ## Evidencia de esta sesión
 
@@ -54,14 +55,14 @@ la integración en CI y la ejecución del código final siguen pendientes.
 
 ## Pendiente
 
-Faltan una reapertura exitosa con edge al final, HTTP y Socket.IO autenticados,
-una escritura de jugador y una escritura real del worker, verificar la versión
-de release frente a la imagen construida y pruebas de salud y de deriva de
+Falta validar en CI la reapertura con edge al final, HTTP y Socket.IO
+autenticados, escritura de jugador y del worker y la correspondencia de
+imagen y checkout. Faltan adversarios adicionales de salud y de deriva de
 identidad/configuración. También falta volver a ejecutar y revisar todos los
 casos adversarios en el HEAD definitivo, incluida la preservación de escrituras
 confirmadas tras COMMITTED. No se trata el rechazo de migración como permiso
 para restaurar en este fixture; la restauración de #206 sigue independiente.
-La rama actual no incorpora el cambio de #208.
+La rama se sincronizó con #208 y #209.
 
 No se afirma recuperación automática tras un crash, exclusión de administradores
 privilegiados fuera del fixture ni RPO=0. No se cierra #174.
