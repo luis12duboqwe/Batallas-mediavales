@@ -127,6 +127,8 @@ publicación, exclusión de administradores reales, failover, crash del
 postmaster, recuperación del coordinador ni certificación de staging #161.
 La exclusividad privilegiada deriva de la propiedad del fixture; observar
 sesiones no la demuestra en producción. **No afirma RPO=0.**
+La inyección de fallo es SQL transaccional conocido; SIGKILL del runner o
+fallo del daemon Docker no garantizan ejecución de `finally`.
 
 En `finally` elimina contenedores, volúmenes anónimos de PG15, ambas DB
 desaparecen con el cluster desechable, red interna
@@ -140,6 +142,35 @@ No imprime passwords, URLs ni stderr de procesos DB.
 
 ## Ejecución verificada
 
-La evidencia de los cinco casos reales se incorporará tras completar el
-ensayo en el runner de esta PR. La futura ejecución obligatoria en
-`validation.yml` queda expresamente fuera del alcance de #205.
+2026-11-26, runner GitHub del agente de la PR draft #206, código comprometido
+`6531c961b6aa3b03f3909b75eeeb167a84a5a541`. Backend construido desde HEAD,
+PG15 real, sin VPS. Comando de verificación final:
+
+```sh
+CI=true GITHUB_ACTIONS=true BM_G5_FULL_SCHEMA_RESTORE=1 \
+python -m pytest --noconftest -o addopts='' -q -s \
+  tests/test_g5_full_schema_restore_safety.py \
+  tests/test_g5_full_schema_restore_runtime.py \
+  tests/test_g5_pg15_writer_fence.py
+```
+
+**47 passed en 179.52 s**, sin skips en esta ejecución opt-in. Cada caso
+registró 50 tablas, 48 secuencias y 538 bloques de catálogo del snapshot,
+misma identidad DB y barrera app cerrada.
+
+| Caso | Resultado JSON | SHA256 del snapshot verificado |
+| --- | --- | --- |
+| `rollback` | `previous_restored` | `6fe9438b7764942261fdf83c4453cb7747ade9577cb0ceea5753d20d46154039` |
+| `restore-failure` | `candidate_retained` | `56b3cf62e1f63f8aab5f7899b87ead7d434c91148ec1d182f4cb3f027f760aea` |
+| `tampered` | `restore_refused` | `7a35e0d69c4fec61b09af1bce1f9868b403cd7832a2449f07ede58d4f9d6c379` |
+| `drift` | `restore_refused` | `570b5b3e4254cecb9018b3400423b9e9b56f5c87499758a4b87b3426b6977cd3` |
+| `dependency` | `restore_refused` | `88f130c977d7efa3d97c9b288697855b8593756836885b72f45813cc152b3df2` |
+
+Después, `docker ps -a` y `docker network ls` filtrados por etiqueta
+`bm.g5.full-schema` devolvieron vacío; `docker volume ls` y búsqueda de
+directorios temporales `bm-g5-full-*` también vacíos. CodeQL: cero alertas;
+escaneo de secretos: ninguno. Revisión independiente final sin hallazgos.
+
+Esto es evidencia del runner del agente, no de un nuevo job obligatorio
+de Validation. La futura integración en `validation.yml`, revisión de la
+responsable técnica y certificación G5 quedan pendientes; #174 sigue abierto.
