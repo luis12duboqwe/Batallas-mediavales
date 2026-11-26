@@ -410,7 +410,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Build backend image
-        run: docker build --file batalla_medieval_backend/Dockerfile batalla_medieval_backend
+        run: docker build --tag medievol-g5-backend:ci --file batalla_medieval_backend/Dockerfile batalla_medieval_backend
+      - name: Rehearse shipped Alembic and seed with fenced application identity
+        env:
+          CI: "true"
+        run: python3 -m ops.ci_g5_actual_migration
+      - name: Rehearse full-schema PostgreSQL rollback and adversaries
+        env:
+          CI: "true"
+        run: |
+          docker tag medievol-g5-backend:ci "bm-g5-full-schema-head:$(git rev-parse HEAD)"
+          python3 -m ops.ci_g5_full_schema_restore --scenario all
       - name: Build frontend image
         run: docker build --tag medievol-g5-frontend:ci --file batalla_medieval_frontend/Dockerfile batalla_medieval_frontend
       - name: Verify shipped frontend is readable to Nginx
