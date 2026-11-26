@@ -100,15 +100,44 @@ try {
   });
 
   await journey.check('simulate map request failure and verify explicit retry', async () => {
-    await loginUi(page, 'g2_browser', 'G2-Browser-Test-2026!');
+    const activeToken = await loginUi(page, 'g2_browser', 'G2-Browser-Test-2026!');
+    const snapshot = await playerSnapshot(activeToken);
+    assert.equal(snapshot.worldId, worldB);
+    const capital = snapshot.cities.find((city) => city.id === cityB);
+    assert.ok(capital, 'Expected active capital in second world');
+    assert.ok(Number.isSafeInteger(capital.x) && Number.isSafeInteger(capital.y));
     let intercepted = 0;
-    const reject = (route) => { intercepted += 1; route.abort('failed'); };
+    const reject = async (route) => { intercepted += 1; await route.abort('failed'); };
     await page.route(/\/map\/tiles\?/, reject);
-    await page.goto(`${UI}/map`, { waitUntil: 'domcontentloaded' });
-    await page.getByTestId('map-load-error').waitFor({ timeout: 15000 });
-    assert.ok(intercepted >= 1, 'Fault injection did not intercept a map request');
-    await page.unroute(/\/map\/tiles\?/, reject);
-    await page.getByRole('button', { name: 'Reintentar mapa' }).click();
+    try {
+      await page.goto(`${UI}/map`, { waitUntil: 'domcontentloaded' });
+      // Map mounts before the asynchronously hydrated city centers it. Keep
+      // fault injection active until the final center has failed and settled.
+      // Otherwise unroute can let the automatic centering request succeed
+      // and detach the retry button before Playwright clicks it.
+      await page.waitForFunction(({ x, y }) => {
+        const center = document.querySelector('[data-testid="map-center"]');
+        const panel = document.querySelector('[data-testid="map-grid-panel"]');
+        return center?.textContent.trim() === `Centro: (${x}, ${y})`
+          && panel?.getAttribute('aria-busy') === 'false'
+          && Boolean(panel.querySelector('[data-testid="map-load-error"]'));
+      }, { x: capital.x, y: capital.y }, { timeout: 15000 });
+      assert.ok(intercepted >= 1, 'Fault injection did not intercept a map request');
+    } finally {
+      await page.unroute(/\/map\/tiles\?/, reject);
+    }
+    // Prove the click actually sends a fresh request for the settled target,
+    // rather than accepting a coincidental automatic recovery.
+    await Promise.all([
+      page.waitForRequest((request) => {
+        const url = new URL(request.url());
+        return request.method() === 'GET' && url.pathname.endsWith('/map/tiles')
+          && url.searchParams.get('world_id') === String(worldB)
+          && url.searchParams.get('x') === String(capital.x)
+          && url.searchParams.get('y') === String(capital.y);
+      }, { timeout: 15000 }),
+      page.getByRole('button', { name: 'Reintentar mapa' }).click({ timeout: 15000 }),
+    ]);
     await page.getByTestId('map-load-error').waitFor({ state: 'hidden', timeout: 15000 });
     await page.getByTestId('map-grid-content').waitFor({ state: 'visible', timeout: 15000 });
     await page.evaluate(() => window.dispatchEvent(new Event('offline')));
