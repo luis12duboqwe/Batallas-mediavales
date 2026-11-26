@@ -1,49 +1,67 @@
 # G5 — reapertura real: implementación incompleta
 
-**NO-GO.** No hay ensayo ejecutable de reapertura ni autorización para
-staging o producción. `python -m ops.ci_g5_actual_reopen` termina con código
-2 sin modificar servicios; no se ha integrado en workflows.
+**NO-GO.** El fixture es exclusivo de GitHub CI, no autoriza staging ni
+producción y todavía no demuestra una reapertura completa. No se ha
+integrado en workflows.
 
-El módulo contiene únicamente controles preparatorios: validación de
-identidad y parámetros originales PG15, captura de la configuración Docker
-inspeccionada y de la política completa (incluyendo `MaximumRetryCount`),
-comparación con el contenedor cerrado (estado `created` o `exited`, sin
-ejecución, pausa ni reinicio) y comprobación del recibo exacto COMMITTED.
-No consulta SQL ni Docker, no conserva esos datos de manera
-durable y no restaura nada. El control de recibo requiere que quien lo llame
-ya tenga el bloqueo exclusivo `hold_phase` y la lease de activación. No
-debe tratarse como autorización independiente.
+El adaptador parcial usa `G5Lifecycle`, las barreras existentes de Nginx,
+PostgreSQL y Docker, PostgreSQL 15 y la imagen backend construida. Crea una
+red interna desechable con direcciones fijadas y verifica sus identidades;
+no publica puertos ni usa datos reales. Guarda un recibo durable de identidad,
+parámetros SQL y políticas de reinicio completas. La configuración Docker se
+representa mediante hashes, sin guardar variables de entorno ni credenciales.
+El recibo no permite reanudar automáticamente tras un crash.
+Si falla la limpieza de Docker por etiqueta, el directorio del fixture se
+conserva y se informa su proyecto para conciliación manual.
 
-## Evidencia de esta sesión CI
+El fixture incluye casos individuales `precommit`, `midreopen` y
+`lost-response`. Los fallos posteriores comprueban una escritura
+SQL confirmada como rol app después de `COMMITTED` y vuelven a restringir
+los escritores sin restaurar el snapshot. La pérdida de respuesta es una
+excepción inyectada después de iniciar el backend, no una desconexión real
+del transporte. El caso `incomplete` se detiene deliberadamente sin abrir
+el edge; **ningún caso demuestra todavía una reapertura exitosa**.
+Para ejecutar un caso en GitHub CI se pasa su nombre y una ruta absoluta a un
+directorio privado existente (modo 0700) fuera del checkout, por ejemplo
+`python -m ops.ci_g5_actual_reopen precommit "$WORKSPACE_PRIVADO"`. Requiere
+las imágenes `medievol-g5-backend:ci`, `postgres:15-alpine` y
+`nginx:1.28-alpine`. El fixture crea y elimina recursos etiquetados propios;
+la integración en CI y la ejecución del código final siguen pendientes.
 
-- Los 22 tests focalizados de `tests/test_g5_actual_reopen_guards.py`
-  pasaron dentro de `medievol-g5-backend:ci` (pytest 9.1.1). Son tests
-  unitarios, no una prueba de reapertura.
-- El ensayo existente `python -m ops.ci_g5_actual_migration` falló al
-  ejecutar la primera migración por fallo de resolución Docker del alias
-  `database` en la red interna. Una prueba independiente de
-  `socket.getaddrinfo("database", 5432)` también falló.
-- Una repetición diagnóstica **en memoria**, sin editar el ensayo existente,
-  añadió `--add-host` con la IP del contenedor PostgreSQL inspeccionado.
-  Esa repetición del ensayo existente pasó: Alembic 0019→0020, seed y
-  bloqueo del rol app. No inició el backend ni el worker, no abrió Nginx
-  y no probó la reapertura.
-- Ambas ejecuciones limpiaron sus recursos etiquetados. No se usaron puertos
-  publicados ni datos o credenciales de despliegue.
+## Evidencia de esta sesión
 
-## Trabajo pendiente
+- HEAD de partida: `1717969d745b3206422bbe4ae012e62304e7821e`.
+- Las pruebas unitarias de controles, recibo y revisión dieron **61 passed,
+  4 warnings** sobre el
+  código de `ops/ci_g5_actual_reopen.py` con SHA-256
+  `48eb48f20a29a77a193b5f9c0d626ed47883a02e6fd84775ea336a438f226b35`:
 
-Falta implementar el adaptador real de `G5Lifecycle` con las tres barreras,
-captura y comprobación efectiva de identidades SQL y Docker, migración y
-publicación durables, reapertura de backend/worker por ID y restauración
-exacta de parámetros y políticas originales. Faltan la verificación
-independiente de imagen y esquema, HTTP y Socket.IO reales, registro de
-jugador y finalización de cola por `app.worker`, y todos los adversarios
-de fallo anterior y posterior a COMMITTED (incluidos salud, pérdida de
-respuesta y deriva). Un fallo posterior al commit debe cerrar admisión y
-restringir escritores sin restaurar el snapshot anterior. También falta
-ejecutar el ensayo completo con limpieza verificada y luego integrarlo en CI.
+  ```sh
+  docker run --rm --network none --env PYTHONDONTWRITEBYTECODE=1 \
+    --volume "$PWD/ops:/app/ops:ro" --volume "$PWD/tests:/app/tests:ro" \
+    --entrypoint python medievol-g5-backend:ci -m pytest -q -p no:cacheprovider \
+    --basetemp=.fixture-test tests/test_g5_actual_reopen_guards.py \
+    tests/test_g5_actual_reopen_receipt.py tests/test_g5_actual_reopen_review.py
+  ```
+- Las pruebas existentes de ciclo y barreras dieron **111 passed, 4 warnings**
+  en la imagen backend, con `umask 022`.
+- Los cuatro casos de fallo se ejecutaron con éxito en versiones anteriores
+  del fixture. **No se han ejecutado sobre el código final**; por tanto, no
+  son evidencia de que esos casos pasen en este HEAD.
+- Las imágenes backend, PostgreSQL 15 y Nginx se prepararon en el runner.
+  La inspección posterior no encontró contenedores ni redes con la etiqueta
+  del fixture. No se usaron puertos publicados, VPS ni credenciales reales.
 
-Este avance no demuestra recuperación automática tras un crash, exclusión
-de administradores privilegiados fuera del fixture ni RPO=0. La restauración
-de #206 sigue siendo independiente; no se cierra #174.
+## Pendiente
+
+Faltan una reapertura exitosa con edge al final, HTTP y Socket.IO autenticados,
+una escritura de jugador y una escritura real del worker, verificar la versión
+de release frente a la imagen construida y pruebas de salud y de deriva de
+identidad/configuración. También falta volver a ejecutar y revisar todos los
+casos adversarios en el HEAD definitivo, incluida la preservación de escrituras
+confirmadas tras COMMITTED. No se trata el rechazo de migración como permiso
+para restaurar en este fixture; la restauración de #206 sigue independiente.
+La rama actual no incorpora el cambio de #208.
+
+No se afirma recuperación automática tras un crash, exclusión de administradores
+privilegiados fuera del fixture ni RPO=0. No se cierra #174.
