@@ -356,3 +356,55 @@ def test_forked_child_cannot_release_parent_activation_lease(request_scope):
                 fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     finally:
         context.__exit__(None, None, None)
+
+
+@pytest.mark.parametrize("source", [
+    "continuity", "before_lock", "after_lock", "after_rejection",
+])
+def test_only_migration_executor_may_authorize_restore(request_scope, monkeypatch, source):
+    from contextlib import contextmanager
+
+    port = Port(request_scope, "rejected" if source == "after_rejection" else None)
+    injected = False
+    original_continuity = port.verify_continuity
+    original_hold = CutoverStore.hold_phase
+
+    def continuity(identity):
+        nonlocal injected
+        # Read without acquiring the manifest lock: PREPARED archive
+        # verification also invokes this callback under the lock.
+        payload = json.loads((port.state / "g5-cutover.json").read_text())["manifest"]
+        if (source == "continuity" and not injected
+                and payload["phase"] == Phase.MIGRATING.value):
+            injected = True
+            raise MigrationRejected("misclassified guard failure")
+        return original_continuity(identity)
+
+    @contextmanager
+    def hold(store, identity, expected):
+        nonlocal injected
+        if expected is Phase.MIGRATING and source == "before_lock":
+            injected = True
+            raise MigrationRejected("misclassified lock entry failure")
+        with original_hold(store, identity, expected) as manifest:
+            try:
+                yield manifest
+            finally:
+                if expected is Phase.MIGRATING and source in ("after_lock", "after_rejection"):
+                    injected = True
+                    raise MigrationRejected("misclassified lock exit failure")
+
+    monkeypatch.setattr(port, "verify_continuity", continuity)
+    monkeypatch.setattr(CutoverStore, "hold_phase", hold)
+    with pytest.raises(MigrationRejected, match="misclassified"):
+        G5Lifecycle().execute(request_scope, port)
+    assert injected
+    assert port.store.show().phase is Phase.RECOVERY_REQUIRED
+    assert "restore" not in port.calls
+    assert "publish" not in port.calls and "reopen" not in port.calls
+    if source in ("continuity", "before_lock"):
+        assert "migrate" not in port.calls
+        assert port.data == b"confirmed previous data"
+    else:
+        assert "migrate" in port.calls
+        assert port.data == b"candidate schema mutations"

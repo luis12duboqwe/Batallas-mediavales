@@ -62,7 +62,11 @@ ln -- "$checksum_tmp" "$checksum"
 checksum_published=1
 sha256sum --check "$checksum"
 
-find "$BACKUP_DIR" -type f \
+# Retention applies only to published top-level archives. Other backup
+# invocations remove their private staging directories concurrently; never
+# descend into those directories. Ignore entries disappearing after readdir
+# (including an old archive pruned by another invocation), not other errors.
+find "$BACKUP_DIR" -ignore_readdir_race -maxdepth 1 -type f \
   \( -name "${POSTGRES_DB}-*.dump" -o -name "${POSTGRES_DB}-*.dump.sha256" \) \
   -mtime "+$BACKUP_RETENTION_DAYS" -delete
 

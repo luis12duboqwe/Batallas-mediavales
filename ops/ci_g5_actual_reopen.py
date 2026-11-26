@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import time
 from uuid import uuid4
@@ -256,6 +257,69 @@ class InjectedFailure(StateError):
     """Deliberate, specifically reached scenario fault."""
 
 
+# Runs inside the fixture backend image, against the pinned internal Nginx IP.
+# No SMTP, external network, browser or additional package installation.
+PLAYER_CLIENT = r'''
+import asyncio
+import json
+import sys
+import httpx
+import websockets
+
+base, action, raw = sys.argv[1:]
+data = json.loads(raw)
+with httpx.Client(base_url=base, timeout=10, trust_env=False) as client:
+    if action == "register":
+        response = client.post("/api/auth/register", json=data)
+    elif action == "verify":
+        response = client.post("/api/auth/verify-email", params=data)
+    elif action == "login":
+        response = client.post("/api/auth/token", data=data)
+    elif action == "join":
+        response = client.post("/api/worlds/" + str(data["world"]) + "/join",
+                               headers={"Authorization": "Bearer " + data["token"]})
+    elif action == "available":
+        response = client.get("/api/building/available",
+                              params={"world_id": data["world"], "city_id": data["city"]},
+                              headers={"Authorization": "Bearer " + data["token"]})
+    elif action == "upgrade":
+        response = client.post("/api/building/upgrade", params={"world_id": data["world"]},
+                               json={"city_id": data["city"], "building_type": data["building"]},
+                               headers={"Authorization": "Bearer " + data["token"]})
+    elif action == "socket":
+        async def verify_socket():
+            url = base.replace("http://", "ws://", 1) + "/socket.io/?EIO=4&transport=websocket"
+            async with websockets.connect(url, open_timeout=5, close_timeout=2) as sock:
+                hello = await asyncio.wait_for(sock.recv(), timeout=5)
+                if not hello.startswith("0"):
+                    raise RuntimeError("Engine.IO handshake missing")
+                await sock.send("40" + json.dumps({"token": data["token"]}))
+                joined, connected = False, False
+                for _ in range(8):
+                    packet = await asyncio.wait_for(sock.recv(), timeout=5)
+                    if packet == "2":
+                        await sock.send("3")
+                    elif packet.startswith("40"):
+                        connected = True
+                    elif packet.startswith("42"):
+                        event = json.loads(packet[2:])
+                        if event == ["joined", {"room": "user_" + str(data["user"])}]:
+                            joined = True
+                    elif packet.startswith("44"):
+                        raise RuntimeError("authenticated Socket.IO rejected")
+                    if joined and connected:
+                        return
+                raise RuntimeError("authenticated room acknowledgement missing")
+        asyncio.run(asyncio.wait_for(verify_socket(), timeout=20))
+        print(json.dumps({"socket": True}))
+        sys.exit(0)
+    else:
+        raise RuntimeError("unknown fixture client action")
+    response.raise_for_status()
+    print(json.dumps(response.json()))
+'''
+
+
 class ActualReopenPort:
     """Single-process CI adapter; every administrator channel belongs to CI."""
 
@@ -276,6 +340,7 @@ class ActualReopenPort:
         write_original_receipt(self.original_path, self.original_db, self.originals)
         self.reopen_attempted = False
         self.postcommit_write = False
+        self.player_worker_verified = False
 
     def check_network(self):
         rows = json.loads(run(["network", "inspect", self.network_id]))
@@ -461,6 +526,90 @@ class ActualReopenPort:
             raise StateError("fixture fail-closed restriction uncertain")
         self.verify_drain()
 
+    def _player_call(self, action, data):
+        edge_url = "http://" + self.addresses[self.edge.nginx_id]
+        raw = run(["exec", self.writers["backend"], "python", "-c", PLAYER_CLIENT,
+                   edge_url, action, json.dumps(data)])
+        return json.loads(raw)
+
+    def _open_edge_last(self, identity):
+        # Fixture-only inverse of EdgeAdmission.close. The coordinator still
+        # owns the activation lease and exact COMMITTED manifest lock.
+        require_committed_receipt_locked(self.store, identity)
+        self.require_publication(identity)
+        self.check_network()
+        self.check_db_identity(fenced=False)
+        self.edge.assert_closed()
+        with self.edge._edge() as (fd, _):
+            self.edge._runtime(fd)
+            if os.listdir(fd):
+                raise StateError("fixture edge was not closed")
+            os.mkdir("open", mode=0o755, dir_fd=fd)
+            os.chmod("open", 0o755, dir_fd=fd)
+            os.fsync(fd)
+            self.edge._runtime(fd)
+
+    def _prove_player_and_worker(self):
+        # Registration and email verification are real HTTP writes through
+        # Nginx. The verification token is read only from our isolated DB.
+        username = "g5_reopen_player"
+        password = "G5-Reopen-Fixture-2026!"
+        player = self._player_call("register", {"username": username,
+                                  "email": "g5-reopen@example.com", "password": password})
+        user = player.get("id")
+        if type(user) is not int or user <= 0:
+            raise StateError("real player registration not established")
+        verification = self.admin.sql(
+            f"SELECT verification_token FROM users WHERE id={user} "
+            f"AND username='{username}' AND NOT is_verified;", DATABASE)
+        if not verification:
+            raise StateError("fixture verification token missing")
+        self._player_call("verify", {"token": verification})
+        if self.admin.sql(f"SELECT count(*) FROM users WHERE id={user} AND is_verified;",
+                          DATABASE) != "1":
+            raise StateError("verification did not persist")
+        login = self._player_call("login", {"username": username, "password": password})
+        token = login.get("access_token")
+        if not isinstance(token, str) or not token:
+            raise StateError("real player authentication missing")
+        if self._player_call("socket", {"token": token, "user": user}) != {"socket": True}:
+            raise StateError("real Socket.IO acknowledgement missing")
+        world = int(self.admin.sql("SELECT id FROM worlds WHERE name='Mundo 1';", DATABASE))
+        if world <= 0:
+            raise StateError("candidate world missing")
+        membership = self._player_call("join", {"world": world, "token": token})
+        city = membership.get("starting_city_id")
+        if type(city) is not int or city <= 0:
+            raise StateError("player capital missing")
+        if self.admin.sql(f"SELECT count(*) FROM cities WHERE id={city} "
+                          f"AND owner_id={user} AND world_id={world};", DATABASE) != "1":
+            raise StateError("player city write did not persist")
+        quotes = self._player_call("available", {"world": world, "city": city, "token": token})
+        quote = next((item for item in quotes if item.get("name") == "woodcutter"
+                      and item.get("can_upgrade") is True), None)
+        if quote is None:
+            raise StateError("fixture woodcutter upgrade unavailable")
+        queue = self._player_call("upgrade", {"world": world, "city": city,
+                                  "token": token, "building": "woodcutter"})
+        qid, level = queue.get("id"), queue.get("target_level")
+        if any(type(value) is not int or value <= 0 for value in (qid, level)):
+            raise StateError("player building queue not established")
+        if self.admin.sql(f"SELECT count(*) FROM building_queue WHERE id={qid} "
+                          f"AND city_id={city} AND building_type='woodcutter' "
+                          f"AND target_level={level};", DATABASE) != "1":
+            raise StateError("player queue write did not persist")
+        # Move only this known fixture deadline. Do not run the worker
+        # function manually or call HTTP after this point: only the real
+        # dedicated worker may consume this due queue.
+        self.admin.sql(f"UPDATE building_queue SET finish_time=now()-interval '2 seconds' "
+                       f"WHERE id={qid} AND city_id={city};", DATABASE)
+        wait_until(lambda: self.admin.sql(
+            f"SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM building_queue WHERE id={qid}) "
+            f"AND EXISTS (SELECT 1 FROM buildings WHERE city_id={city} "
+            f"AND name='woodcutter' AND level={level}) THEN 1 ELSE 0 END;", DATABASE) == "1",
+            "real dedicated worker did not complete the player queue")
+        self.player_worker_verified = True
+
     def reopen_writers(self, identity):
         self.reopen_attempted = True
         try:
@@ -507,9 +656,13 @@ class ActualReopenPort:
                        "candidate backend health failed")
             if not self.verify_candidate_readonly(identity):
                 raise StateError("candidate schema changed after start")
-            # Do not advertise a completed rehearsal until real authenticated
-            # player/Socket.IO and worker write evidence is implemented.
-            raise StateError("real authenticated player/socket and worker evidence not yet implemented")
+            if self.scenario != "success":
+                raise StateError("incomplete scenario intentionally leaves the edge closed")
+            self._open_edge_last(identity)
+            self._prove_player_and_worker()
+            self.require_publication(identity)
+            self.check_network()
+            self.check_db_identity(fenced=False)
         except BaseException:
             self._restrict_after_failure()
             raise
@@ -519,7 +672,7 @@ def run_case(scenario, workspace):
     """Run exactly one disposable scenario; no public ports or external DB."""
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("CI") != "true":
         raise StateError("actual reopen fixture is GitHub CI only")
-    if scenario not in {"precommit", "midreopen", "lost-response", "incomplete"}:
+    if scenario not in {"precommit", "midreopen", "lost-response", "incomplete", "success"}:
         raise StateError("unknown fixture scenario")
     if not isinstance(workspace, str) or not os.path.isabs(workspace):
         raise StateError("an absolute pre-existing fixture workspace is required")
@@ -617,14 +770,22 @@ def run_case(scenario, workspace):
             "nginx:1.28-alpine",
         ], extra=("--add-host", "backend:" + ips["backend"],
                   "--add-host", "frontend:" + ips["frontend"]))
+        candidate_sha = subprocess.check_output(
+            ["git", "-C", str(Path(__file__).resolve().parents[1]), "rev-parse", "HEAD"],
+            text=True, timeout=10).strip()
+        image_id = run(["image", "inspect", "--format", "{{.Id}}", IMAGE]).strip()
+        if not _IMAGE_ID.fullmatch(image_id) or any(
+            inspect_container(cid).get("Image") != image_id for cid in (backend, worker)
+        ):
+            raise StateError("candidate backend and worker do not match the built image")
         request = PreparationRequest(str(host), str(backups), "ci-" + uuid4().hex,
-                                     "a" * 40, "b" * 40, project, DATABASE)
+                                     "a" * 40, candidate_sha, project, DATABASE)
         addresses = {database: ips["database"], frontend: ips["frontend"],
                      nginx: ips["nginx"], backend: ips["backend"], worker: ips["worker"]}
         port = ActualReopenPort(request, database, nginx, {"backend": backend, "worker": worker},
                                 admin, network_id, addresses, scenario)
         try:
-            G5Lifecycle().execute(request, port)
+            result = G5Lifecycle().execute(request, port)
         except InjectedFailure:
             phase = port.store.show().phase
             expected = Phase.RECOVERY_REQUIRED if scenario == "precommit" else Phase.COMMITTED_WRITERS_ALLOWED
@@ -642,7 +803,13 @@ def run_case(scenario, workspace):
                 raise StateError("historical committed write missing")
             print(f"{scenario}: expected failure; {phase.value}; barriers remain closed")
             return
-        raise StateError("fixture scenario unexpectedly completed")
+        if (scenario != "success" or result.phase is not Phase.COMMITTED_WRITERS_ALLOWED
+                or port.store.show() != result or not port.postcommit_write
+                or not port.player_worker_verified):
+            raise StateError("fixture scenario unexpectedly completed")
+        if admin.sql(f"SELECT name FROM worlds WHERE id={inserted};", DATABASE) != "Postcommit CI write":
+            raise StateError("confirmed write missing after successful reopen")
+        print("success: COMMITTED; HTTP, authenticated Socket.IO, player and worker writes verified")
     finally:
         try:
             cleanup_fixture(project)
@@ -656,7 +823,7 @@ def run_case(scenario, workspace):
 def main():
     if len(sys.argv) != 3:
         print("usage: python -m ops.ci_g5_actual_reopen "
-              "{precommit,midreopen,lost-response,incomplete} WORKSPACE", file=sys.stderr)
+              "{precommit,midreopen,lost-response,incomplete,success} WORKSPACE", file=sys.stderr)
         return 2
     run_case(sys.argv[1], sys.argv[2])
     return 0

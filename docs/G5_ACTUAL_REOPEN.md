@@ -65,3 +65,16 @@ La rama actual no incorpora el cambio de #208.
 
 No se afirma recuperación automática tras un crash, exclusión de administradores
 privilegiados fuera del fixture ni RPO=0. No se cierra #174.
+
+## Continuación de responsable técnica
+
+Se agregó el escenario `success`, aún **sin certificación CI**: apertura de edge
+solo después de COMMITTED, salud de backend, comprobación de esquema y
+restauración de políticas; registro, verificación, login y adhesión a mundo
+por HTTP real, handshake Engine.IO y acuse Socket.IO del room autenticado;
+creación de una cola de edificio por HTTP y consumo por el proceso worker
+real (solo se adelanta el deadline de la cola sintética). Se comprueba el
+ID de imagen de backend/worker contra la etiqueta construida y se registra
+el SHA del checkout; eso no demuestra una transición entre dos binarios
+distintos, ni procedencia criptográfica de la etiqueta. Falta ejecución
+integral, adversarios adicionales de salud/deriva y revisión.
