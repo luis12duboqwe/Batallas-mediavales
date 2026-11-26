@@ -33,7 +33,7 @@ python -m pytest --noconftest -o addopts='' \
 La prueba real opt-in puede ejecutarse con la infraestructura pytest existente:
 
 ```sh
-BM_G5_FULL_SCHEMA_RESTORE=1 python -m pytest --noconftest -o addopts='' \
+BM_G5_FULL_SCHEMA_RESTORE=1 python -m pytest --noconftest -o addopts='' -s \
   tests/test_g5_full_schema_restore_runtime.py
 ```
 
@@ -58,6 +58,9 @@ No hay puertos publicados, bind mounts, VPS ni datos reales.
    fsync de archivo/directorio, registrar dispositivo/inodo/tamaño/SHA256.
    Abrir sin seguir symlinks, verificar el FD y validar TOC con `pg_restore`.
    Verificar de nuevo barrera y equivalencia con el inventario anterior.
+   Restaurar el FD en `g5_catalog_reference`, DB testigo nueva del mismo
+   contenedor desechable, para obtener el catálogo esperado tras el parser PG15.
+   La DB de juego no se reemplaza ni cambia de identidad.
 4. Ejecutar **0020 real**, comprobar ledger, tablas de financiación y nueva
    columna del mundo; confirmar mutación del mundo desde otra sesión admin.
    Registrar inventario candidato y forzar rechazo conocido `division by zero`.
@@ -72,12 +75,15 @@ No hay puertos publicados, bind mounts, VPS ni datos reales.
    desde el snapshot y COMMIT. Nunca `DROP DATABASE`, `--create`,
    cambio de rol LOGIN ni reapertura del límite. `--clean` del dump antiguo
    por sí solo deja objetos de 0020; vaciar el esquema evita ese residuo.
+   El bootstrap conserva propietario `pg_database_owner`, USAGE a PUBLIC y
+   comentario `standard public schema`; el dump aplica las diferencias.
 7. Pausar la transacción después del DROP para observar rechazo FATAL de app
    durante un restore realmente activo. Antes/después comprobar también
    ausencia de sesiones y transacciones preparadas. Comparar todo el
    inventario previo y exigir desaparición de las tablas exclusivas de 0020.
 
-El catálogo compara todos los bloques TOC de `pg_dump --schema-only`, sin
+El catálogo compara todos los bloques TOC de `pg_dump --schema-only` contra
+la restauración independiente del snapshot en la DB testigo, sin
 eliminar DDL, ACL, propiedad, restricciones, índices, defaults o tipos.
 Normaliza solo banners externos, tokens aleatorios `psql \restrict` y
 orden entre bloques (no orden dentro de cada bloque). Compara todas las
@@ -86,6 +92,10 @@ como JSONB, y `last_value/is_called` de todas las secuencias. Los OIDs de
 objetos reconstruidos cambian por diseño; el de la DB debe conservarse.
 También compara ACL/propietario de la DB y namespace `public`, encoding,
 collation y estado de admisión. Conserva contenido SQL multilínea.
+PG15 cambia la representación textual de los casts ARRAY del índice parcial
+real de 0019 al releer su DDL. El testigo normaliza mediante el propio parser
+PostgreSQL, no regex de predicados ni exclusión de índices. Filas y secuencias
+siguen comparándose directamente con el inventario de la DB original.
 
 ## Adversarios
 
@@ -94,7 +104,7 @@ collation y estado de admisión. Conserva contenido SQL multilínea.
 | `rollback` | Catálogo, filas, secuencias, ACL, propietarios y ledger idénticos a 0019; sin objetos exclusivos de 0020. |
 | `restore-failure` | Error conocido **después de reconstruir/cargar** pero antes de COMMIT; rollback transaccional conserva íntegro el candidato, barrera cerrada, sin reintento automático. |
 | `tampered` | Alterar bytes después de abrir el FD; checksum rechaza antes de DDL y conserva el candidato. |
-| `drift` | UPDATE administrativo después del inventario candidato; rechazar sin borrar ni restaurar. |
+| `drift` | UPDATE y tabla nueva administrativos después del inventario candidato; rechazar sin borrar ni restaurar. |
 | `dependency` | Vista en esquema ajeno dependiente de `worlds`; rechazar antes del CASCADE, preservar vista y datos. |
 
 Pruebas unitarias adicionales cubren sustitución de ruta/inodo, truncado,
@@ -118,9 +128,12 @@ postmaster, recuperación del coordinador ni certificación de staging #161.
 La exclusividad privilegiada deriva de la propiedad del fixture; observar
 sesiones no la demuestra en producción. **No afirma RPO=0.**
 
-En `finally` elimina contenedores, volúmenes anónimos de PG15, red interna
+En `finally` elimina contenedores, volúmenes anónimos de PG15, ambas DB
+desaparecen con el cluster desechable, red interna
 y snapshot temporal, también tras fallos. La imagen local de HEAD queda
 como cache de build del runner. Un fallo de limpieza hace fallar el ensayo.
+Registra nombres antes de crear y reconcilia recursos parcialmente creados
+por etiqueta exclusiva; no borra recursos ajenos que colisionen en nombre.
 Cada resultado JSON se imprime solo después de limpiar; incluye escenario,
 HEAD, hash del snapshot, tamaño del inventario, identidad y barrera.
 No imprime passwords, URLs ni stderr de procesos DB.

@@ -28,6 +28,7 @@ APP = "game_app"
 PASSWORD = "synthetic-g5-fixture-only"
 PREVIOUS = "0019_privacy_active_unique"
 CANDIDATE = "0020_wonder_funding"
+REFERENCE = "g5_catalog_reference"
 SCENARIOS = ("rollback", "restore-failure", "tampered", "drift", "dependency")
 
 
@@ -60,11 +61,75 @@ def canonical_schema(payload: bytes) -> tuple[str, ...]:
     objects remain intact. OIDs and random psql restrict tokens are not identity.
     """
     text = payload.decode("utf-8")
-    # Only discard the generated outer trailer, never lines within SQL bodies
-    # (comments/defaults/functions can contain blank or "--"-prefixed literals).
-    text = text.rsplit("\n--\n-- PostgreSQL database dump complete\n--", 1)[0]
-    blocks = re.split(r"(?m)^--\n-- Name: ", text)
-    return tuple(sorted(block.strip("\n") for block in blocks[1:]))
+    blocks = []
+    start = None
+    i = 0
+    quote = None
+    escaped = False
+    dollar = None
+    depth = 0
+    # Recognize generated TOC headers only outside SQL strings/comments.
+    # A function or COMMENT literal may itself contain a fake dump header.
+    while i < len(text):
+        if dollar:
+            end = text.find(dollar, i)
+            require(end >= 0, "unterminated catalog dollar literal")
+            i = end + len(dollar)
+            dollar = None
+            continue
+        if quote:
+            if escaped and text[i] == "\\":
+                i += 2
+                continue
+            if text[i] == quote:
+                if text[i:i + 2] == quote * 2:
+                    i += 2
+                    continue
+                quote = None
+            i += 1
+            continue
+        if depth:
+            if text.startswith("/*", i):
+                depth += 1
+                i += 2
+            elif text.startswith("*/", i):
+                depth -= 1
+                i += 2
+            else:
+                i += 1
+            continue
+        if text.startswith("--", i):
+            if i == 0 or text[i - 1] == "\n":
+                if text.startswith("--\n-- Name: ", i):
+                    if start is not None:
+                        blocks.append(text[start:i].strip("\n"))
+                    start = i + len("--\n-- Name: ")
+                elif text.startswith("--\n-- PostgreSQL database dump complete\n--", i):
+                    if start is not None:
+                        blocks.append(text[start:i].strip("\n"))
+                    start = None
+                    break
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end + 1
+        elif text.startswith("/*", i):
+            depth = 1
+            i += 2
+        elif text[i] in "'\"":
+            quote = text[i]
+            escaped = quote == "'" and i > 0 and text[i - 1] in "Ee"
+            i += 1
+        elif text[i] == "$" and (i == 0 or not (text[i - 1].isalnum()
+                                              or text[i - 1] in "_$")):
+            match = re.match(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$", text[i:])
+            dollar = match.group() if match else None
+            i += len(dollar) if dollar else 1
+        else:
+            i += 1
+    require(quote is None and dollar is None and depth == 0,
+            "unterminated catalog SQL")
+    if start is not None:
+        blocks.append(text[start:].strip("\n"))
+    return tuple(sorted(blocks))
 
 
 @dataclass(frozen=True)
@@ -233,9 +298,26 @@ class Fixture:
             result.stderr), "app login not explicitly refused")
         self.fence().assert_closed()
 
-    def dump(self, *options):
-        return docker(["exec", self.name, "pg_dump", "-U", "postgres", "-d", DB,
+    def dump(self, *options, database=DB):
+        return docker(["exec", self.name, "pg_dump", "-U", "postgres", "-d", database,
                        *options]).stdout
+
+    def snapshot_catalog(self, receipt, fd):
+        """PG15 parser roundtrip in a separate fixture-owned witness database.
+
+        0019's partial index ARRAY casts deparse differently after reload.
+        Comparing against an independently restored snapshot keeps full DDL
+        comparison strict without stripping predicates or guessing equivalence.
+        """
+        self.closed()
+        self.admin.sql(f"CREATE DATABASE {REFERENCE};", "postgres")
+        docker(["exec", "-i", self.name, "pg_restore", "--single-transaction",
+                "--exit-on-error", "-U", "postgres", "-d", REFERENCE],
+               input=receipt.read_verified(fd))
+        schema = canonical_schema(self.dump("--schema-only", database=REFERENCE))
+        self.closed()
+        require(schema, "snapshot witness catalog missing")
+        return schema
 
     def inventory(self):
         """All table rows (including ledger) and sequence state, without OIDs."""
@@ -309,7 +391,8 @@ class Fixture:
         # PG15 omits CREATE SCHEMA for the initdb-owned public namespace.
         bootstrap = (b"" if re.search(rb"(?m)^CREATE SCHEMA public;", sql) else
                      b"CREATE SCHEMA public AUTHORIZATION pg_database_owner;\n"
-                     b"GRANT USAGE ON SCHEMA public TO PUBLIC;\n")
+                     b"GRANT USAGE ON SCHEMA public TO PUBLIC;\n"
+                     b"COMMENT ON SCHEMA public IS 'standard public schema';\n")
         transaction = (b"BEGIN;\nDROP SCHEMA public CASCADE;\n" + bootstrap +
                        b"SELECT pg_sleep(2);\n" + sql
                        + (b"\nSELECT 1/0;\n" if fail else b"\n")
@@ -394,6 +477,7 @@ def rehearse(image, scenario):
                        input=receipt.read_verified(fd))
                 fixture.closed()
                 require(fixture.inventory() == baseline, "snapshot/drain drift")
+                baseline["catalog"] = fixture.snapshot_catalog(receipt, fd)
                 fixture.migrate(CANDIDATE)
                 require(fixture.admin.scalar(
                     "SELECT to_regclass('public.wonder_funding') IS NOT NULL "
@@ -414,7 +498,9 @@ def rehearse(image, scenario):
                         stream.seek(-1, os.SEEK_END)
                         stream.write(b"X")
                 elif scenario == "drift":
-                    fixture.admin.sql("UPDATE worlds SET name='unexpected-drift';")
+                    fixture.admin.sql(
+                        "UPDATE worlds SET name='unexpected-drift';"
+                        "CREATE TABLE public.drift_guard(id integer PRIMARY KEY);")
                 elif scenario == "dependency":
                     fixture.admin.sql(
                         "CREATE SCHEMA outside_guard;"
@@ -451,6 +537,9 @@ def rehearse(image, scenario):
                         ) == "t", "candidate-only objects survived restore")
                 fixture.closed()
                 return {"scenario": scenario, "result": "passed", "postgres": 15,
+                        "outcome": ("previous_restored" if scenario == "rollback" else
+                                    "candidate_retained" if scenario == "restore-failure"
+                                    else "restore_refused"),
                         "previous": PREVIOUS, "candidate": CANDIDATE,
                         "snapshot_sha256": receipt.sha256,
                         "catalog_blocks": len(baseline["catalog"]),

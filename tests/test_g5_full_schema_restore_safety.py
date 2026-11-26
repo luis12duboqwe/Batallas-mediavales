@@ -90,6 +90,17 @@ def test_catalog_preserves_multiline_literal_comments_and_blank_lines():
         before.replace(b"\n\n", b"\n"))
 
 
+@pytest.mark.parametrize("delimiter", ["'", "$body$"])
+def test_fake_toc_headers_inside_literals_cannot_mask_drift(delimiter):
+    header = "--\n-- Name: actual; Type: COMMENT\n--\n"
+    fake_a = "--\n-- Name: fake_a\n--\nA"
+    fake_b = "--\n-- Name: fake_b\n--\nB"
+    before = f"{header}SELECT {delimiter}\n{fake_a}\n{fake_b}\n{delimiter};".encode()
+    after = f"{header}SELECT {delimiter}\n{fake_b}\n{fake_a}\n{delimiter};".encode()
+    assert len(rehearsal.canonical_schema(before)) == 1
+    assert rehearsal.canonical_schema(before) != rehearsal.canonical_schema(after)
+
+
 @pytest.mark.parametrize("missing", ["CI", "GITHUB_ACTIONS"])
 def test_cli_refuses_outside_ci_without_invoking_docker(monkeypatch, missing):
     monkeypatch.setenv("CI", "true")
@@ -195,3 +206,85 @@ def test_cleanup_accepts_confirmed_absence_after_failed_creation(monkeypatch):
                         type("Result", (), {"returncode": 0, "stdout": b""})())
     fixture.cleanup()
     assert fixture.resources == []
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_restore_bootstraps_pg15_acl_and_fails_inside_one_transaction(monkeypatch, fail):
+    fixture = rehearsal.Fixture("fixture-image")
+    fixture.rejected = True
+    candidate = {"catalog": "candidate"}
+    calls = []
+    transactions = []
+
+    class Receipt:
+        def read_verified(self, fd):
+            calls.append("verified-fd")
+            return b"PGDMPverified"
+
+    class Process:
+        returncode = None
+
+        def __init__(self, args, stdin, **kwargs):
+            transactions.append(stdin.read())
+
+        def poll(self):
+            return self.returncode
+
+        def communicate(self, **kwargs):
+            self.returncode = 3 if fail else 0
+            return None, b"division by zero" if fail else b""
+
+        def kill(self):
+            pytest.fail("known completed restore was killed")
+
+    def docker(args, **kwargs):
+        assert calls == ["closed", "verified-fd", "scope", "closed"]
+        assert args[-1] == "--file=-"
+        assert kwargs["input"] == b"PGDMPverified"
+        return type("Result", (), {"stdout": b"CREATE TABLE public.worlds(id integer);\n"})()
+
+    monkeypatch.setattr(fixture, "closed", lambda: calls.append("closed"))
+    monkeypatch.setattr(fixture, "scope", lambda: calls.append("scope"))
+    monkeypatch.setattr(fixture, "inventory", lambda: candidate)
+    monkeypatch.setattr(fixture.admin, "scalar",
+                        lambda sql, database: "1" if "PgSleep" in sql else "0")
+    monkeypatch.setattr(fixture, "app", lambda sql: type("Result", (), {
+        "returncode": 2, "stderr": b"FATAL: role is not permitted to log in"})())
+    monkeypatch.setattr(rehearsal, "docker", docker)
+    monkeypatch.setattr(rehearsal.subprocess, "Popen", Process)
+    fixture.restore(Receipt(), 123, candidate, fail=fail)
+    sql = transactions[0]
+    assert sql.startswith(b"BEGIN;\nDROP SCHEMA public CASCADE;\n")
+    assert b"CREATE SCHEMA public AUTHORIZATION pg_database_owner;" in sql
+    assert b"GRANT USAGE ON SCHEMA public TO PUBLIC;" in sql
+    assert b"COMMENT ON SCHEMA public IS 'standard public schema';" in sql
+    assert sql.index(b"DROP SCHEMA") < sql.index(b"CREATE TABLE")
+    assert sql.endswith(b"COMMIT;\n")
+    assert (b"SELECT 1/0;" in sql) is fail
+    assert calls[-1] == "closed"
+
+
+def test_snapshot_catalog_witness_uses_verified_bytes_and_distinct_database(monkeypatch):
+    fixture = rehearsal.Fixture("fixture-image")
+    calls = []
+
+    class Receipt:
+        def read_verified(self, fd):
+            assert fd == 123
+            return b"PGDMPverified-snapshot"
+
+    def docker(args, **kwargs):
+        calls.append(args)
+        assert args[-1] == rehearsal.REFERENCE
+        assert kwargs["input"] == b"PGDMPverified-snapshot"
+
+    monkeypatch.setattr(fixture, "closed", lambda: calls.append("closed"))
+    monkeypatch.setattr(fixture.admin, "sql",
+                        lambda sql, database: calls.append((sql, database)))
+    monkeypatch.setattr(rehearsal, "docker", docker)
+    monkeypatch.setattr(fixture, "dump", lambda *options, database:
+                        b"--\n-- Name: witness; Type: TABLE\n--\nCREATE TABLE worlds(id int);")
+    assert fixture.snapshot_catalog(Receipt(), 123)
+    assert calls[0] == calls[-1] == "closed"
+    assert calls[1] == ("CREATE DATABASE g5_catalog_reference;", "postgres")
+    assert rehearsal.REFERENCE != rehearsal.DB
