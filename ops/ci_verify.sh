@@ -193,6 +193,26 @@ for archive in "${SAME_SECOND_BACKUPS[@]}"; do
   sha256sum --check "${archive}.sha256"
 done
 
+# Retention is scoped to published files in the backup root. A stale-looking
+# nested archive may belong to a separate operation and must not be touched.
+mkdir -p "$BACKUP_DIR/.retention-scope-probe"
+NESTED_ARCHIVE="$BACKUP_DIR/.retention-scope-probe/batalla_ci-old.dump"
+OLD_ARCHIVE="$BACKUP_DIR/batalla_ci-retention-probe.dump"
+printf 'nested archive\n' > "$NESTED_ARCHIVE"
+printf 'expired archive\n' > "$OLD_ARCHIVE"
+sha256sum "$NESTED_ARCHIVE" > "${NESTED_ARCHIVE}.sha256"
+sha256sum "$OLD_ARCHIVE" > "${OLD_ARCHIVE}.sha256"
+touch -d '30 days ago' "$NESTED_ARCHIVE" "${NESTED_ARCHIVE}.sha256" "$OLD_ARCHIVE" "${OLD_ARCHIVE}.sha256"
+COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" \
+  bash ops/backup_postgres.sh "$ENV_FILE"
+test ! -e "$OLD_ARCHIVE"
+test ! -e "${OLD_ARCHIVE}.sha256"
+sha256sum --check "${NESTED_ARCHIVE}.sha256"
+for archive in "${SAME_SECOND_BACKUPS[@]}"; do
+  sha256sum --check "${archive}.sha256"
+done
+rm -r -- "$BACKUP_DIR/.retention-scope-probe"
+
 # A failed pg_dump must leave no half-written backup, no orphan checksum,
 # and no leaked staging directory; the successful backups must remain usable.
 DUMP_COUNT_BEFORE="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'batalla_ci-*.dump' | wc -l)"

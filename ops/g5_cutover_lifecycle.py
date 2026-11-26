@@ -148,9 +148,22 @@ class G5Lifecycle:
                     if port.verify_continuity(identity) is not True:
                         raise StateError("writer exclusion lost before migration")
                 advance(Phase.PREPARED, Phase.MIGRATING)
-                try:
-                    mutate(Phase.MIGRATING, port.migrate)
-                except MigrationRejected:
+                # Only the maintenance executor itself may classify a
+                # known rejection. A similarly typed exception from barrier,
+                # lock or lease verification is uncertainty, not permission
+                # to restore. Complete the enclosing guards before using a
+                # rejection reported by the executor.
+                migration_rejected = False
+
+                def run_migration(current_identity):
+                    nonlocal migration_rejected
+                    try:
+                        port.migrate(current_identity)
+                    except MigrationRejected:
+                        migration_rejected = True
+
+                mutate(Phase.MIGRATING, run_migration)
+                if migration_rejected:
                     restore_rejected()
                 require_continuity(Phase.MIGRATING)
                 if port.verify_candidate_readonly(identity) is not True:
