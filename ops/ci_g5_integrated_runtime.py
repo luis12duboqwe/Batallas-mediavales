@@ -8,6 +8,7 @@ This exercises PREPARED and fail-closed drift, not a production RPO guarantee.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -23,7 +24,8 @@ from ops.ci_g5_edge_admission import (
 )
 from ops.g5_activation_fence import MARKER
 from ops.g5_cutover_prepare import BackupReceipt, G5Preparation, PreparationRequest
-from ops.g5_cutover_state import CutoverStore, MANIFEST, Phase, StateError
+from ops.g5_cutover_state import CutoverStore, MANIFEST, Manifest, Phase, StateError
+from ops.g5_cutover_lifecycle import G5Lifecycle, MigrationRejected, RecoveryRequired
 from ops.g5_docker_writer_fence import DockerFenceError, DockerWriterFence
 from ops.g5_edge_admission import EdgeAdmission
 from ops.g5_pg15_writer_fence import Pg15FenceTarget, Pg15PersistentFence
@@ -155,6 +157,96 @@ class RuntimePreparationPort:
         return self.receipt
 
 
+class RuntimeLifecyclePort(RuntimePreparationPort):
+    """CI-owned privileged executor; synthetic schema change, not Alembic."""
+
+    def __init__(self, *args, reject, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.reject = reject
+        self.restored = False
+        self.published = Path(self.request.host_root) / ".release-sha"
+
+    def verify_continuity(self, identity):
+        # Exclusivity is a fixture precondition (unique isolated network,
+        # synthetic password, no outside administrator in this test).
+        # These observations alone could NOT certify a real deployment.
+        if identity.compose_project != self.request.compose_project or identity.postgres_db != DB:
+            raise RuntimeError("lifecycle target identity changed")
+        self.assert_barriers()
+        return True
+
+    def migrate(self, identity):
+        # Commit a real change first, then exercise a known rejected second
+        # statement. A restore must undo the committed candidate mutation.
+        self.admin.sql("ALTER TABLE durable_probe ADD COLUMN candidate_revision int;"
+                       " UPDATE durable_probe SET candidate_revision=2, marker='candidate';", DB)
+        if self.reject:
+            code, _, stderr = probe([
+                "exec", self.database, "psql", "-X", "-v", "ON_ERROR_STOP=1",
+                "-U", "postgres", "-d", DB, "-Atqc", "SELECT 1/0;",
+            ])
+            if code != 1 or "division by zero" not in stderr:
+                raise RuntimeError("known migration failure was not established")
+            raise MigrationRejected("isolated migration statement rejected after executor exit")
+
+    def verify_candidate_readonly(self, identity):
+        return self.admin.sql(
+            "SELECT count(*) FROM durable_probe WHERE candidate_revision=2 AND marker='candidate';", DB
+        ) == "3"
+
+    def publish_candidate(self, identity):
+        fd = os.open(self.published, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as stream:
+            stream.write(identity.candidate_sha + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        fd = os.open(self.request.host_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def restore_previous(self, identity, verified_fd):
+        if self.published.exists():
+            raise RuntimeError("candidate publication forbids automatic rollback")
+        # In-place restore: no --create, no database replacement, no role
+        # or connection limit changes. Only this tiny fixture schema is
+        # eligible for this clean/single-transaction restore strategy.
+        with os.fdopen(os.dup(verified_fd), "rb") as archive:
+            payload = archive.read()
+        binary(["exec", "-i", self.database, "pg_restore", "--clean", "--if-exists",
+                "--single-transaction", "--exit-on-error", "-U", "postgres", "-d", DB],
+               input=payload)
+        self.restored = True
+
+    def verify_previous_readonly(self, identity):
+        return (
+            self.restored and self.admin.sql("SELECT id, marker FROM durable_probe ORDER BY id;", DB) == ROWS
+            and self.admin.sql("SELECT count(*) FROM information_schema.columns "
+                               "WHERE table_name='durable_probe' AND column_name='candidate_revision';", DB) == "0"
+            and self.admin.sql("SELECT has_table_privilege('game_app','durable_probe','INSERT');", DB) == "t"
+        )
+
+    def reopen_writers(self, identity):
+        # The coordinator holds the exclusive manifest lock during this
+        # callback. Read the already persisted receipt without reacquiring it.
+        raw = (Path(self.request.host_root) / ".ops-state" / MANIFEST).read_text()
+        receipt = json.loads(raw)
+        payload = receipt["manifest"]
+        expected = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        if (receipt["sha256"] != hashlib.sha256(expected).hexdigest()
+                or payload != Manifest(identity, Phase.COMMITTED_WRITERS_ALLOWED).payload()):
+            raise RuntimeError("attempted fixture login before exact durable terminal commit")
+        if self.published.read_text().strip() != identity.candidate_sha:
+            raise RuntimeError("candidate metadata mismatch")
+        # Only a controlled SQL login in this disposable fixture. Do not
+        # reopen the synthetic worker or edge; actual service release and
+        # restart restoration remain separate production prerequisites.
+        self.admin.execute_committed(f"ALTER DATABASE {DB} CONNECTION LIMIT -1;")
+        self.admin.execute_committed(f"ALTER ROLE {APP} LOGIN;")
+        run(app_command(self.database, "INSERT INTO durable_probe VALUES (6,'after-commit',2);"))
+
+
 def wait_until(predicate, failure):
     for _ in range(60):
         if predicate():
@@ -172,7 +264,7 @@ def ready_db(database):
     return code == 0 and output.strip() == "*"
 
 
-def run_case(*, drift):
+def run_case(*, drift, lifecycle=None):
     project = "bm-g5-edge-" + uuid4().hex
     label = "medievol.g5.edge-fixture=" + project
     client = None
@@ -261,7 +353,38 @@ def run_case(*, drift):
                 str(host), str(backup), "ci-" + uuid4().hex, "a" * 40, "b" * 40, project, DB,
             )
             port = RuntimePreparationPort(request, database, nginx, backend, admin, client, drift=drift)
-            if drift:
+            if lifecycle is not None:
+                port = RuntimeLifecyclePort(request, database, nginx, backend, admin, client,
+                                            drift=False, reject=lifecycle == "reject")
+                store = CutoverStore(request.host_root)
+                if lifecycle == "reject":
+                    try:
+                        G5Lifecycle().execute(request, port)
+                    except RecoveryRequired:
+                        pass
+                    else:
+                        raise RuntimeError("known failed migration did not enter recovery")
+                    if store.show().phase is not Phase.RECOVERY_REQUIRED or not port.verify_previous_readonly(
+                        store.show().identity
+                    ) or port.published.exists():
+                        raise RuntimeError("migration rollback evidence missing")
+                    port.assert_barriers()
+                else:
+                    result = G5Lifecycle().execute(request, port)
+                    if result.phase is not Phase.COMMITTED_WRITERS_ALLOWED or store.show() != result:
+                        raise RuntimeError("lifecycle did not durably commit")
+                    if admin.sql("SELECT marker FROM durable_probe WHERE id=6;", DB) != "after-commit":
+                        raise RuntimeError("new app commit after durable commit was not preserved")
+                    if not port.verify_candidate_readonly(result.identity):
+                        raise RuntimeError("candidate schema/commits not verified after commit")
+                    try:
+                        with store.verify_restore_allowed(result.identity, request.backup_root):
+                            raise RuntimeError("terminal commit allowed stale snapshot restore")
+                    except StateError:
+                        pass
+                    port.edge.assert_closed()
+                    port.docker.assert_closed()
+            elif drift:
                 try:
                     G5Preparation().prepare(request, port)
                 except DockerFenceError:
@@ -319,6 +442,9 @@ def main():
     run_case(drift=False)
     run_case(drift=True)
     print("G5 combined real edge, SQL, Docker PREPARED and post-dump drift rehearsal passed")
+    run_case(drift=False, lifecycle="commit")
+    run_case(drift=False, lifecycle="reject")
+    print("G5 lifecycle: real synthetic migration, guarded rollback and durable commit before app login passed")
     return 0
 
 
