@@ -93,3 +93,13 @@ def test_inventory_checks_parameter_acl_not_only_current_settings():
     assert inspect_privileged_inventory(TARGET, reader, fenced=False).blockers == ("no_parameter_grants",)
     assert "pg_parameter_acl" in reader.calls[0][1]
     assert "ALTER SYSTEM" in reader.calls[0][1]
+
+
+def test_stock_pg_settings_exception_is_narrow():
+    reader = Reader(flags(CLUSTER_CHECKS), flags(DATABASE_CHECKS),
+                    flags(DATABASE_CHECKS), flags(CLUSTER_CHECKS))
+    assert inspect_privileged_inventory(TARGET, reader, fenced=False).blockers == ()
+    statement = reader.calls[1][1]
+    assert "c.relname<>'pg_settings' OR c.relkind<>'v' OR c.oid>=16384" in statement
+    assert "INSERT,DELETE,TRUNCATE,TRIGGER" in statement
+    assert "aclexplode(c.relacl)" in statement

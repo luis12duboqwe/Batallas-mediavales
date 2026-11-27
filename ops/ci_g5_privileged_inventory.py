@@ -53,6 +53,11 @@ def main():
             if set(observation.blockers) != set(blockers):
                 raise RuntimeError("unexpected inventory result: " + ",".join(observation.blockers))
 
+        # Real stock permission-checked pg_settings access is not a
+        # privileged catalog mutation. Prove the default explicitly.
+        if admin.sql("SELECT has_table_privilege('game_app','pg_catalog.pg_settings','UPDATE');",
+                     "game_ci") != "t":
+            raise RuntimeError("expected PG15 stock pg_settings UPDATE permission")
         expect()
         for create, remove, blocker, db in (
             ("CREATE ROLE other_admin LOGIN SUPERUSER;", "DROP ROLE other_admin;",
@@ -82,6 +87,15 @@ def main():
             ("GRANT EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) TO PUBLIC;",
              "REVOKE EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) FROM PUBLIC;",
              "no_sensitive_builtin_execute", "postgres"),
+            ("GRANT UPDATE ON pg_catalog.pg_settings TO game_app;",
+             "REVOKE UPDATE ON pg_catalog.pg_settings FROM game_app;",
+             "no_sensitive_catalog_access", "game_ci"),
+            ("GRANT UPDATE ON pg_catalog.pg_authid TO game_app;",
+             "REVOKE UPDATE ON pg_catalog.pg_authid FROM game_app;",
+             "no_sensitive_catalog_access", "game_ci"),
+            ("GRANT UPDATE (rolname) ON pg_catalog.pg_authid TO PUBLIC;",
+             "REVOKE UPDATE (rolname) ON pg_catalog.pg_authid FROM PUBLIC;",
+             "no_sensitive_catalog_access", "postgres"),
             ("GRANT SELECT ON pg_catalog.pg_authid TO game_app;",
              "REVOKE SELECT ON pg_catalog.pg_authid FROM game_app;",
              "no_sensitive_catalog_access", "game_ci"),

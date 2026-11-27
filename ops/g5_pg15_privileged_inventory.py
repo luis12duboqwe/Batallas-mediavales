@@ -165,8 +165,18 @@ def inspect_privileged_inventory(
         f"AND has_column_privilege('{app}',c.oid,a.attnum,'SELECT')) "
         "AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
         "WHERE n.nspname='pg_catalog' AND c.relkind IN ('r','v','m','p','f') "
-        f"AND (has_table_privilege('{app}',c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER') "
-        f"OR has_any_column_privilege('{app}',c.oid,'INSERT,UPDATE')))",
+        # pg_settings has stock PUBLIC UPDATE with permission-checked
+        # set_config rules. Exempt only that standard view's UPDATE; all
+        # other catalog mutations and explicit additional grants still fail.
+        f"AND (has_table_privilege('{app}',c.oid,'INSERT,DELETE,TRUNCATE,TRIGGER') "
+        f"OR has_any_column_privilege('{app}',c.oid,'INSERT') "
+        "OR ((c.relname<>'pg_settings' OR c.relkind<>'v' OR c.oid>=16384) "
+        f"AND (has_table_privilege('{app}',c.oid,'UPDATE') "
+        f"OR has_any_column_privilege('{app}',c.oid,'UPDATE'))) "
+        "OR (c.relname='pg_settings' AND EXISTS (SELECT 1 FROM aclexplode(c.relacl) a "
+        "WHERE a.privilege_type='UPDATE' "
+        f"AND (a.grantee=(SELECT oid FROM pg_roles WHERE rolname='{app}') "
+        "OR (a.grantee=0 AND a.is_grantable))))))",
     ))
     first = _flags(session, "postgres", cluster, CLUSTER_CHECKS)
     # Do not connect to an untrusted or already ambiguous target.
