@@ -38,7 +38,7 @@ from ops.g5_edge_admission import EdgeAdmission
 from ops.g5_pg15_writer_fence import Pg15FenceTarget, Pg15PersistentFence
 
 
-PREVIOUS_SHA = "6ec2f118d4423359707176538d7f835bdb43c0e9"
+PREVIOUS_SHA = "eafc5bbd5fdc9caad698db48cbb8ad80df942f0e"
 PREVIOUS_REVISION = "0019_privacy_active_unique"
 _SHA = re.compile(r"[0-9a-f]{40}")
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
@@ -605,6 +605,8 @@ class TransitionPort:
             previous: _container(previous)["State"].get("Running") is True,
             previous_worker: _container(previous_worker)["State"].get("Running") is True,
         }
+        if not all(self.previous_initial_running.values()):
+            raise StateError("historical backend and worker must both be running")
         self.original_db = original_database(self.admin)
         self.originals = [
             OriginalContainer.capture(_container(cid), project, service)
@@ -1086,11 +1088,7 @@ class TransitionPort:
 
             for cid in (self.previous, self.previous_worker):
                 if not self.previous_initial_running[cid]:
-                    self.evidence.append(
-                        "previous_writer_remains_stopped",
-                        container_id=cid, image_id=self.images["previous"],
-                    )
-                    continue
+                    raise StateError("historical writer was not running before cutover")
                 self._assert_recovery_preconditions(
                     assert_lease, database_open=True, role_open=True,
                 )
@@ -1136,6 +1134,13 @@ class TransitionPort:
             _api_version(self.images["previous"], self.project, self.nginx_address, 404)
             _app_call(self.images["previous"], self.project, self.nginx_address, "socket",
                       {"token": self.access_token, "user": self.user_id})
+            assert_lease()
+            _prove_queue(self.images["previous"], self.project, self.nginx_address,
+                         self.admin, self.user_id, self.world_id, self.access_token)
+            if not all(_container(cid)["State"].get("Running") is True
+                       for cid in (self.previous, self.previous_worker)):
+                raise StateError("recovered historical writer did not remain running")
+            self.evidence.append("previous_worker_queue_completed")
             assert_lease()
             if self.release_receipt.exists():
                 raise StateError("failed transition unexpectedly published candidate identity")
@@ -1203,41 +1208,47 @@ class TransitionPort:
             os.close(directory)
 
     def _prove_player_and_worker(self):
-        _app_call(self.images["candidate"], self.project, self.nginx_address, "join",
-                  {"world": self.world_id, "token": self.access_token})
-        city = int(self.admin.sql(
-            f"SELECT id FROM cities WHERE owner_id={self.user_id} AND world_id={self.world_id} "
-            "ORDER BY id LIMIT 1;", DATABASE
-        ))
-        quotes = _app_call(self.images["candidate"], self.project, self.nginx_address, "available",
-                           {"world": self.world_id, "city": city, "token": self.access_token})
-        quote = next((item for item in quotes if item.get("name") == "warehouse"
-                      and item.get("can_upgrade") is True), None)
-        if quote is None:
-            raise StateError("candidate version did not expose a writable building path")
-        queued = _app_call(
-            self.images["candidate"], self.project, self.nginx_address, "upgrade",
-            {"world": self.world_id, "city": city, "token": self.access_token,
-             "building": "warehouse"},
-        )
-        queue_id, level = queued.get("id"), queued.get("target_level")
-        if type(queue_id) is not int or type(level) is not int:
-            raise StateError("candidate HTTP write did not create a durable queue")
-        if self.admin.sql(
-            f"SELECT count(*) FROM building_queue WHERE id={queue_id} AND city_id={city};",
-            DATABASE,
-        ) != "1":
-            raise StateError("candidate HTTP write was not persistent")
-        self.admin.sql(
-            f"UPDATE building_queue SET finish_time=now()-interval '2 seconds' "
-            f"WHERE id={queue_id} AND city_id={city};", DATABASE
-        )
-        wait_until(lambda: self.admin.sql(
-            f"SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM building_queue WHERE id={queue_id}) "
-            f"AND EXISTS (SELECT 1 FROM buildings WHERE city_id={city} "
-            f"AND name='warehouse' AND level={level}) THEN 1 ELSE 0 END;", DATABASE
-        ) == "1", "candidate worker did not persist queue completion")
+        _prove_queue(self.images["candidate"], self.project, self.nginx_address,
+                     self.admin, self.user_id, self.world_id, self.access_token)
         self.player_worker_verified = True
+
+def _prove_queue(image, network, nginx_address, admin, user_id, world_id, access_token):
+    _app_call(image, network, nginx_address, "join",
+              {"world": world_id, "token": access_token})
+    city = int(admin.sql(
+        f"SELECT id FROM cities WHERE owner_id={user_id} AND world_id={world_id} "
+        "ORDER BY id LIMIT 1;", DATABASE
+    ))
+    quotes = _app_call(image, network, nginx_address, "available",
+                       {"world": world_id, "city": city, "token": access_token})
+    quote = next((item for item in quotes if item.get("name") == "warehouse"
+                  and item.get("can_upgrade") is True), None)
+    if quote is None:
+        raise StateError("release did not expose a writable building path")
+    queued = _app_call(
+        image, network, nginx_address, "upgrade",
+        {"world": world_id, "city": city, "token": access_token,
+         "building": "warehouse"},
+    )
+    queue_id, level = queued.get("id"), queued.get("target_level")
+    if type(queue_id) is not int or type(level) is not int:
+        raise StateError("release HTTP write did not create a durable queue")
+    if admin.sql(
+        f"SELECT count(*) FROM building_queue WHERE id={queue_id} AND city_id={city};",
+        DATABASE,
+    ) != "1":
+        raise StateError("release HTTP write was not persistent")
+    admin.sql(
+        f"UPDATE building_queue SET finish_time=now()-interval '2 seconds' "
+        f"WHERE id={queue_id} AND city_id={city};", DATABASE
+    )
+    wait_until(lambda: admin.sql(
+        f"SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM building_queue WHERE id={queue_id}) "
+        f"AND EXISTS (SELECT 1 FROM buildings WHERE city_id={city} "
+        f"AND name='warehouse' AND level={level}) THEN 1 ELSE 0 END;", DATABASE
+    ) == "1", "release worker did not persist queue completion")
+    return queue_id, level
+
 
 
 def _create_container(project, network, service, image, *, alias=None, mounts=(),
@@ -1428,6 +1439,13 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
             raise StateError("previous release login did not issue an access token")
         _app_call(previous_image, network, nginx_address, "socket",
                   {"token": access, "user": user_id})
+        # Verify real worker processing on the immutable historical release.
+        _prove_queue(previous_image, network, nginx_address, admin, user_id,
+                     int(world_id_raw), access)
+        if not all(_container(cid)["State"].get("Running") is True
+                   for cid in (old_backend, old_worker)):
+            raise StateError("historical release is not fully operational")
+        evidence.append("historical_worker_queue_completed")
         baseline_hash = _database_fingerprint(database)
         evidence.append(
             "previous_release_ready", previous_sha=PREVIOUS_SHA,

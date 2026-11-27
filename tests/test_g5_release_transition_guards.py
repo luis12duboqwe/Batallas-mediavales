@@ -38,7 +38,7 @@ CANDIDATE_SHA = "c" * 40
 
 
 def test_historical_and_candidate_release_identities_are_immutable_and_distinct():
-    assert PREVIOUS_SHA == "6ec2f118d4423359707176538d7f835bdb43c0e9"
+    assert PREVIOUS_SHA == "eafc5bbd5fdc9caad698db48cbb8ad80df942f0e"
     assert release_pair(PREVIOUS_SHA, CANDIDATE_SHA,
                         PREVIOUS_IMAGE, CANDIDATE_IMAGE) == (PREVIOUS_SHA, CANDIDATE_SHA)
     for args in (
@@ -317,7 +317,7 @@ def test_failure_reclosure_attempts_every_barrier_and_writer_after_errors(tmp_pa
         log.close()
 
 
-@pytest.mark.parametrize("failure_point", ["after_old_start", "after_edge_open"])
+@pytest.mark.parametrize("failure_point", ["after_old_start", "after_edge_open", "stopped_worker"])
 def test_recovery_recloses_if_failure_follows_old_start_or_edge_open(
     tmp_path, monkeypatch, failure_point,
 ):
@@ -328,7 +328,7 @@ def test_recovery_recloses_if_failure_follows_old_start_or_edge_open(
     port.previous = old_id
     port.previous_worker = old_worker_id
     port.candidate_id = port.candidate_worker = None
-    port.previous_initial_running = {old_id: True, old_worker_id: False}
+    port.previous_initial_running = {old_id: True, old_worker_id: failure_point != "stopped_worker"}
     port.recovery_started = set()
     port.images = {"previous": PREVIOUS_IMAGE, "candidate": CANDIDATE_IMAGE}
     port.original_db = SimpleNamespace(connection_limit=100)
@@ -378,7 +378,8 @@ def test_recovery_recloses_if_failure_follows_old_start_or_edge_open(
     try:
         with pytest.raises((StateError, RuntimeError)):
             port.supervised_recover_previous(lambda: None)
-        assert started == [["start", old_id]]
+        assert started == ([["start", old_id], ["start", old_worker_id]]
+                           if failure_point == "after_edge_open" else [["start", old_id]])
         assert port._restrict_after_failure.call_count >= 2
         assert bool(edge_opened) is (failure_point == "after_edge_open")
     finally:

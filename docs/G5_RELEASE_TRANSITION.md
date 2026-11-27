@@ -1,13 +1,13 @@
 # G5 — ensayo de transición entre releases
 
 **NO-GO para staging y producción.** Este ensayo está limitado a un runner
-GitHub Actions desechable. No modifica workflows, no despliega a un VPS, no
+GitHub Actions desechable. Se integra en Validation, no despliega a un VPS, no
 publica puertos, no usa datos reales ni configura SMTP externo. No certifica
 ni cambia el estado de #174.
 
 ## Releases y procedencia
 
-- Release previa: `6ec2f118d4423359707176538d7f835bdb43c0e9`. El árbol de ese
+- Release previa: `eafc5bbd5fdc9caad698db48cbb8ad80df942f0e`. El árbol de ese
   commit contiene la revisión Alembic `0019_privacy_active_unique` y no contiene
   `0020_wonder_funding_rules.py`.
 - Candidata: el SHA completo de `HEAD` del checkout de CI; se exige que ese
@@ -28,7 +28,7 @@ el ensayo falla; no sustituye el SHA por una etiqueta mutable.
 
 ## Ejecución exacta
 
-No se agregó integración al workflow por alcance. Desde un job GitHub Actions
+Validation exige todos los escenarios. Desde un job GitHub Actions
 con Docker local disponible, dependencias backend instaladas e historial Git
 suficiente (o acceso para buscar el SHA histórico), ejecutar:
 
@@ -149,3 +149,7 @@ conciliación; no elimina datos para forzar éxito.
 
 La revisión sigue **NO-GO**. No se afirma certificación de producción, no se
 cierra #174 y no se debe mergear como autorización de despliegue.
+
+## Revisión de responsable técnica
+
+Se reemplaza el SHA histórico por el padre exacto de 0020, `eafc5bbd5fdc9caad698db48cbb8ad80df942f0e`, que conserva 0019 e incorpora la corrección de importación del worker #140 (`46aa895936ed2f42bd42062c4c44b4089fbadfa4`). Se exige ejecución real de una cola en la release anterior antes del cutover y otra tras recuperar esa misma release; ambos escritores deben estar activos. Los resultados previos del sandbox no certifican este cambio. Se integra la compuerta oficial CI, sin eliminar las anteriores. El fallo de arranque del worker del SHA anterior no se oculta con un wrapper ni se cambia su código histórico.
