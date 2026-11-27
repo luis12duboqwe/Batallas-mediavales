@@ -153,3 +153,25 @@ def test_cross_database_probe_requires_explicit_denial(monkeypatch, result):
     monkeypatch.setattr(ci_g5_edge_admission, "probe", lambda command: result)
     with pytest.raises(role.ObjectPolicyError, match="cross-database denial"):
         role._sql_denial_probes("fixture")
+
+
+def test_candidate_http_client_uses_distinct_fixture_accounts(monkeypatch, capsys):
+    Client.failure = None
+    Client.requests = []
+    monkeypatch.setitem(sys.modules, "httpx", types.SimpleNamespace(Client=Client))
+    monkeypatch.setattr(sys, "argv", ["-", "7", "_candidate"])
+    # The historical mock recognizes unsuffixed identities; normalize only
+    # for authorization responses, while retaining the actual login inputs.
+    original = Client.request
+    names = []
+    def request(self, method, path, **kwargs):
+        if path == "/auth/token":
+            names.append(kwargs["data"]["username"])
+            kwargs = {**kwargs, "data": {**kwargs["data"],
+                      "username": kwargs["data"]["username"].removesuffix("_candidate")}}
+        return original(self, method, path, **kwargs)
+    monkeypatch.setattr(Client, "request", request)
+    exec(role._HTTP_CLIENT, {})
+    assert names == ["g5_role_player_candidate", "g5_role_other_candidate",
+                     "g5_role_admin_candidate"]
+    assert json.loads(capsys.readouterr().out)["queue"] == 12

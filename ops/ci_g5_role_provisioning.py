@@ -306,18 +306,21 @@ def provision(target, admin, inventory, revision, *, granted_revision=None, fenc
     sequences = inspect_objects(target, inventory, revision, granted_revision=granted_revision)
     if any(not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", name) for name in sequences):
         raise ObjectPolicyError("unsafe sequence name")
+    statements = []
     if granted_revision is None:
-        admin.sql(f'GRANT USAGE ON SCHEMA public TO "{target.application_role}";', target.database)
+        statements.append(f'GRANT USAGE ON SCHEMA public TO "{target.application_role}";')
     prior = table_privileges(granted_revision) if granted_revision else {}
     for name, privileges in sorted(table_privileges(revision).items()):
         if name in prior:
             continue
-        admin.sql(f'GRANT {", ".join(sorted(privileges))} ON TABLE "{name}" '
-                  f'TO "{target.application_role}";', target.database)
+        statements.append(f'GRANT {", ".join(sorted(privileges))} ON TABLE "{name}" '
+                          f'TO "{target.application_role}";')
     for name in sequences:
-        # Existing grants were verified exactly above; regranting is harmless.
-        admin.sql(f'GRANT USAGE, SELECT ON SEQUENCE "{name}" '
-                  f'TO "{target.application_role}";', target.database)
+        statements.append(f'GRANT USAGE, SELECT ON SEQUENCE "{name}" '
+                          f'TO "{target.application_role}";')
+    # One committed transaction, never a prefix of a multi-object grant set.
+    admin.sql("BEGIN; " + " ".join(statements) + " COMMIT;", target.database)
+    _inventory(target, inventory, fenced)
     inspect_objects(target, inventory, revision, granted_revision=revision)
 
 
@@ -353,9 +356,12 @@ def _sql_denial_probes(database):
 
 _REGISTER_CLIENT = r'''
 import httpx
+import sys
 
+suffix = sys.argv[1] if len(sys.argv) > 1 else ""
 with httpx.Client(base_url="http://127.0.0.1:8000", timeout=20, trust_env=False) as client:
-    for name in ("g5_role_player", "g5_role_other", "g5_role_admin"):
+    for base_name in ("g5_role_player", "g5_role_other", "g5_role_admin"):
+        name = base_name + suffix
         response = client.post("/auth/register", json={
             "username": name, "email": name + "@example.com",
             "password": "G5-Role-Fixture-Password-2026!"})
@@ -371,6 +377,7 @@ import sys
 import httpx
 
 world = int(sys.argv[1])
+suffix = sys.argv[2] if len(sys.argv) > 2 else ""
 password = "G5-Role-Fixture-Password-2026!"
 with httpx.Client(base_url="http://127.0.0.1:8000", timeout=20, trust_env=False) as client:
     def request(method, path, expected, **kwargs):
@@ -382,7 +389,8 @@ with httpx.Client(base_url="http://127.0.0.1:8000", timeout=20, trust_env=False)
         return response.json()
 
     tokens = []
-    for name in ("g5_role_player", "g5_role_other", "g5_role_admin"):
+    for base_name in ("g5_role_player", "g5_role_other", "g5_role_admin"):
+        name = base_name + suffix
         result = request("POST", "/auth/token", 200,
                          data={"username": name, "password": password})
         token = result.get("access_token")
@@ -435,8 +443,14 @@ print(json.dumps({"city": city, "queue": queue, "case": case_id, "privacy": priv
 '''
 
 
-def _http_probes(project, image, app_url, world, admin):
-    """Run historical HTTP requests inside a disposable, unexposed backend."""
+def _http_probes(project, image, app_url, world, admin, *, candidate=False):
+    """Run actual HTTP and worker workload under the experimental SQL role."""
+    if type(candidate) is not bool:
+        raise ObjectPolicyError("invalid fixture release stage")
+    suffix = "_candidate" if candidate else ""
+    player = "g5_role_player" + suffix
+    fixture_admin = "g5_role_admin" + suffix
+    other = "g5_role_other" + suffix
     from ops.ci_g5_actual_migration import DATABASE
     from ops.ci_g5_edge_admission import probe, run
     from ops.ci_g5_integrated_runtime import binary, wait_until
@@ -447,6 +461,7 @@ def _http_probes(project, image, app_url, world, admin):
         environment=("APP_ENV=test", "DATABASE_URL=" + app_url,
                      "SECRET_KEY=" + _TEST_SECRET),
     )
+    worker = None
     try:
         row = _container(backend)
         if (row.get("Image") != image
@@ -458,14 +473,14 @@ def _http_probes(project, image, app_url, world, admin):
         wait_until(lambda: probe(["exec", backend, "python", "-c",
             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"
         ])[0] == 0, "historical backend unavailable")
-        if binary(["exec", "-i", backend, "python", "-"], input=_REGISTER_CLIENT.encode()).strip() != b"registered":
+        if binary(["exec", "-i", backend, "python", "-", suffix], input=_REGISTER_CLIENT.encode()).strip() != b"registered":
             raise ObjectPolicyError("HTTP fixture registration failed")
         # Bootstrap verification and the fixture admin, not authorization decisions.
         admin.sql("UPDATE users SET is_verified=true, verification_token=NULL, "
-                  "is_admin=(username='g5_role_admin'), "
-                  "admin_role=CASE WHEN username='g5_role_admin' THEN 'admin' ELSE NULL END "
-                  "WHERE username IN ('g5_role_player','g5_role_other','g5_role_admin');", DATABASE)
-        raw = binary(["exec", "-i", backend, "python", "-", str(world)],
+                  f"is_admin=(username='{fixture_admin}'), "
+                  f"admin_role=CASE WHEN username='{fixture_admin}' THEN 'admin' ELSE NULL END "
+                  f"WHERE username IN ('{player}','{other}','{fixture_admin}');", DATABASE)
+        raw = binary(["exec", "-i", backend, "python", "-", str(world), suffix],
                      input=_HTTP_CLIENT.encode())
         try:
             evidence = json.loads(raw)
@@ -478,17 +493,53 @@ def _http_probes(project, image, app_url, world, admin):
         if admin.sql(
             f"SELECT count(*) FROM building_queue q JOIN cities c ON c.id=q.city_id "
             f"JOIN users u ON u.id=c.owner_id WHERE q.id={queue} AND c.id={city} "
-            f"AND c.world_id={world} AND u.username='g5_role_player';", DATABASE
+            f"AND c.world_id={world} AND u.username='{player}';", DATABASE
         ) != "1" or admin.sql(
             f"SELECT count(*) FROM support_cases s JOIN users u ON u.id=s.requester_id "
-            f"WHERE s.id IN ({case},{privacy}) AND u.username='g5_role_player';", DATABASE
+            f"WHERE s.id IN ({case},{privacy}) AND u.username='{player}';", DATABASE
         ) != "2":
             raise ObjectPolicyError("HTTP writes not persisted")
+        level = admin.sql(f"SELECT target_level FROM building_queue WHERE id={queue} "
+                          f"AND city_id={city};", DATABASE)
+        if not level.isdecimal() or int(level) <= 0:
+            raise ObjectPolicyError("queue target level missing")
+        admin.sql(f"UPDATE building_queue SET finish_time=now()-interval '2 seconds' "
+                  f"WHERE id={queue} AND city_id={city};", DATABASE)
+        worker = _create_container(
+            project, project, "role-worker", image, restart="no",
+            environment=("APP_ENV=test", "DATABASE_URL=" + app_url,
+                         "SECRET_KEY=" + _TEST_SECRET),
+            command=("python", "-m", "app.worker"),
+        )
+        row = _container(worker)
+        if (row.get("Image") != image
+                or row.get("HostConfig", {}).get("PortBindings") not in (None, {})
+                or row.get("HostConfig", {}).get("PublishAllPorts") is not False
+                or row.get("Config", {}).get("Labels", {}).get("medievol.g5.edge-fixture") != project):
+            raise ObjectPolicyError("worker container isolation mismatch")
+        run(["start", worker])
+        wait_until(lambda: admin.sql(
+            f"SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM building_queue WHERE id={queue}) "
+            f"AND EXISTS (SELECT 1 FROM buildings WHERE city_id={city} "
+            f"AND name='warehouse' AND level={level}) THEN 1 ELSE 0 END;", DATABASE
+        ) == "1", "runtime worker did not persist queue completion")
+        if _container(worker).get("State", {}).get("Running") is not True:
+            raise ObjectPolicyError("worker did not remain running")
+        print("candidate HTTP and worker verified" if candidate else
+              "historical HTTP and worker verified", flush=True)
+        return {"city": city, "case": case, "privacy": privacy, "level": int(level)}
     finally:
-        run(["stop", "-t", "10", backend])
-        if _container(backend).get("State", {}).get("Running") is not False:
-            raise ObjectPolicyError("backend did not stop")
-        run(["rm", backend])
+        try:
+            if worker is not None:
+                run(["stop", "-t", "10", worker])
+                if _container(worker).get("State", {}).get("Running") is not False:
+                    raise ObjectPolicyError("worker did not stop")
+                run(["rm", worker])
+        finally:
+            run(["stop", "-t", "10", backend])
+            if _container(backend).get("State", {}).get("Running") is not False:
+                raise ObjectPolicyError("backend did not stop")
+            run(["rm", backend])
 
 
 def _drill():
@@ -500,6 +551,7 @@ def _drill():
     from ops.ci_g5_integrated_runtime import binary, ready_db, wait_until
     from ops.ci_g5_privileged_inventory import IsolatedAdmin
     from ops.ci_g5_actual_reopen import original_database
+    from ops.ci_g5_full_schema_restore import Snapshot
     from ops.ci_g5_release_transition import (
         PREVIOUS_SHA, _base_image_reference, _build_image, _container_ip, _ensure_commit,
         _git, _git_exists, _image, _remove_fixture_image, _worktree, release_pair,
@@ -590,14 +642,16 @@ def _drill():
         archive = binary(["exec", "-i", database, "pg_restore", "--list"], input=backup)
         if b"alembic_version" not in archive or b"worlds" not in archive:
             raise ObjectPolicyError("backup verification failed")
-        backup_path = root / "historical.dump"
-        with backup_path.open("xb") as stream:
-            os.fchmod(stream.fileno(), 0o600)
-            stream.write(backup)
-            stream.flush()
-            os.fsync(stream.fileno())
-        if backup_path.read_bytes() != backup:
-            raise ObjectPolicyError("backup persistence verification failed")
+        snapshot = Snapshot.capture(root / "historical.dump", backup)
+        fd = snapshot.open_verified()
+        try:
+            if snapshot.read_verified(fd) != backup:
+                raise ObjectPolicyError("backup persistence verification failed")
+        finally:
+            os.close(fd)
+        system_id = admin.sql("SELECT system_identifier::text FROM pg_control_system();")
+        if not re.fullmatch(r"[1-9][0-9]{0,19}", system_id):
+            raise ObjectPolicyError("cluster identity unavailable")
 
         admin.sql(f"CREATE ROLE {APP} LOGIN PASSWORD '{APP_PASSWORD}';")
         original = original_database(admin)
@@ -649,7 +703,7 @@ def _drill():
         world_id = admin.sql("SELECT id FROM worlds WHERE name='Mundo 1';", DATABASE)
         if not world_id.isdecimal() or int(world_id) <= 0:
             raise ObjectPolicyError("historical world unavailable")
-        _http_probes(project, images[0], app_url, int(world_id), admin)
+        historical = _http_probes(project, images[0], app_url, int(world_id), admin)
         world = run(app_command(database, """
             INSERT INTO worlds(name, speed_modifier, resource_modifier, map_size,
               special_rules, created_at, is_active, lifecycle_status, lifecycle_changed_at)
@@ -699,10 +753,48 @@ def _drill():
             raise ObjectPolicyError("migrated database identity changed")
         expect_refused(database, "SELECT * FROM wonder_funding;", "not permitted to log in")
         gate.assert_closed()
-        print("G5 role laboratory: historical HTTP gameplay, support, privacy and authorization, "
-              "archive listing, 0020 seed, grants and fence verified")
-        print("Limitations: mutable-table grants are not least-privilege certified; "
-              "no backup restore, wiki or unprobed HTTP routes, or worker were exercised.")
+        if admin.sql("SELECT system_identifier::text FROM pg_control_system();") != system_id:
+            raise ObjectPolicyError("PostgreSQL cluster identity changed")
+        provision(target, admin, inventory, CANDIDATE, granted_revision=CANDIDATE, fenced=True)
+        gate.assert_closed()
+        # This runner owns the entire disposable fixture; never an activation
+        # of a real release. Restore both SQL restrictions in one transaction,
+        # without an externally visible intermediate LOGIN state.
+        try:
+            _inventory(target, inventory, True)
+            admin.sql(f'BEGIN; ALTER DATABASE "{DATABASE}" CONNECTION LIMIT '
+                      f'{original.connection_limit}; ALTER ROLE "{APP}" LOGIN; COMMIT;')
+            _inventory(target, inventory, False)
+            inspect_objects(target, inventory, CANDIDATE, granted_revision=CANDIDATE)
+            candidate_world = admin.sql("SELECT id FROM worlds WHERE name='Mundo 1';", DATABASE)
+            if not candidate_world.isdecimal() or int(candidate_world) <= 0:
+                raise ObjectPolicyError("candidate world missing")
+            _http_probes(project, images[1], app_url, int(candidate_world), admin, candidate=True)
+            run(app_command(database, "SELECT count(*) FROM wonder_funding;"))
+            run(app_command(database, "SELECT count(*) FROM wonder_contributions;"))
+            expect_refused(database, "UPDATE alembic_version SET version_num='bad';", "permission denied")
+            _sql_denial_probes(database)
+            if admin.sql(
+                f"SELECT count(*) FROM support_cases WHERE id IN ({historical['case']},{historical['privacy']});",
+                DATABASE,
+            ) != "2" or admin.sql(
+                f"SELECT count(*) FROM buildings WHERE city_id={historical['city']} "
+                f"AND name='warehouse' AND level>={historical['level']};", DATABASE
+            ) != "1":
+                raise ObjectPolicyError("historical confirmed HTTP/worker data lost")
+        finally:
+            gate.engage()
+            gate.assert_closed()
+        _inventory(target, inventory, True)
+        fd = snapshot.open_verified()
+        try:
+            snapshot.read_verified(fd)
+        finally:
+            os.close(fd)
+        print("G5 role laboratory: historical and candidate HTTP gameplay, support, privacy, "
+              "authorization, worker persistence, archive identity, 0020 seed, grants and fence verified")
+        print("Limitations: experimental DML upper bound, no complete least-privilege certification; "
+              "no independent backup restore in this runner or unprobed HTTP routes.")
         succeeded = True
     finally:
         if succeeded:

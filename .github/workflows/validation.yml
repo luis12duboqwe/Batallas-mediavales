@@ -419,6 +419,15 @@ jobs:
         env:
           CI: "true"
         run: python3 -m ops.ci_g5_actual_migration
+      - name: Rehearse runtime role provisioning on populated historical schema
+        timeout-minutes: 25
+        env:
+          CI: "true"
+        run: |
+          git fetch --no-tags --depth=1 origin eafc5bbd5fdc9caad698db48cbb8ad80df942f0e
+          docker pull python:3.11-slim
+          docker pull postgres:15-alpine
+          python3 -m ops.ci_g5_role_provisioning
       - name: Rehearse full-schema PostgreSQL rollback and adversaries
         env:
           CI: "true"

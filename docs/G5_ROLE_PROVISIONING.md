@@ -77,3 +77,7 @@ before and after execution. It exercised historical gameplay, support and
 privacy HTTP routes, archive listing, real 0020 migration and seed, grant
 checks and persistent fence. This was not an official GitHub Actions run and
 did not test worker behavior or backup restoration.
+
+## Ampliación de mantenimiento
+
+Se reutiliza el recibo Snapshot de #206 (archivo 0600, fsync, identidad y hash verificados antes y después). Los grants nombrados se aplican en una única transacción y se observa inventario antes/después. Se prueban las dos imágenes históricas/candidata con cuentas distintas, HTTP de juego/soporte/privacidad y worker real: completar la cola de almacén bajo el rol runtime y verificar persistencia SQL. La candidata se abre únicamente en el runner desechable, en una sola transacción SQL para restaurar límite y LOGIN, y se vuelve a cerrar en finally; se verifica que las escrituras históricas sobreviven. CI obligatoria de imágenes y revisión independiente pendientes. No se afirma mínimo privilegio exhaustivo ni se restaura una base real. La restauración independiente se ensaya en #221, fuera de este scope.

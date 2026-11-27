@@ -322,5 +322,5 @@ def test_provision_issues_only_named_policy_grants(monkeypatch, revision, grante
         if name not in prior
     )
     expected.append('GRANT USAGE, SELECT ON SEQUENCE "worlds_id_seq" TO "game_app";')
-    assert statements == [(statement, TARGET.database) for statement in expected]
+    assert statements == [("BEGIN; " + " ".join(expected) + " COMMIT;", TARGET.database)]
     assert inspections == [granted, revision]
