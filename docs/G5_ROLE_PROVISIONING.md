@@ -6,11 +6,25 @@ and provides a read-only name comparison. It does not grant, revoke, migrate,
 back up, fence, or validate database privileges. It must not be used to
 authorize a cutover or to claim continuous exclusion of writers.
 
-The explicit fixture list excludes `alembic_version`, administrative logs,
-support and anti-cheat tables. Unknown or missing table names are rejected.
-The list is preliminary: excluding internal tables may break application
-features that use them. A complete drill must prove its chosen policy against
-actual runtime behavior rather than assume this list is sufficient.
+The name inventory distinguishes the migration ledger (`alembic_version`)
+from runtime tables, including the administrative, support and anti-cheat
+tables. Unknown or missing table names are rejected. This is only a list of
+names; it does not prescribe or verify grants. Runtime call sites establish
+at least the following operations:
+
+| Table | Observed operations and evidence |
+| --- | --- |
+| `support_cases` | SELECT, INSERT, UPDATE: `services/support.py`, `routers/account_data.py`, `services/account_export.py` |
+| `logs` | SELECT, INSERT, UPDATE: `services/anticheat.py`, `services/admin.py`, `services/achievement.py`; DELETE through the user ORM cascade in `models/user.py` |
+| `anti_cheat_rate_buckets` | SELECT, INSERT, UPDATE: `services/anticheat.py` |
+| `anti_cheat_flags` | SELECT, INSERT, UPDATE: `services/anticheat.py`, `routers/anticheat.py` |
+| `admin_bot_logs` | SELECT, INSERT: `services/admin_bot.py`, `routers/admin_bot.py` |
+
+These are observed operations, **not an exhaustive minimum privilege
+policy**. Cascades and other code paths require further review and real
+runtime testing. The application uses one shared SQL identity, so its SQL
+privileges cannot distinguish an administrator's request from an ordinary
+player's request. Application-level authorization remains essential.
 
 Outstanding work includes exact-SHA images and an existing populated 0019
 database, identity and verified backup, a strict catalog/ownership/ACL audit

@@ -11,7 +11,7 @@ from ops.g5_pg15_writer_fence import Pg15FenceTarget
 PREVIOUS = "0019_privacy_active_unique"
 CANDIDATE = "0020_wonder_funding"
 
-# Explicitly reviewed fixture policy, not a production permission specification.
+# These sets describe names only, not a reviewed SQL privilege policy.
 GAME_TABLES = frozenset({
     "achievement_progress", "achievements", "adventures", "alliance_chat_messages",
     "alliance_invitations", "alliance_members", "alliances", "building_queue",
@@ -29,6 +29,17 @@ INTERNAL_TABLES = frozenset({
 })
 NEW_TABLES = frozenset({"wonder_contributions", "wonder_funding"})
 
+# Runtime code also uses tables previously mistaken for maintenance-only data.
+# These are observed operations, not a complete privilege specification: ORM
+# cascades and other call paths can require additional operations.
+OBSERVED_INTERNAL_OPERATIONS = {
+    "support_cases": frozenset({"SELECT", "INSERT", "UPDATE"}),
+    "logs": frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"}),
+    "anti_cheat_rate_buckets": frozenset({"SELECT", "INSERT", "UPDATE"}),
+    "anti_cheat_flags": frozenset({"SELECT", "INSERT", "UPDATE"}),
+    "admin_bot_logs": frozenset({"SELECT", "INSERT"}),
+}
+
 
 class ObjectPolicyError(RuntimeError):
     """Unrecognized or unsafe catalog evidence."""
@@ -43,8 +54,8 @@ def expected_tables(revision: str) -> frozenset[str]:
 
 
 def allowed_tables(revision: str) -> frozenset[str]:
-    expected_tables(revision)
-    return GAME_TABLES | (NEW_TABLES if revision == CANDIDATE else frozenset())
+    """Names used by runtime code; not permission to grant any privileges."""
+    return expected_tables(revision) - {"alembic_version"}
 
 
 def validate_table_names(revision: str, names) -> None:

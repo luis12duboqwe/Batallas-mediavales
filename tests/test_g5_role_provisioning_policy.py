@@ -6,13 +6,12 @@ from ops.g5_pg15_writer_fence import Pg15FenceTarget
 
 
 class PolicyTests(unittest.TestCase):
-    def test_explicit_revision_policy_excludes_internal_tables(self):
+    def test_runtime_names_include_internal_application_tables_but_not_ledger(self):
         for revision in (policy.PREVIOUS, policy.CANDIDATE):
-            self.assertFalse(policy.allowed_tables(revision) & policy.INTERNAL_TABLES)
-            self.assertEqual(
-                policy.expected_tables(revision),
-                policy.allowed_tables(revision) | policy.INTERNAL_TABLES,
-            )
+            self.assertEqual(policy.allowed_tables(revision),
+                             policy.expected_tables(revision) - {"alembic_version"})
+            self.assertTrue(set(policy.OBSERVED_INTERNAL_OPERATIONS)
+                            <= policy.allowed_tables(revision))
         self.assertEqual(
             policy.allowed_tables(policy.CANDIDATE) - policy.allowed_tables(policy.PREVIOUS),
             {"wonder_funding", "wonder_contributions"},
@@ -28,6 +27,18 @@ class PolicyTests(unittest.TestCase):
                     policy.validate_table_names(policy.PREVIOUS, invalid)
         with self.assertRaises(policy.ObjectPolicyError):
             policy.validate_table_names("head", names)
+        with self.assertRaises(policy.ObjectPolicyError):
+            policy.allowed_tables("head")
+
+    def test_documented_internal_operations_are_not_an_empty_exclusion(self):
+        self.assertEqual(policy.OBSERVED_INTERNAL_OPERATIONS, {
+            "support_cases": {"SELECT", "INSERT", "UPDATE"},
+            "logs": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+            "anti_cheat_rate_buckets": {"SELECT", "INSERT", "UPDATE"},
+            "anti_cheat_flags": {"SELECT", "INSERT", "UPDATE"},
+            "admin_bot_logs": {"SELECT", "INSERT"},
+        })
+        self.assertNotIn("alembic_version", policy.OBSERVED_INTERNAL_OPERATIONS)
 
     def test_read_only_inventory_uses_existing_session_and_rejects_unknown(self):
         class Session:
