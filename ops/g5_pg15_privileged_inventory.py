@@ -138,6 +138,14 @@ def inspect_privileged_inventory(
         "JOIN pg_namespace n ON n.oid=p.pronamespace WHERE "
         "(l.lanname IN ('internal','c') OR NOT l.lanpltrusted) "
         "AND (p.oid>=16384 OR n.nspname NOT IN ('pg_catalog','information_schema')))",
+        # These server-file operations must never be executable by the
+        # application identity, even if a catalog baseline is incomplete.
+        # Ownership grants implicit EXECUTE independent of an explicit ACL.
+        "NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+        "WHERE n.nspname='pg_catalog' AND "
+        "(p.proname IN ('lo_import','lo_export') "
+        f"OR p.proowner=(SELECT oid FROM pg_roles WHERE rolname='{app}')) "
+        f"AND has_function_privilege('{app}',p.oid,'EXECUTE')) AND "
         # Detect nonstandard grants of built-in routine execution relative to
         # the initdb ACL, rather than classifying standard PUBLIC execution
         # of an unrelated overload as elevated authority. Explicit app grants

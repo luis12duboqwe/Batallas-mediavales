@@ -48,10 +48,10 @@ def main():
         admin.sql("REVOKE CONNECT ON DATABASE postgres, template1 FROM PUBLIC;")
         admin.sql("CREATE TABLE evidence (id int PRIMARY KEY);", "game_ci")
 
-        def expect(*blockers, fenced=False):
+        def expect(*blockers, fenced=False, case="baseline"):
             observation = inspect_privileged_inventory(target, admin, fenced=fenced)
             if set(observation.blockers) != set(blockers):
-                raise RuntimeError("unexpected inventory result: " + ",".join(observation.blockers))
+                raise RuntimeError(f"{case}: expected {sorted(blockers)}, observed {sorted(observation.blockers)}")
 
         # Real stock permission-checked pg_settings access is not a
         # privileged catalog mutation. Prove the default explicitly.
@@ -59,7 +59,8 @@ def main():
                      "game_ci") != "t":
             raise RuntimeError("expected PG15 stock pg_settings UPDATE permission")
         expect()
-        for create, remove, blocker, db in (
+        failures = []
+        for index, (create, remove, blocker, db) in enumerate((
             ("CREATE ROLE other_admin LOGIN SUPERUSER;", "DROP ROLE other_admin;",
              "dedicated_roles", "postgres"),
             ("CREATE ROLE hidden_owner NOLOGIN;", "DROP ROLE hidden_owner;",
@@ -124,11 +125,23 @@ def main():
              "ROLLBACK PREPARED 'g5_probe';", "no_prepared_transactions", "game_ci"),
             ("ALTER ROLE game_app SET session_preload_libraries TO '';",
              "ALTER ROLE game_app RESET session_preload_libraries;", "no_preload_overrides", "postgres"),
-        ):
+        ), start=1):
+            # These commands are fixed synthetic test fixtures, not user
+            # input or live SQL. Report the exact adversarial case and
+            # collect all independent assertion failures in one runner.
+            case = f"case {index}: {create}"
             admin.sql(create, db)
-            expect(*(blocker if isinstance(blocker, tuple) else (blocker,)))
-            admin.sql(remove, db)
-            expect()
+            try:
+                expect(*(blocker if isinstance(blocker, tuple) else (blocker,)), case=case)
+                print(f"PASS {case}", flush=True)
+            except RuntimeError as exc:
+                failures.append(str(exc))
+                print(f"FAIL {exc}", flush=True)
+            finally:
+                admin.sql(remove, db)
+            expect(case=f"baseline after {index}")
+        if failures:
+            raise RuntimeError("adversarial inventory failures: " + "; ".join(failures))
 
         run(["exec", "-d", container, "psql", "-X", "-U", "postgres",
              "-d", "game_ci", "-Atqc", "SELECT pg_sleep(90);"])

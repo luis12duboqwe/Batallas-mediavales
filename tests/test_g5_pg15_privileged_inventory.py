@@ -103,3 +103,13 @@ def test_stock_pg_settings_exception_is_narrow():
     assert "c.relname<>'pg_settings' OR c.relkind<>'v' OR c.oid>=16384" in statement
     assert "INSERT,DELETE,TRUNCATE,TRIGGER" in statement
     assert "aclexplode(c.relacl)" in statement
+
+
+def test_server_file_acl_is_independent_of_initdb_acl():
+    reader = Reader(flags(CLUSTER_CHECKS), flags(DATABASE_CHECKS),
+                    flags(DATABASE_CHECKS), flags(CLUSTER_CHECKS))
+    assert inspect_privileged_inventory(TARGET, reader, fenced=False).blockers == ()
+    sql = reader.calls[1][1]
+    assert "p.proname IN ('lo_import','lo_export')" in sql
+    assert "p.proowner=(SELECT oid FROM pg_roles" in sql
+    assert "has_function_privilege" in sql
