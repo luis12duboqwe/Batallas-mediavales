@@ -70,6 +70,7 @@ class TargetIdentity:
     application_role: str
     maintenance_role: str
     caddy_container_id: str
+    postgres_system_identifier: str
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,9 @@ class ExternalCopyDeclaration:
     database_oid: int
     schema_sha256: str
     source_release_sha: str
+    source_identity: TargetIdentity
+    data_sha256: str
+    captured_at: datetime
     observed_at: datetime
     verified: bool
 
@@ -136,6 +140,8 @@ class CloneRestoreDeclaration:
     source_sha256: str
     restored_schema_sha256: str
     restored_database_oid: int
+    restored_data_sha256: str
+    clone_postgres_system_identifier: str
     clone_id: str
     clone_network_id: str
     clone_volume_id: str
@@ -178,7 +184,7 @@ _STEPS = (
     "Provision or attest a dedicated non-privileged application role; test allowed and denied privileges.",
     "Close HTTP and Socket.IO admission, disable writer restarts, stop all writers, and establish a durable database write barrier.",
     "Capture and verify the external snapshot while the barrier and all host identities remain continuous.",
-    "Restore that snapshot only in a distinct isolated clone and verify schema and application data.",
+    "Restore that snapshot only in a distinct isolated logical-restore cluster and verify schema and application data.",
     "After verified rollback evidence exists, durably record the prior release identity before candidate publication.",
     "Publish the approved immutable candidate while admission remains controlled; verify candidate health before any public probe.",
     "Only under separately authorized, controlled admission, probe HTTPS, SMTP delivery, and bounded load; remain NO-GO for activation.",
@@ -242,6 +248,11 @@ def _role_split_is_well_formed(identity: TargetIdentity) -> bool:
     return result.application == app and result.maintenance == admin and result.database == database
 
 
+def _valid_system_identifier(value: object) -> bool:
+    return (isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{0,19}", value) is not None
+            and int(value) <= 2**64 - 1)
+
+
 def _valid_identity(identity: object) -> bool:
     return (
         isinstance(identity, TargetIdentity)
@@ -256,7 +267,8 @@ def _valid_identity(identity: object) -> bool:
         and isinstance(identity.database, str)
         and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,62}", identity.database) is not None
         and type(identity.database_oid) is int
-        and identity.database_oid > 0
+        and 0 < identity.database_oid <= 2**32 - 1
+        and _valid_system_identifier(identity.postgres_system_identifier)
         and isinstance(identity.schema_sha256, str)
         and _HASH.fullmatch(identity.schema_sha256) is not None
         and isinstance(identity.current_release_sha, str)
@@ -272,6 +284,8 @@ def _metadata_consistent(metadata: object, identity: TargetIdentity) -> list[str
         return ["Release metadata cannot be matched to a malformed target identity."]
     if not isinstance(metadata, MetadataObservation):
         return ["Release metadata observation is missing or malformed."]
+    if type(metadata.recovery_marker_present) is not bool:
+        return ["Recovery marker observation is malformed."]
     g5_artifacts = (
         metadata.marker_operation_id is not None
         or metadata.manifest is not None
@@ -396,12 +410,14 @@ def _inventory_blockers(inventory: object) -> list[str]:
                 or container.network_id != identity.network_id
                 or type(container.running) is not bool
                 or not isinstance(container.restart_policy, str)
-                or not container.restart_policy):
+                or container.restart_policy not in {"no", "always", "unless-stopped", "on-failure"}):
             blockers.append("A container identity does not match the observed Compose target.")
         elif container.container_id in ids:
             blockers.append("Compose container IDs are duplicated.")
         else:
             ids.add(container.container_id)
+        if service in _REQUIRED_SERVICES and container.running is not True:
+            blockers.append(f"{service} is not running in the observed prior release.")
         if service == "database" and container.volume_id != getattr(identity, "volume_id", None):
             blockers.append("PostgreSQL volume differs from the observed volume identity.")
         if service in {"migrate", "seed"} and (
@@ -537,6 +553,8 @@ def plan_adoption(
             or type(copy.database_oid) is not int or copy.database_oid <= 0
             or not isinstance(copy.schema_sha256, str) or _HASH.fullmatch(copy.schema_sha256) is None
             or not isinstance(copy.source_release_sha, str) or _SHA.fullmatch(copy.source_release_sha) is None
+            or not _valid_identity(copy.source_identity)
+            or not isinstance(copy.data_sha256, str) or _HASH.fullmatch(copy.data_sha256) is None
             or copy.verified is not True
         ):
             blockers.append("External snapshot verification is only declared or incomplete.")
@@ -548,7 +566,10 @@ def plan_adoption(
             or not isinstance(restore.restored_schema_sha256, str)
             or _HASH.fullmatch(restore.restored_schema_sha256) is None
             or type(restore.restored_database_oid) is not int
-            or restore.restored_database_oid <= 0
+            or not 0 < restore.restored_database_oid <= 2**32 - 1
+            or not isinstance(restore.restored_data_sha256, str)
+            or _HASH.fullmatch(restore.restored_data_sha256) is None
+            or not _valid_system_identifier(restore.clone_postgres_system_identifier)
             or not isinstance(restore.clone_id, str) or not restore.clone_id
             or not isinstance(restore.clone_network_id, str)
             or _CONTAINER_ID.fullmatch(restore.clone_network_id) is None
@@ -559,7 +580,9 @@ def plan_adoption(
             blockers.append("Restore evidence in an isolated clone is only declared or incomplete.")
 
         if isinstance(copy, ExternalCopyDeclaration):
-            if not _fresh(copy.observed_at, now, max_observation_age_seconds):
+            if (not _fresh(copy.observed_at, now, max_observation_age_seconds)
+                    or not _fresh(copy.captured_at, now, max_observation_age_seconds)
+                    or not _not_after(copy.captured_at, copy.observed_at)):
                 blockers.append("External snapshot evidence is stale or has an invalid timestamp.")
         if isinstance(restore, CloneRestoreDeclaration):
             if not _fresh(restore.observed_at, now, max_observation_age_seconds):
@@ -571,7 +594,10 @@ def plan_adoption(
                 copy.sha256 != restore.source_sha256
                 or copy.schema_sha256 != restore.restored_schema_sha256
                 or copy.database_oid != target_identity.database_oid
-                or copy.database_oid != restore.restored_database_oid
+                or copy.source_identity != target_identity
+                or copy.data_sha256 != restore.restored_data_sha256
+                or not _not_after(copy.observed_at, restore.observed_at)
+                or restore.clone_postgres_system_identifier == target_identity.postgres_system_identifier
                 or copy.schema_sha256 != target_identity.schema_sha256
                 or copy.source_release_sha != target_identity.current_release_sha
                 or restore.clone_network_id == target_identity.network_id

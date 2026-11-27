@@ -32,9 +32,9 @@ La función `plan_adoption(observations, declarations, now=...)` recibe:
   sin gestión, metadata legacy administrada, recibo G5 administrado e
   incidente. Metadata ausente con marcador/manifiesto/recuperación es
   contradictoria. La metadata legacy no equivale a un recibo G5 terminal.
-- Declaraciones externas separadas de observaciones: copia enlazada a OID,
-  huella de esquema y release fuente; restauración en clon enlazada al mismo
-  hash, esquema y OID, con red y volumen distintos; mediciones frescas de
+- Declaraciones externas separadas de observaciones: copia enlazada a toda la identidad fuente, incluido identificador del clúster PostgreSQL, OID,
+  huellas de esquema/datos y release; restauración lógica en clon enlazada al mismo
+  hash, esquema y datos, con clúster, red y volumen distintos (el OID del clon puede diferir); mediciones frescas de
   capacidad, ventana y autorización humana. Son declaraciones no verificadas;
   el plan comprueba consistencia y frescura, pero no autentica pruebas.
 
@@ -60,8 +60,8 @@ posterior auditado y autorización humana explícita:
 5. Cerrar HTTP/Socket.IO, desactivar reinicios de writers, detenerlos y
    establecer una barrera durable contra escrituras y reconexiones.
 6. Capturar y verificar la copia externa con barrera e identidad continuas.
-7. Restaurarla solo en un clon con red y volumen distintos, y verificar OID,
-   esquema y datos.
+7. Restaurarla solo en un clon con red y volumen distintos, y verificar identidad distinta del clúster,
+   esquema y datos; no exigir el mismo OID en una restauración lógica.
 8. Solo después de validar evidencia durable de rollback, registrar la
    identidad de la release previa.
 9. Publicar la candidata inmutable bajo admisión controlada y verificar su
@@ -102,3 +102,7 @@ Las pruebas son sintéticas y no acceden a sistemas externos. #174 y #161
 continúan explícitamente NO-GO; el estado sin metadata de release administrada
 de la vista previa histórica es un bloqueador, no una invitación a inicializar
 metadata sobre un host poblado.
+
+## Revisión de identidad de respaldo
+
+Se exige identidad fuente completa (incluido system_identifier de PostgreSQL), no solo OID, y se vincula la huella canónica declarada de datos de la copia con la del clon. Se exige orden captura → verificación de copia → verificación del clon y frescura. El OID del clon lógico es propio; el identificador de clúster, red y volumen deben ser distintos. El planner no calcula ni autentica estas huellas: siguen siendo declaraciones externas; una integración posterior debe obtenerlas de forma verificable. También se rechazan servicios requeridos detenidos y valores inválidos del marcador/restart policy. Sincronizado con #215, pendiente CI y revisión independiente.

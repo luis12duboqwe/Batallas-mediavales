@@ -43,6 +43,7 @@ def valid_evidence():
         application_role="game_app",
         maintenance_role="game_admin",
         caddy_container_id="e" * 64,
+        postgres_system_identifier="7345678901234567890",
     )
     images = (
         ImageObservation("backend", "ghcr.io/example/backend@sha256:" + "1" * 64,
@@ -96,6 +97,9 @@ def valid_evidence():
             database_oid=16384,
             schema_sha256="d" * 64,
             source_release_sha=SHA,
+            source_identity=identity,
+            data_sha256="8" * 64,
+            captured_at=NOW - timedelta(seconds=8),
             observed_at=NOW - timedelta(seconds=5),
             verified=True,
         ),
@@ -103,7 +107,9 @@ def valid_evidence():
             evidence_id="restore-evidence-1",
             source_sha256="6" * 64,
             restored_schema_sha256="d" * 64,
-            restored_database_oid=16384,
+            restored_database_oid=16400,
+            restored_data_sha256="8" * 64,
+            clone_postgres_system_identifier="7345678901234567891",
             clone_id="isolated-clone-1",
             clone_network_id="7" * 64,
             clone_volume_id="isolated-clone-volume",
@@ -392,7 +398,12 @@ def test_naive_or_invalid_timezone_values_fail_closed_without_crashing():
 
 def test_external_clone_schema_and_database_identity_must_match():
     observations, declarations = valid_evidence()
+    # A logical restore gets a new database OID. Do not require equality
+    # with the source OID; require matching evidence and distinct cluster.
     clone = replace(declarations.clone_restore, restored_database_oid=999)
+    assert not plan(observations, replace(declarations, clone_restore=clone)).blockers
+    clone = replace(declarations.clone_restore, clone_postgres_system_identifier=
+                    observations.after.identity.postgres_system_identifier)
     assert any("differs from the observed source identity" in blocker for blocker in plan(
         observations, replace(declarations, clone_restore=clone)
     ).blockers)
@@ -410,3 +421,38 @@ def test_role_split_errors_do_not_echo_credentials_or_database_urls():
     assert "fail the G5 split contract" in rendered
     assert "synthetic" not in rendered
     assert "postgresql+psycopg" not in rendered
+
+
+@pytest.mark.parametrize("field,value", [
+    ("postgres_system_identifier", "7345678901234567899"),
+    ("compose_sha256", "9" * 64),
+    ("volume_id", "different-source-volume"),
+    ("network_id", "9" * 64),
+])
+def test_same_oid_and_schema_do_not_bind_a_different_source(field, value):
+    observed, declared = valid_evidence()
+    identity = replace(observed.after.identity, **{field: value})
+    containers = tuple(replace(c, network_id=identity.network_id,
+                               volume_id=identity.volume_id if c.service == "database" else c.volume_id)
+                       for c in observed.after.containers)
+    changed = replace_both(observed, identity=identity, containers=containers)
+    result = plan(changed, declared)
+    assert any("differs from the observed source identity" in b for b in result.blockers)
+
+
+def test_clone_data_and_capture_order_are_required():
+    observed, declared = valid_evidence()
+    for clone in (
+        replace(declared.clone_restore, restored_data_sha256="9" * 64),
+        replace(declared.clone_restore, observed_at=NOW - timedelta(seconds=6)),
+    ):
+        result = plan(observed, replace(declared, clone_restore=clone))
+        assert any("differs from the observed source identity" in b for b in result.blockers)
+
+
+def test_stopped_required_service_is_not_a_valid_prior_release():
+    observed, declared = valid_evidence()
+    containers = tuple(replace(c, running=False) if c.service == "worker" else c
+                       for c in observed.after.containers)
+    result = plan(replace_both(observed, containers=containers), declared)
+    assert any("worker is not running" in b for b in result.blockers)
