@@ -405,6 +405,26 @@ def test_nginx_route_accepts_candidate_reusing_previous_private_address(tmp_path
     evidence.close()
 
 
+def test_nginx_previous_route_uses_the_recovered_container_address(tmp_path, monkeypatch):
+    host = tmp_path / "host"
+    host.mkdir()
+    config = host / "nginx.g5.conf"
+    config.write_text("upstream backend {\n    server 172.18.0.2:8000;\n}\n")
+    evidence = EvidenceLog(tmp_path / "transition.jsonl")
+    port = TransitionPort.__new__(TransitionPort)
+    port.root = tmp_path
+    port.evidence = evidence
+    port.previous_address = "172.18.0.9"
+    port.nginx = "nginx"
+    monkeypatch.setattr(transition, "run", lambda _args: "")
+
+    port._route_nginx_to_previous()
+
+    assert "server 172.18.0.9:8000;" in config.read_text()
+    assert [row["event"] for row in evidence.verify()] == ["nginx_previous_route_reloaded"]
+    evidence.close()
+
+
 def test_database_fingerprint_normalizes_pg_dump_stream_tokens(monkeypatch):
     template = (
         b"--\n-- PostgreSQL database dump\n"

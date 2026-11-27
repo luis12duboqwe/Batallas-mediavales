@@ -13,9 +13,13 @@ ni cambia el estado de #174.
 - Candidata: el SHA completo de `HEAD` del checkout de CI; se exige que ese
   árbol contenga `0020_wonder_funding` y que sea distinto de la release previa.
 - El ensayo construye ambas imágenes backend desde worktrees detenidos en esos
-  SHAs. Verifica los labels de revisión SHA, registra los image IDs inmutables,
-  distingue ambas imágenes y recoge el digest de la imagen base. Una etiqueta
-  Docker no se toma como identidad.
+  SHAs. Compara el `Dockerfile` de cada worktree byte a byte con el blob de su
+  SHA, registra su hash original y sustituye solo el `FROM python:3.11-slim`
+  por el digest inmutable obtenido de la imagen base descargada. La construcción
+  usa `--pull=false`; después valida labels, referencia base y prefijo de capas
+  de la imagen inspeccionada. Registra los image IDs inmutables y exige que sean
+  distintos. Una etiqueta Docker no se toma como identidad ni como prueba de
+  qué base se usó.
 
 La verificación del commit anterior a 0020 se obtuvo de su árbol GitHub y del
 cambio que añadió 0020 (`264237860ef08348f082e37d1ea1579b6ab58e68`). Si el SHA
@@ -45,7 +49,10 @@ python -m ops.ci_g5_release_transition replace "$RUNNER_TEMP/g5-transition"
 ```
 
 Los casos de fallo son puntos de inyección deterministas, no cortes de red
-externos. `pull` inyecta un fallo de adquisición antes de cerrar el servicio
+externos. Cada punto registra un recibo duradero y lanza un tipo de excepción
+propio con escenario y punto exactos. Solo ese tipo y su recibo permiten tratar
+el fallo como inyectado; cualquier excepción no relacionada preserva el fixture
+y no se convierte en un resultado esperado. `pull` inyecta un fallo de adquisición antes de cerrar el servicio
 previo; `backup` falla después de calcular una huella de solo lectura y antes
 de guardar el snapshot; esa huella normaliza únicamente los tokens aleatorios
 de integridad del dump SQL y el archivo de respaldo conserva su hash propio.
@@ -78,10 +85,24 @@ Los fallos pre-migración `backup`, `create`, `wrong-image` y `retry` solo
 reactivan el contenedor previo mediante la opción explícita
 `--approve-previous-recovery`. Se exigen marcador y operación coincidentes,
 ausencia verificable del inicio de migración, huella de DB idéntica, revisión
-0019 y el mismo image ID/configuración del contenedor previo. No se restaura el
-snapshot; el marcador de activación permanece y no se autoriza el entrypoint
-legacy. Si alguna evidencia falta, cambia o resulta incierta, se conserva la
-admisión cerrada y el directorio/evidencia para conciliación manual.
+0019 y el mismo image ID/configuración del contenedor previo. La recuperación
+mantiene el `deploy.lock`, descriptor y contenido del marcador, identidad de
+directorio/manifest y tip del log de evidencia fijados durante todo el
+procedimiento; vuelve a comprobarlos y la ausencia de mutaciones antes de cada
+apertura. Primero intenta de forma independiente volver a cerrar Nginx,
+PostgreSQL y todos los escritores, y verifica esas barreras antes de abrirlas.
+Verifica el backend anterior de forma interna, resuelve su IP Docker actual,
+recarga Nginx hacia esa IP y comprueba HTTP y Socket.IO antes de admitir tráfico.
+Una excepción tras abrir una barrera vuelve a intentar el cierre completo. Si
+cualquier inspección, cierre o identidad queda incierta, el fixture se conserva
+para conciliación manual. No se restaura el snapshot; el marcador permanece y
+no se autoriza el entrypoint legacy.
+
+El lease protege una recuperación que se ejecuta en el mismo proceso; no hay
+reanudación automática después de SIGKILL, caída del runner o pérdida del host.
+El proceso siguiente debe conciliar manualmente el estado y la evidencia. La
+integridad del recibo se fija al descriptor abierto: vacío, truncamiento,
+registro parcial, edición final o reemplazo del archivo son errores.
 
 Si la migración ya empezó, o hay fallo tras COMMITTED, no hay recuperación
 automática al release previo ni restauración de snapshot. `replace` verifica
