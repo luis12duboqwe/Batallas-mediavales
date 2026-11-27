@@ -70,10 +70,10 @@ deployment integration is included.
 ## Sandbox result
 
 The laboratory ran locally with synthetic CI guard variables and candidate
-checkout `1e022819f9bce3381751fa10512b36b7cdcbc544`, exiting 0 after the
-historical write, archive listing, real 0020 migration and seed, grant checks
-and persistent fence. This was not an official GitHub Actions run. A subsequent
-local run also exercised historical gameplay, support and privacy HTTP routes.
-Neither run tested worker behavior or backup restoration. The later changes
-moving the temporary workspace to `/tmp` and adding positive owner-detail
-checks were not included in those runs.
+checkout `1e022819f9bce3381751fa10512b36b7cdcbc544` with uncommitted laboratory
+changes. The final local run exited 0 with script SHA-256
+`46a7f28bc160bf8f8a52bfde79770934e4e2005b36b1ff2a0c4141ca5a84bc1b`
+before and after execution. It exercised historical gameplay, support and
+privacy HTTP routes, archive listing, real 0020 migration and seed, grant
+checks and persistent fence. This was not an official GitHub Actions run and
+did not test worker behavior or backup restoration.
