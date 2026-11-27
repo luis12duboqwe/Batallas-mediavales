@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import fcntl
 import hashlib
 import ipaddress
 import json
@@ -26,8 +27,12 @@ from ops.ci_g5_actual_reopen import (
 from ops.ci_g5_edge_admission import cleanup_fixture, probe, run
 from ops.ci_g5_integrated_runtime import binary, ready_db, wait_until
 from ops.g5_cutover_lifecycle import G5Lifecycle
+from ops.g5_cutover_prepare import G5Preparation
 from ops.g5_cutover_prepare import BackupReceipt, PreparationRequest
 from ops.g5_cutover_state import CutoverStore, Phase, StateError
+from ops.g5_activation_fence import (
+    DEPLOY_LOCK, MARKER, _check_lock, _check_marker,
+)
 from ops.g5_docker_writer_fence import DockerWriterFence
 from ops.g5_edge_admission import EdgeAdmission
 from ops.g5_pg15_writer_fence import Pg15FenceTarget, Pg15PersistentFence
@@ -40,6 +45,38 @@ _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
 _SCENARIOS = {"success", "pull", "backup", "create", "wrong-image", "retry", "replace"}
 _TEST_SECRET = "disposable-g5-transition-ci-key-not-production-2026"
+_MAX_EVIDENCE_BYTES = 4 * 1024 * 1024
+
+
+class ScenarioFault(StateError):
+    """A narrowly injected, explicitly evidenced rehearsal failure."""
+
+    def __init__(self, scenario: str, point: str):
+        super().__init__("injected G5 rehearsal failure")
+        self.scenario = scenario
+        self.point = point
+
+
+def _inject_scenario_fault(evidence, scenario: str, point: str) -> None:
+    evidence.append(
+        "scenario_fault_reached", scenario=scenario, point=point,
+        migration_started=False,
+    )
+    raise ScenarioFault(scenario, point)
+
+
+def _scenario_fault_reached(evidence, fault: BaseException, scenario: str) -> bool:
+    if not isinstance(fault, ScenarioFault) or fault.scenario != scenario:
+        return False
+    return any(
+        row.get("event") == "scenario_fault_reached"
+        and row.get("fields") == {
+            "scenario": fault.scenario,
+            "point": fault.point,
+            "migration_started": False,
+        }
+        for row in evidence.verify()
+    )
 
 
 def release_pair(previous_sha: str, candidate_sha: str,
@@ -88,65 +125,199 @@ def recovery_is_authorized(*, approved: bool, marker_operation: str,
     return True
 
 
+@contextmanager
+def _hold_supervised_recovery_lease(host_root: str, operation_id: str,
+                                   request: PreparationRequest, evidence: EvidenceLog):
+    """Pin deploy.lock, activation marker, state directory, and exact incident."""
+    store = CutoverStore(host_root)
+    owner_pid = os.getpid()
+    with store._state_directory() as directory:
+        directory_info = os.fstat(directory)
+        directory_id = (directory_info.st_dev, directory_info.st_ino)
+        lock_fd = os.open(
+            DEPLOY_LOCK, os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=directory,
+        )
+        try:
+            _check_lock(directory, lock_fd)
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise StateError("another deploy, rollback or recovery holds deploy.lock") from None
+            _check_lock(directory, lock_fd)
+            marker_fd = os.open(
+                MARKER, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=directory,
+            )
+            try:
+                marker_info = os.fstat(marker_fd)
+                _check_marker(directory, marker_info)
+                marker_payload = os.pread(marker_fd, 513, 0)
+                expected_marker = (
+                    f"version=1\noperation_id={operation_id}\n".encode("ascii")
+                )
+                if marker_payload != expected_marker:
+                    raise StateError("G5 activation marker identity mismatch")
+                with store._locked() as locked_directory:
+                    locked_info = os.fstat(locked_directory)
+                    if (locked_info.st_dev, locked_info.st_ino) != directory_id:
+                        raise StateError("G5 state directory changed during recovery lock")
+                    manifest, manifest_stamp = store._load(locked_directory)
+                    if manifest is not None:
+                        identity = manifest.identity
+                        if (
+                            manifest.phase is not Phase.RECOVERY_REQUIRED
+                            or identity.operation_id != operation_id
+                            or identity.previous_sha != request.previous_sha
+                            or identity.candidate_sha != request.candidate_sha
+                            or identity.compose_project != request.compose_project
+                            or identity.postgres_db != request.postgres_db
+                        ):
+                            raise StateError("recovery manifest identity or phase mismatch")
+
+                    def assert_active():
+                        if os.getpid() != owner_pid:
+                            raise StateError("recovery lease cannot be used after fork")
+                        _check_lock(directory, lock_fd)
+                        _check_marker(directory, marker_info)
+                        if os.pread(marker_fd, 513, 0) != expected_marker:
+                            raise StateError("G5 activation marker content changed")
+                        current_dir = os.fstat(directory)
+                        if (current_dir.st_dev, current_dir.st_ino) != directory_id:
+                            raise StateError("G5 state directory identity changed")
+                        store._check_entry(locked_directory, manifest_stamp)
+                        current_manifest, current_stamp = store._load(locked_directory)
+                        if current_manifest != manifest or current_stamp != manifest_stamp:
+                            raise StateError("recovery manifest changed under lease")
+                        evidence.verify()
+
+                    assert_active()
+                    yield assert_active, manifest
+                    assert_active()
+            finally:
+                os.close(marker_fd)
+        finally:
+            if os.getpid() == owner_pid:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
+
+
 class EvidenceLog:
     """Append-only, fsync'd, secret-free, hash-chained fixture evidence."""
 
     def __init__(self, path: Path):
         self.path = path
         self.previous = "0" * 64
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        self._directory_fd = os.open(
+            path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+        )
+        self._name = path.name
+        fd = os.open(
+            self._name,
+            os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW,
+            0o600, dir_fd=self._directory_fd,
+        )
+        self._fd = fd
         try:
             os.fchmod(fd, 0o600)
+            self._check_file_identity()
             os.fsync(fd)
-        finally:
+            os.fsync(self._directory_fd)
+        except BaseException:
             os.close(fd)
+            os.close(self._directory_fd)
+            del self._fd
+            del self._directory_fd
+            raise
 
     def append(self, event: str, **fields) -> None:
+        self._read_verified(allow_empty=self.previous == "0" * 64)
         body = {"event": event, "fields": fields, "previous": self.previous}
         digest = hashlib.sha256(json.dumps(
             body, sort_keys=True, separators=(",", ":"), allow_nan=False
         ).encode()).hexdigest()
         line = json.dumps(body | {"sha256": digest}, sort_keys=True,
                           separators=(",", ":"), allow_nan=False).encode() + b"\n"
-        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW)
-        try:
-            info = os.fstat(fd)
-            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
-                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
-                raise StateError("unsafe transition evidence log")
-            view = memoryview(line)
-            while view:
-                written = os.write(fd, view)
-                if written <= 0:
-                    raise StateError("transition evidence write failed")
-                view = view[written:]
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        self._check_file_identity()
+        view = memoryview(line)
+        while view:
+            written = os.write(self._fd, view)
+            if written <= 0:
+                raise StateError("transition evidence write failed")
+            view = view[written:]
+        os.fsync(self._fd)
+        os.fsync(self._directory_fd)
         self.previous = digest
 
     def verify(self) -> list[dict]:
-        info = self.path.stat(follow_symlinks=False)
+        return self._read_verified(allow_empty=False)
+
+    def _check_file_identity(self):
+        info = os.fstat(self._fd)
+        try:
+            path_info = os.stat(
+                self._name, dir_fd=self._directory_fd, follow_symlinks=False,
+            )
+        except OSError:
+            raise StateError("transition evidence path changed") from None
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
-                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1
+                or (info.st_dev, info.st_ino) != (path_info.st_dev, path_info.st_ino)):
             raise StateError("unsafe transition evidence log")
+        return info
+
+    def _read_verified(self, *, allow_empty: bool) -> list[dict]:
+        info = self._check_file_identity()
+        if info.st_size > _MAX_EVIDENCE_BYTES:
+            raise StateError("transition evidence log exceeds its size limit")
+        raw = os.pread(self._fd, info.st_size + 1, 0)
+        after = self._check_file_identity()
+        if (len(raw) != info.st_size or after.st_size != info.st_size
+                or (after.st_mtime_ns, after.st_ctime_ns) !=
+                (info.st_mtime_ns, info.st_ctime_ns)):
+            raise StateError("transition evidence changed during verification")
+        if not raw:
+            if allow_empty and self.previous == "0" * 64:
+                return []
+            raise StateError("transition evidence log is empty or truncated")
+        if not raw.endswith(b"\n"):
+            raise StateError("transition evidence log has a truncated trailing record")
         previous = "0" * 64
         rows = []
-        for line in self.path.read_bytes().splitlines():
+        for line in raw.splitlines():
             try:
                 row = json.loads(line)
+                if (not isinstance(row, dict)
+                        or set(row) != {"event", "fields", "previous", "sha256"}
+                        or not isinstance(row["event"], str)
+                        or not isinstance(row["fields"], dict)):
+                    raise ValueError
                 body = {key: row[key] for key in ("event", "fields", "previous")}
                 digest = hashlib.sha256(json.dumps(
                     body, sort_keys=True, separators=(",", ":"), allow_nan=False
                 ).encode()).hexdigest()
+                canonical = json.dumps(
+                    body | {"sha256": digest}, sort_keys=True, separators=(",", ":"),
+                    allow_nan=False,
+                ).encode()
             except (ValueError, TypeError, KeyError):
                 raise StateError("transition evidence log is invalid") from None
             if row.get("previous") != previous or row.get("sha256") != digest:
                 raise StateError("transition evidence chain is broken")
+            if canonical != line:
+                raise StateError("transition evidence record is not canonical")
             previous = digest
             rows.append(row)
-        self.previous = previous
+        if previous != self.previous:
+            raise StateError("transition evidence tip changed or was truncated")
         return rows
+
+    def close(self):
+        for name in ("_fd", "_directory_fd"):
+            fd = getattr(self, name, None)
+            if isinstance(fd, int):
+                os.close(fd)
+                delattr(self, name)
 
 
 def _git(repo: Path, *args, check=True) -> str:
@@ -284,7 +455,59 @@ def _remove_fixture_image(tag: str, expected_sha: str) -> None:
     run(["image", "rm", tag])
 
 
-def _build_image(repo: Path, sha: str, tag: str, context: Path) -> tuple[str, str]:
+def _base_image_reference() -> str:
+    base = _image("python:3.11-slim")
+    values = base.get("RepoDigests")
+    if not isinstance(values, list):
+        raise StateError("base image immutable digest unavailable")
+    matches = [
+        value for value in values
+        if isinstance(value, str)
+        and re.fullmatch(r"(?:docker\.io/library/)?python@sha256:[0-9a-f]{64}", value)
+    ]
+    if len(matches) != 1:
+        raise StateError("base image digest identity is ambiguous")
+    return matches[0]
+
+
+def _pin_build_base(repo: Path, sha: str, context: Path, base_reference: str) -> str:
+    dockerfile = context / "Dockerfile"
+    original = dockerfile.read_bytes()
+    expected = subprocess.run(
+        ["git", "-C", str(repo), "show", f"{sha}:batalla_medieval_backend/Dockerfile"],
+        capture_output=True, timeout=30, check=False,
+    )
+    if expected.returncode or expected.stdout != original:
+        raise StateError("release Dockerfile differs from the exact source SHA")
+    from_lines = re.findall(rb"(?m)^[ \t]*FROM[ \t]+[^\r\n]+$", original)
+    if len(from_lines) != 1 or not re.fullmatch(
+        r"(?:docker\.io/library/)?python@sha256:[0-9a-f]{64}", base_reference,
+    ):
+        raise StateError("release Dockerfile base is not the expected single stage")
+    pinned, count = re.subn(
+        rb"(?m)^([ \t]*FROM[ \t]+)python:3\.11-slim([ \t]*)$",
+        lambda match: match.group(1) + base_reference.encode("ascii") + match.group(2),
+        original,
+    )
+    if count != 1:
+        raise StateError("release Dockerfile does not use python:3.11-slim exactly")
+    fd = os.open(dockerfile, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+    try:
+        view = memoryview(pinned)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise StateError("pinned Dockerfile write failed")
+            view = view[written:]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return hashlib.sha256(original).hexdigest()
+
+
+def _build_image(repo: Path, sha: str, tag: str, context: Path,
+                 base_reference: str) -> tuple[str, str, str]:
+    dockerfile_sha256 = _pin_build_base(repo, sha, context, base_reference)
     env = os.environ.copy()
     for key in ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_TLS", "DOCKER_TLS_VERIFY",
                 "DOCKER_CERT_PATH"):
@@ -296,6 +519,9 @@ def _build_image(repo: Path, sha: str, tag: str, context: Path) -> tuple[str, st
             "--label", "org.opencontainers.image.revision=" + sha,
             "--label", "medievol.g5.source-sha=" + sha,
             "--label", "medievol.g5.scope=github-ci-disposable",
+            "--label", "medievol.g5.base-image-ref=" + base_reference,
+            "--label", "medievol.g5.dockerfile-sha256=" + dockerfile_sha256,
+            "--pull=false",
             "--file", str(context / "Dockerfile"), str(context),
         ],
         env=env, capture_output=True, text=True, timeout=1200, check=False,
@@ -304,15 +530,18 @@ def _build_image(repo: Path, sha: str, tag: str, context: Path) -> tuple[str, st
         raise StateError("isolated immutable release image build failed")
     inspected = _image(tag)
     image_id = image_provenance(inspected, sha)
-    if not isinstance(inspected.get("RepoDigests"), list):
+    labels = inspected.get("Config", {}).get("Labels", {})
+    if (labels.get("medievol.g5.base-image-ref") != base_reference
+            or labels.get("medievol.g5.dockerfile-sha256") != dockerfile_sha256
+            or not isinstance(inspected.get("RepoDigests"), list)):
         raise StateError("image digest evidence unavailable")
-    base = _image("python:3.11-slim")
-    repo_digests = base.get("RepoDigests")
-    if not isinstance(repo_digests, list) or not any(
-        isinstance(value, str) and "@sha256:" in value for value in repo_digests
-    ):
-        raise StateError("base image immutable digest unavailable")
-    return image_id, next(value for value in repo_digests if "@sha256:" in value)
+    base = _image(base_reference)
+    base_layers = base.get("RootFS", {}).get("Layers")
+    image_layers = inspected.get("RootFS", {}).get("Layers")
+    if (not isinstance(base_layers, list) or not base_layers
+            or not isinstance(image_layers, list) or image_layers[:len(base_layers)] != base_layers):
+        raise StateError("built release does not contain the digest-pinned base layers")
+    return image_id, base_reference, dockerfile_sha256
 
 
 def _app_call(image: str, network: str, nginx_alias: str, action: str, payload: dict):
@@ -369,6 +598,10 @@ class TransitionPort:
             previous: _container(previous)["State"]["StartedAt"],
             previous_worker: _container(previous_worker)["State"]["StartedAt"],
         }
+        self.previous_initial_running = {
+            previous: _container(previous)["State"].get("Running") is True,
+            previous_worker: _container(previous_worker)["State"].get("Running") is True,
+        }
         self.original_db = original_database(self.admin)
         self.originals = [
             OriginalContainer.capture(_container(cid), project, service)
@@ -382,6 +615,7 @@ class TransitionPort:
         self.candidate_created = False
         self.published = False
         self.player_worker_verified = False
+        self.recovery_started = set()
         self.release_receipt = root / "host" / ".release.json"
 
     def _identity(self):
@@ -450,7 +684,7 @@ class TransitionPort:
         self.baseline = self._database_hash()
         self.evidence.append("pre_migration_database_fingerprint", sha256=self.baseline)
         if self.scenario == "backup":
-            raise StateError("injected snapshot failure before migration")
+            _inject_scenario_fault(self.evidence, "backup", "snapshot")
         backup_dir = self.root / "backups"
         backup_path = backup_dir / "cutover.dump"
         fd = os.open(backup_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
@@ -479,7 +713,7 @@ class TransitionPort:
         self.candidate_created = True
         if source_image != self.images["candidate"]:
             self.evidence.append("wrong_candidate_image_detected")
-            raise StateError("candidate container image does not match candidate provenance")
+            _inject_scenario_fault(self.evidence, "wrong-image", "candidate-image")
         self.evidence.append("candidate_containers_created_stopped")
         self.migration_started = True
         self.evidence.append("migration_started", image_id=self.images["candidate"])
@@ -531,10 +765,7 @@ class TransitionPort:
             if service == "backend":
                 self.candidate_id = created
                 if self.scenario in {"create", "retry"}:
-                    self.evidence.append("candidate_container_create_failed",
-                                         scenario=self.scenario, created_stopped=True,
-                                         migration_started=False)
-                    raise StateError("injected candidate worker creation failure")
+                    _inject_scenario_fault(self.evidence, self.scenario, "candidate-worker")
             else:
                 self.candidate_worker = created
 
@@ -590,8 +821,8 @@ class TransitionPort:
         return False
 
     def reopen_writers(self, identity):
-        require_committed_receipt_locked(self.store, identity)
         try:
+            require_committed_receipt_locked(self.store, identity)
             self._reopen_candidate(identity)
         except BaseException:
             self._restrict_after_failure()
@@ -612,8 +843,7 @@ class TransitionPort:
         )
         self.admin.execute_committed(f'ALTER ROLE "{APP}" LOGIN;')
         if self.scenario == "replace":
-            self.evidence.append("candidate_replacement_failed", migration_started=True)
-            raise StateError("injected candidate replacement failure after durable COMMITTED")
+            _inject_scenario_fault(self.evidence, "replace", "candidate-replacement")
         for cid in (self.candidate_id, self.candidate_worker):
             if not _container(cid)["State"].get("Running"):
                 run(["start", cid])
@@ -686,7 +916,15 @@ class TransitionPort:
             raise StateError("candidate release receipt identity mismatch")
 
     def _restrict_after_failure(self):
-        actions = [
+        errors = []
+
+        def attempt(action):
+            try:
+                action()
+            except BaseException:
+                errors.append(True)
+
+        for action in (
             self.edge.close,
             lambda: self.admin.execute_committed(
                 f'ALTER DATABASE "{DATABASE}" CONNECTION LIMIT 0;'
@@ -696,114 +934,239 @@ class TransitionPort:
                 f"SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity "
                 f"WHERE datname='{DATABASE}' AND pid<>pg_backend_pid();"
             ),
-        ]
-        for cid in (self.candidate_id, self.candidate_worker):
-            if isinstance(cid, str) and _CONTAINER_ID.fullmatch(cid):
-                row = _container(cid)
-                if row["State"].get("Running") is True:
-                    actions.extend((
-                        lambda item=cid: run(["update", "--restart=no", item]),
-                        lambda item=cid: run(["stop", "--time", "10", item]),
-                    ))
-                elif row["State"].get("Status") not in {"created", "exited"}:
-                    raise StateError("candidate container state is uncertain after failure")
-        errors = []
-        for action in actions:
+        ):
+            attempt(action)
+        writers = (
+            self.previous, self.previous_worker,
+            self.candidate_id, self.candidate_worker,
+        )
+        for cid in writers:
+            if not isinstance(cid, str) or not _CONTAINER_ID.fullmatch(cid):
+                if cid is not None:
+                    errors.append(True)
+                continue
+            row = None
             try:
-                action()
-            except Exception:
+                row = _container(cid)
+            except BaseException:
                 errors.append(True)
+            attempt(lambda item=cid: run(["update", "--restart=no", item]))
+            row_state = row.get("State", {}) if isinstance(row, dict) else {}
+            if (row is None or row_state.get("Running") is True
+                    or row_state.get("Status") not in {"created", "exited"}):
+                attempt(lambda item=cid: run(["stop", "--time", "10", item]))
+        for action in (self.edge.assert_closed, self.sql.assert_closed):
+            attempt(action)
+        for cid in writers:
+            if not isinstance(cid, str) or not _CONTAINER_ID.fullmatch(cid):
+                continue
+            try:
+                row = _container(cid)
+                state = row.get("State", {})
+                policy = row.get("HostConfig", {}).get("RestartPolicy", {}).get("Name")
+                if (state.get("Running") is not False
+                        or state.get("Status") not in {"created", "exited"}
+                        or policy != "no"):
+                    errors.append(True)
+            except BaseException:
+                errors.append(True)
+        try:
+            if (self.admin.sql(
+                    f"SELECT connection_limit FROM pg_database WHERE datname='{DATABASE}';",
+                    "postgres",
+                ) != "0"
+                    or self.admin.sql(
+                        f"SELECT rolcanlogin FROM pg_roles WHERE rolname='{APP}';",
+                        "postgres",
+                    ) != "f"):
+                errors.append(True)
+        except BaseException:
+            errors.append(True)
         if errors:
-            raise StateError("one or more post-commit restrictions are uncertain")
-        self.edge.assert_closed()
-        self.sql.assert_closed()
-        self._check_old_stopped()
+            self.evidence.append("failure_reclosure_uncertain", actions_failed=len(errors))
+            raise StateError("one or more barriers or writer stops are uncertain")
+        self.evidence.append("failure_reclosure_verified", writers=len(writers))
 
-    def supervised_recover_previous(self):
-        """Resume only the exact old service after explicit no-mutation proof."""
+    def _assert_recovery_preconditions(self, assert_lease, *, check_database=True,
+                                       database_open=False, role_open=False):
+        assert_lease()
         rows = self.evidence.verify()
         if (self.migration_started
-                or any(row.get("event") == "migration_started" for row in rows)
-                or self._database_hash() != self.baseline):
-            raise StateError("database mutation evidence blocks previous release recovery")
-        self._check_old_stopped()
-        marker = self.root / "host" / ".ops-state" / "g5-cutover-activated"
-        try:
-            marker_stat = marker.stat(follow_symlinks=False)
-            marker_data = marker.read_text()
-        except OSError:
-            raise StateError("G5 activation marker cannot be verified") from None
-        if (not stat.S_ISREG(marker_stat.st_mode) or marker_stat.st_uid != os.geteuid()
-                or stat.S_IMODE(marker_stat.st_mode) != 0o600 or marker_stat.st_nlink != 1
-                or marker_data != f"version=1\noperation_id={self.request.operation_id}\n"):
-            raise StateError("G5 activation marker identity mismatch")
+                or any(row.get("event") == "migration_started" for row in rows)):
+            raise StateError("migration evidence blocks previous-release recovery")
+        if check_database and self._database_hash() != self.baseline:
+            raise StateError("database mutation evidence blocks previous-release recovery")
+        expected_limit = (
+            self.original_db.connection_limit if database_open else 0
+        )
+        if self.admin.sql(
+            f"SELECT connection_limit FROM pg_database WHERE datname='{DATABASE}';",
+            "postgres",
+        ) != str(expected_limit):
+            raise StateError("database connection fence changed during recovery")
+        if self.admin.sql(
+            f"SELECT rolcanlogin FROM pg_roles WHERE rolname='{APP}';", "postgres",
+        ) != ("t" if role_open else "f"):
+            raise StateError("application role fence changed during recovery")
+        self.edge.assert_closed()
         if self.admin.sql("SELECT version_num FROM alembic_version;", DATABASE) != PREVIOUS_REVISION:
             raise StateError("previous schema revision is not positively established")
-        for cid in (self.candidate_id, self.candidate_worker):
-            if isinstance(cid, str) and _CONTAINER_ID.fullmatch(cid):
-                if _container(cid)["State"].get("Running") is not False:
-                    raise StateError("candidate writer is running during previous-release recovery")
+        self._assert_persistent_resources()
         for cid in (self.previous, self.previous_worker):
             row = _container(cid)
             original = next(item for item in self.originals if item.identity == cid)
-            original.assert_fenced_identity(row, self.project)
-        if _container(self.previous)["Image"] != self.images["previous"]:
-            raise StateError("previous release image changed before recovery")
+            actual = OriginalContainer.capture(row, self.project, original.service)
+            expected_running = cid in self.recovery_started
+            state = row.get("State", {})
+            if (actual.identity != original.identity or actual.image != original.image
+                    or actual.config != original.config or actual.host_config != original.host_config
+                    or actual.policy_name != "no" or actual.policy_maximum_retry_count != 0
+                    or state.get("Running") is not expected_running
+                    or state.get("Paused") is not False
+                    or state.get("Restarting") is not False
+                    or (not expected_running and state.get("Status") not in {"created", "exited"})):
+                raise StateError("previous release image changed during recovery")
+        for cid in (self.candidate_id, self.candidate_worker):
+            if isinstance(cid, str) and _CONTAINER_ID.fullmatch(cid):
+                row = _container(cid)
+                if (row.get("Image") != self.images["candidate"]
+                        or row.get("State", {}).get("Running") is not False
+                        or row.get("HostConfig", {}).get("RestartPolicy", {}).get("Name") != "no"):
+                    raise StateError("candidate writer identity is uncertain during recovery")
+        assert_lease()
 
-        self.admin.execute_committed(
-            f'ALTER DATABASE "{DATABASE}" CONNECTION LIMIT {self.original_db.connection_limit};'
-        )
-        self.admin.execute_committed(f'ALTER ROLE "{APP}" LOGIN;')
-        for cid in (self.previous, self.previous_worker):
-            run(["start", cid])
-            row = _container(cid)
-            if row.get("Image") != self.images["previous"] or row["State"].get("Running") is not True:
-                raise StateError("previous release recovery identity is uncertain")
-        run(["exec", self.nginx, "nginx", "-t"])
-        run(["exec", self.nginx, "nginx", "-s", "reload"])
-        self._open_edge()
-        wait_until(lambda: probe([
-            "exec", self.nginx, "wget", "-q", "-O", "/dev/null", "-T", "2",
-            "http://127.0.0.1/api/health",
-        ])[0] == 0, "supervised previous release health failed")
-        _api_version(self.images["previous"], self.project, self.nginx_address, 404)
-        _app_call(self.images["previous"], self.project, self.nginx_address, "socket",
-                  {"token": self.access_token, "user": self.user_id})
+    def supervised_recover_previous(self, assert_lease):
+        """Recover only under a retained lease, after re-closing every barrier."""
+        try:
+            self._restrict_after_failure()
+            self._assert_recovery_preconditions(assert_lease)
+            for opening, action in (
+                ("database_connection_limit", lambda: self.admin.execute_committed(
+                    f'ALTER DATABASE "{DATABASE}" CONNECTION LIMIT '
+                    f'{self.original_db.connection_limit};'
+                )),
+                ("application_role_login", lambda: self.admin.execute_committed(
+                    f'ALTER ROLE "{APP}" LOGIN;'
+                )),
+            ):
+                self._assert_recovery_preconditions(
+                    assert_lease,
+                    database_open=(opening == "application_role_login"),
+                )
+                self.evidence.append("recovery_opening_started", opening=opening)
+                self._assert_recovery_preconditions(
+                    assert_lease,
+                    database_open=(opening == "application_role_login"),
+                )
+                action()
+                self.evidence.append("recovery_opening_complete", opening=opening)
+                assert_lease()
 
-        if self.release_receipt.exists():
-            raise StateError("failed transition unexpectedly published candidate identity")
-        self.evidence.append("supervised_previous_release_reopened",
-                             previous_image_id=self.images["previous"],
-                             snapshot_restore=False, marker_retained=True,
-                             legacy_authorized=False)
+            for cid in (self.previous, self.previous_worker):
+                if not self.previous_initial_running[cid]:
+                    self.evidence.append(
+                        "previous_writer_remains_stopped",
+                        container_id=cid, image_id=self.images["previous"],
+                    )
+                    continue
+                self._assert_recovery_preconditions(
+                    assert_lease, database_open=True, role_open=True,
+                )
+                self.evidence.append("recovery_writer_start_started", container_id=cid)
+                self._assert_recovery_preconditions(
+                    assert_lease, database_open=True, role_open=True,
+                )
+                run(["start", cid])
+                row = _container(cid)
+                if (row.get("Image") != self.images["previous"]
+                        or row.get("State", {}).get("Running") is not True
+                        or row.get("HostConfig", {}).get("RestartPolicy", {}).get("Name") != "no"):
+                    raise StateError("previous release writer identity is uncertain")
+                self.recovery_started.add(cid)
+                self.evidence.append("recovery_writer_start_complete", container_id=cid)
+                assert_lease()
+
+            wait_until(lambda: probe([
+                "exec", self.previous, "python", "-c",
+                "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=2)",
+            ])[0] == 0, "previous release internal health failed")
+            self.previous_address = _container_ip(self.previous, self.project)
+            _api_version(self.images["previous"], self.project,
+                         self.previous_address + ":8000", 404)
+            _app_call(self.images["previous"], self.project,
+                      self.previous_address + ":8000", "socket",
+                      {"token": self.access_token, "user": self.user_id})
+            self._route_nginx_to_previous()
+            self._assert_recovery_preconditions(
+                assert_lease, check_database=False,
+                database_open=True, role_open=True,
+            )
+            self.evidence.append("recovery_edge_open_started")
+            self._assert_recovery_preconditions(
+                assert_lease, check_database=False,
+                database_open=True, role_open=True,
+            )
+            self._open_edge()
+            wait_until(lambda: probe([
+                "exec", self.nginx, "wget", "-q", "-O", "/dev/null", "-T", "2",
+                "http://127.0.0.1/api/health",
+            ])[0] == 0, "supervised previous release health failed")
+            _api_version(self.images["previous"], self.project, self.nginx_address, 404)
+            _app_call(self.images["previous"], self.project, self.nginx_address, "socket",
+                      {"token": self.access_token, "user": self.user_id})
+            assert_lease()
+            if self.release_receipt.exists():
+                raise StateError("failed transition unexpectedly published candidate identity")
+            self.evidence.append("supervised_previous_release_reopened",
+                                 previous_image_id=self.images["previous"],
+                                 snapshot_restore=False, marker_retained=True,
+                                 legacy_authorized=False)
+        except BaseException:
+            self._restrict_after_failure()
+            raise
 
     def _route_nginx_to_candidate(self):
+        self._route_nginx_to_address(self.candidate_address, "nginx_candidate_route_reloaded")
+
+    def _route_nginx_to_previous(self):
+        self._route_nginx_to_address(self.previous_address, "nginx_previous_route_reloaded")
+
+    def _route_nginx_to_address(self, address: str, event: str):
+        try:
+            address = str(ipaddress.IPv4Address(address))
+        except (ipaddress.AddressValueError, TypeError):
+            raise StateError("Nginx upstream address is not a private IPv4 identity") from None
         config = self.root / "host" / "nginx.g5.conf"
         current = config.read_text()
-        if self.previous_address == self.candidate_address:
-            if current.count("server " + self.candidate_address + ":8000;") != 1:
-                raise StateError("Nginx release route could not be verified exactly")
-            self.evidence.append(
-                "nginx_candidate_route_address_reused",
-                previous_container_id=self.previous,
-                candidate_container_id=self.candidate_id,
-                address=self.candidate_address,
-            )
-            return
-        updated = current.replace(
-            "server " + self.previous_address + ":8000;",
-            "server " + self.candidate_address + ":8000;",
-        )
-        if updated == current or updated.count("server " + self.candidate_address + ":8000;") != 1:
-            raise StateError("Nginx release route could not be switched exactly")
-        fd = os.open(config, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
-        with os.fdopen(fd, "w") as stream:
-            stream.write(updated)
-            stream.flush()
-            os.fsync(stream.fileno())
+        matches = list(re.finditer(
+            r"(?m)^([ \t]*server[ \t]+)([0-9.]+)(:8000;[ \t]*)$", current,
+        ))
+        if len(matches) != 1:
+            raise StateError("Nginx backend upstream is not uniquely identified")
+        match = matches[0]
+        updated = current[:match.start(2)] + address + current[match.end(2):]
+        if updated != current:
+            fd = os.open(config, os.O_WRONLY | os.O_NOFOLLOW)
+            try:
+                info = os.fstat(fd)
+                path_info = os.stat(config, follow_symlinks=False)
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                        or (info.st_dev, info.st_ino) !=
+                        (path_info.st_dev, path_info.st_ino)):
+                    raise StateError("Nginx config identity changed")
+                os.ftruncate(fd, 0)
+                view = memoryview(updated.encode())
+                while view:
+                    written = os.write(fd, view)
+                    if written <= 0:
+                        raise StateError("Nginx config update failed")
+                    view = view[written:]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
         run(["exec", self.nginx, "nginx", "-t"])
         run(["exec", self.nginx, "nginx", "-s", "reload"])
-        self.evidence.append("nginx_candidate_route_reloaded")
+        self.evidence.append(event, address=address)
 
     def _open_edge(self):
         self.edge.assert_closed()
@@ -925,12 +1288,16 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
         _local_docker(["pull", "python:3.11-slim"])
         _local_docker(["pull", "postgres:15-alpine"])
         _local_docker(["pull", "nginx:1.28-alpine"])
+        base_reference = _base_image_reference()
         image_tags.append((previous_tag, PREVIOUS_SHA))
         with _worktree(repo, root, PREVIOUS_SHA) as old_tree:
-            previous_image, base_digest = _build_image(
+            previous_image, previous_base, previous_dockerfile = _build_image(
                 repo, PREVIOUS_SHA, previous_tag,
                 old_tree / "batalla_medieval_backend",
+                base_reference,
             )
+        if previous_base != base_reference:
+            raise StateError("historical release used an unexpected base image digest")
         network = project
         volume = project + "-pgdata"
         networks.append(network)
@@ -1049,33 +1416,41 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
         )
 
         if scenario == "pull":
-            evidence.append("candidate_acquisition_failed", mutation_started=False)
-            if _container(old_backend)["State"].get("Running") is not True:
-                raise StateError("previous release was not left running after acquisition failure")
-            if admin.sql("SELECT version_num FROM alembic_version;", DATABASE) != PREVIOUS_REVISION:
-                raise StateError("candidate acquisition failure changed the schema")
-            if probe(["exec", nginx, "wget", "-q", "-O", "/dev/null", "-T", "2",
-                      "http://127.0.0.1/api/health"])[0] != 0:
-                raise StateError("previous release became unavailable after candidate acquisition failure")
-            evidence.append("previous_service_still_available")
-            print("pull: previous service remained active; no marker, migration, or snapshot restore")
+            try:
+                _inject_scenario_fault(evidence, "pull", "candidate-acquisition")
+            except ScenarioFault as fault:
+                if not _scenario_fault_reached(evidence, fault, "pull"):
+                    raise
+                evidence.append("candidate_acquisition_failed", mutation_started=False)
+                if _container(old_backend)["State"].get("Running") is not True:
+                    raise StateError("previous release was not left running after acquisition failure")
+                if admin.sql("SELECT version_num FROM alembic_version;", DATABASE) != PREVIOUS_REVISION:
+                    raise StateError("candidate acquisition failure changed the schema")
+                if probe(["exec", nginx, "wget", "-q", "-O", "/dev/null", "-T", "2",
+                          "http://127.0.0.1/api/health"])[0] != 0:
+                    raise StateError("previous release became unavailable after candidate acquisition failure")
+                evidence.append("previous_service_still_available")
+                print("pull: previous service remained active; no marker, migration, or snapshot restore")
             return
 
         with _worktree(repo, root, candidate_sha) as current_tree:
             image_tags.append((candidate_tag, candidate_sha))
-            candidate_image, candidate_base_digest = _build_image(
+            candidate_image, candidate_base, candidate_dockerfile = _build_image(
                 repo, candidate_sha, candidate_tag,
                 current_tree / "batalla_medieval_backend",
+                base_reference,
             )
         release_pair(PREVIOUS_SHA, candidate_sha, previous_image, candidate_image)
         evidence.append(
             "candidate_image_provenance", previous_sha=PREVIOUS_SHA,
             candidate_sha=candidate_sha, previous_image_id=previous_image,
-            candidate_image_id=candidate_image, base_image_digest=base_digest,
+            candidate_image_id=candidate_image, base_image_digest=base_reference,
+            previous_dockerfile_sha256=previous_dockerfile,
+            candidate_dockerfile_sha256=candidate_dockerfile,
         )
-        if candidate_base_digest != base_digest:
+        if candidate_base != previous_base:
             evidence.append("base_digest_changed_between_builds",
-                            previous=base_digest, candidate=candidate_base_digest)
+                            previous=previous_base, candidate=candidate_base)
             raise StateError("release builds did not share the same immutable base image")
         images = {"previous": previous_image, "candidate": candidate_image}
         project_network_id = _docker_json("network", "inspect", network)["Id"]
@@ -1089,68 +1464,77 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
         )
         port.access_token, port.user_id, port.world_id = access, user_id, int(world_id_raw)
         try:
+            if scenario == "backup":
+                with arm_cutover(port.request.host_root, port.request.operation_id) as lease:
+                    G5Preparation()._prepare_armed(
+                        port.request, port, port.store, lease,
+                    )
+                raise StateError("backup scenario unexpectedly passed its injection")
             result = G5Lifecycle().execute(port.request, port)
         except BaseException as exc:
+            if not _scenario_fault_reached(evidence, exc, scenario):
+                preserve = True
+                try:
+                    evidence.append("unclassified_failure", error_type=type(exc).__name__)
+                except BaseException:
+                    pass
+                raise
             if scenario == "replace":
                 manifest = port.store.show()
-                if (manifest.phase is not Phase.COMMITTED_WRITERS_ALLOWED
-                        or port.migration_started is not True):
+                if manifest.phase is not Phase.COMMITTED_WRITERS_ALLOWED or not port.migration_started:
                     preserve = True
-                    raise StateError(
-                        "replacement failure phase or mutation evidence is uncertain"
-                    ) from exc
-                port.edge.assert_closed()
-                port.sql.assert_closed()
-                port._check_old_stopped()
-                if any(_container(cid)["State"].get("Running") for cid in
-                       (port.candidate_id, port.candidate_worker)):
-                    preserve = True
-                    raise StateError("candidate replacement failure left a writer running") from exc
-                if not (state / "g5-cutover-activated").is_file():
-                    preserve = True
-                    raise StateError("replacement failure lost G5 activation marker") from exc
+                    raise StateError("replacement failure phase or mutation evidence is uncertain") from exc
+                port._restrict_after_failure()
                 evidence.append("replacement_failure_closed",
                                 phase=manifest.phase.value, snapshot_restore=False)
-                print("replace: candidate replacement failed after COMMITTED; writers and edge remain closed")
+                print("replace: candidate replacement failed after COMMITTED; all writers and edge remain closed")
                 return
             if scenario not in {"backup", "create", "wrong-image", "retry"}:
                 preserve = True
-                evidence.append("uncertain_failure", phase=str(type(exc).__name__))
-                raise
+                raise StateError("unexpected typed scenario failure") from exc
             try:
                 evidence.append("pre_mutation_failure", scenario=scenario,
                                 migration_started=port.migration_started)
                 if scenario == "retry":
+                    before_manifest = port.store.show()
+                    before_evidence_tip = evidence.previous
                     try:
                         G5Lifecycle().execute(port.request, port)
-                    except StateError:
-                        evidence.append("unsafe_retry_rejected")
+                    except StateError as retry_error:
+                        if str(retry_error) != "G5 or recovery state already exists; reconcile manually":
+                            raise StateError("unsafe retry failed for an unclassified reason") from retry_error
                     else:
                         raise StateError("unsafe G5 operation retry was accepted")
-                current_hash = port._database_hash()
-                manifest = None
-                try:
-                    manifest = port.store.show()
-                except StateError as state_error:
-                    if str(state_error) != "cutover manifest is missing":
-                        raise
-                phase = manifest.phase if manifest else None
-                marker = (state / "g5-cutover-activated").read_text()
-                match = re.search(r"^operation_id=([A-Za-z0-9_-]+)$", marker, re.MULTILINE)
-                marker_operation = match.group(1) if match else ""
-                previous_observed = _container(old_backend).get("Image")
-                recovery_is_authorized(
-                    approved=approved_recovery, marker_operation=marker_operation,
-                    operation_id=port.request.operation_id,
-                    migration_started=port.migration_started,
-                    baseline_sha256=port.baseline, current_sha256=current_hash,
-                    previous_image_id=images["previous"],
-                    observed_image_id=previous_observed, phase=phase,
-                )
-                port.supervised_recover_previous()
-                evidence.append("supervised_previous_release_recovery_complete",
-                                manifest_phase=phase.value if phase else "PREPARED_NOT_PERSISTED",
-                                snapshot_restore=False, marker_retained=True)
+                    if port.store.show() != before_manifest or evidence.previous != before_evidence_tip:
+                        raise StateError("unsafe retry changed durable lifecycle evidence")
+                    evidence.append("unsafe_retry_rejected")
+                with _hold_supervised_recovery_lease(
+                    port.request.host_root, port.request.operation_id, port.request, evidence,
+                ) as (assert_lease, manifest):
+                    phase = manifest.phase if manifest else None
+                    if phase not in (None, Phase.RECOVERY_REQUIRED):
+                        raise StateError("pre-mutation recovery manifest phase is not eligible")
+                    rows = evidence.verify()
+                    if (port.migration_started
+                            or any(row.get("event") == "migration_started" for row in rows)):
+                        raise StateError("migration evidence blocks previous-release recovery")
+                    current_hash = port._database_hash()
+                    previous_observed = _container(old_backend).get("Image")
+                    recovery_is_authorized(
+                        approved=approved_recovery,
+                        marker_operation=port.request.operation_id,
+                        operation_id=port.request.operation_id,
+                        migration_started=port.migration_started,
+                        baseline_sha256=port.baseline, current_sha256=current_hash,
+                        previous_image_id=images["previous"],
+                        observed_image_id=previous_observed, phase=phase,
+                    )
+                    port.supervised_recover_previous(assert_lease)
+                    evidence.append(
+                        "supervised_previous_release_recovery_complete",
+                        manifest_phase=phase.value if phase else "NO_MANIFEST_BEFORE_BACKUP",
+                        snapshot_restore=False, marker_retained=True,
+                    )
                 print(f"{scenario}: supervised previous release recovery; marker retained; no snapshot restore")
                 return
             except BaseException:
@@ -1164,26 +1548,29 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
                         previous_sha=PREVIOUS_SHA, candidate_sha=candidate_sha,
                         previous_image_id=images["previous"],
                         candidate_image_id=images["candidate"],
-                        base_image_digest=base_digest,
+                        base_image_digest=base_reference,
                         volume=volume, network_id=project_network_id)
         print("success: distinct 0019/0020 releases; HTTP, authenticated Socket.IO, version, "
               "candidate write and worker persistence verified")
     finally:
-        if preserve:
-            print(f"uncertain fixture preserved closed for reconciliation: project={project}; root={root}",
-                  file=sys.stderr)
-        else:
-            try:
-                _export_evidence(evidence.path, workspace, scenario, project)
-                cleanup_fixture(project)
-                for volume in volumes:
-                    run(["volume", "rm", volume])
-                for tag, sha in image_tags:
-                    _remove_fixture_image(tag, sha)
-                shutil.rmtree(root)
-            except BaseException:
-                print(f"fixture cleanup uncertain; project={project}; root={root}", file=sys.stderr)
-                raise
+        try:
+            if preserve:
+                print(f"uncertain fixture preserved closed for reconciliation: project={project}; root={root}",
+                      file=sys.stderr)
+            else:
+                try:
+                    _export_evidence(evidence.path, workspace, scenario, project)
+                    cleanup_fixture(project)
+                    for volume in volumes:
+                        run(["volume", "rm", volume])
+                    for tag, sha in image_tags:
+                        _remove_fixture_image(tag, sha)
+                    shutil.rmtree(root)
+                except BaseException:
+                    print(f"fixture cleanup uncertain; project={project}; root={root}", file=sys.stderr)
+                    raise
+        finally:
+            evidence.close()
 
 
 def _export_evidence(source: Path, workspace: Path, scenario: str, project: str):
