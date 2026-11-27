@@ -37,3 +37,5 @@ todas las categorías y deriva entre observaciones. Certificación pendiente
 del HEAD exacto.
 
 Revisión P2: las tres categorías de Codex se cubren con casos de grants directos y PUBLIC, ACL de columna, rutina nativa inocua y rutina privilegiada en postgres, además de CONNECT a postgres/template1. Pendiente nueva CI y revisión.
+
+Segunda revisión: el ensayo inicial falló por ACL estándar de PG15. Se diferencia el acceso inicial de initdb (`pg_init_privs`, o ACL por defecto) de grants efectivos nuevos sobre funciones incorporadas; se inspeccionan columnas confidenciales concretas y privilegios de modificación en catálogos. Se rechazan además grants explícitos SET/ALTER SYSTEM en `pg_parameter_acl`, incluso PUBLIC, sin depender del valor vigente. Política limitada a instalación PostgreSQL confiable y al alcance documentado, no una auditoría de toda capacidad privilegiada. Nuevos casos de regresión con parámetros sin alterar sus valores. CI pendiente.

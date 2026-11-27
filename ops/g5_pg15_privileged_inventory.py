@@ -27,7 +27,7 @@ CLUSTER_CHECKS = (
     "no_role_membership", "role_state", "client_sessions",
     "no_prepared_transactions", "no_replication_slots", "no_subscriptions",
     "known_backend_types", "no_preload_libraries", "no_preload_overrides",
-    "no_other_database_access",
+    "no_other_database_access", "no_parameter_grants",
 )
 DATABASE_CHECKS = (
     "target_identity", "only_standard_extension", "no_foreign_tables",
@@ -120,6 +120,10 @@ def inspect_privileged_inventory(
         "'session_preload_libraries','local_preload_libraries'))",
         f"NOT EXISTS (SELECT 1 FROM pg_database WHERE datname<>'{db}' AND "
         f"datallowconn AND has_database_privilege('{app}',oid,'CONNECT'))",
+        "NOT EXISTS (SELECT 1 FROM pg_parameter_acl p "
+        "CROSS JOIN LATERAL aclexplode(p.paracl) AS a "
+        f"WHERE a.grantee IN (0, (SELECT oid FROM pg_roles WHERE rolname='{app}')) "
+        "AND a.privilege_type IN ('SET','ALTER SYSTEM'))",
     ))
     def catalog(database):
         return _select((
@@ -134,17 +138,35 @@ def inspect_privileged_inventory(
         "JOIN pg_namespace n ON n.oid=p.pronamespace WHERE "
         "(l.lanname IN ('internal','c') OR NOT l.lanpltrusted) "
         "AND (p.oid>=16384 OR n.nspname NOT IN ('pg_catalog','information_schema')))",
+        # Detect nonstandard grants of built-in routine execution relative to
+        # the initdb ACL, rather than classifying standard PUBLIC execution
+        # of an unrelated overload as elevated authority. Explicit app grants
+        # are not part of the stock initial ACL. Membership is checked above.
         "NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
-        "WHERE n.nspname='pg_catalog' AND "
-        "(p.proname IN ('lo_import','lo_export','pg_read_file','pg_read_binary_file',"
-        "'pg_stat_file','pg_ls_dir','pg_ls_logdir','pg_ls_waldir','pg_ls_archive_statusdir',"
-        "'pg_ls_tmpdir','pg_ls_logicalsnapdir','pg_ls_logicalmapdir','pg_ls_replslotdir') "
-        "OR (p.proname LIKE 'pg_file_%')) "
-        f"AND has_function_privilege('{app}',p.oid,'EXECUTE'))",
+        "LEFT JOIN pg_init_privs i ON i.classoid='pg_proc'::regclass AND i.objoid=p.oid "
+        "AND i.objsubid=0 AND i.privtype='i' "
+        "CROSS JOIN LATERAL aclexplode(p.proacl) AS a "
+        "WHERE n.nspname='pg_catalog' AND p.oid<16384 AND a.privilege_type='EXECUTE' "
+        f"AND a.grantee IN (0,(SELECT oid FROM pg_roles WHERE rolname='{app}')) "
+        f"AND has_function_privilege('{app}',p.oid,'EXECUTE') "
+        "AND NOT EXISTS (SELECT 1 FROM aclexplode(COALESCE(i.initprivs,"
+        "acldefault('f',p.proowner))) AS initial "
+        "WHERE initial.grantee=a.grantee AND initial.privilege_type=a.privilege_type "
+        "AND (NOT a.is_grantable OR initial.is_grantable)))",
+        # Some subscription metadata columns are intentionally visible in
+        # stock PG15. Check confidential columns and catalog mutation ACLs,
+        # not arbitrary SELECT on any nonsecret column.
         "NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-        "WHERE n.nspname='pg_catalog' AND c.relname IN ('pg_authid','pg_shadow','pg_subscription') "
-        f"AND (has_table_privilege('{app}',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') "
-        f"OR has_any_column_privilege('{app}',c.oid,'SELECT,INSERT,UPDATE,REFERENCES')))",
+        "JOIN pg_attribute a ON a.attrelid=c.oid "
+        "WHERE n.nspname='pg_catalog' AND a.attnum>0 AND NOT a.attisdropped "
+        "AND ((c.relname='pg_authid' AND a.attname='rolpassword') OR "
+        "(c.relname='pg_shadow' AND a.attname='passwd') OR "
+        "(c.relname='pg_subscription' AND a.attname='subconninfo')) "
+        f"AND has_column_privilege('{app}',c.oid,a.attnum,'SELECT')) "
+        "AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname='pg_catalog' AND c.relkind IN ('r','v','m','p','f') "
+        f"AND (has_table_privilege('{app}',c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER') "
+        f"OR has_any_column_privilege('{app}',c.oid,'INSERT,UPDATE')))",
     ))
     first = _flags(session, "postgres", cluster, CLUSTER_CHECKS)
     # Do not connect to an untrusted or already ambiguous target.

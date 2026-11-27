@@ -86,3 +86,10 @@ def test_maintenance_catalog_not_ignored(blocker):
                     flags(DATABASE_CHECKS), flags(CLUSTER_CHECKS))
     assert inspect_privileged_inventory(TARGET, reader, fenced=False).blockers == (blocker,)
     assert [db for db, _ in reader.calls] == ["postgres", "postgres", "game_ci", "postgres"]
+
+
+def test_inventory_checks_parameter_acl_not_only_current_settings():
+    reader = Reader(flags(CLUSTER_CHECKS, "no_parameter_grants"))
+    assert inspect_privileged_inventory(TARGET, reader, fenced=False).blockers == ("no_parameter_grants",)
+    assert "pg_parameter_acl" in reader.calls[0][1]
+    assert "ALTER SYSTEM" in reader.calls[0][1]
