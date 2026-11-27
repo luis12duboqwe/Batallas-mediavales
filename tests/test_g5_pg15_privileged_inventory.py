@@ -113,3 +113,14 @@ def test_server_file_acl_is_independent_of_initdb_acl():
     assert "p.proname IN ('lo_import','lo_export')" in sql
     assert "p.proowner=(SELECT oid FROM pg_roles" in sql
     assert "has_function_privilege" in sql
+
+
+def test_raw_catalog_acl_and_ownership_are_checked_independent_of_effective_privileges():
+    reader = Reader(flags(CLUSTER_CHECKS), flags(DATABASE_CHECKS),
+                    flags(DATABASE_CHECKS), flags(CLUSTER_CHECKS))
+    assert inspect_privileged_inventory(TARGET, reader, fenced=False).blockers == ()
+    statement = reader.calls[1][1]
+    assert "c.relowner=(SELECT oid FROM pg_roles" in statement
+    assert "aclexplode(c.relacl)" in statement
+    assert "aclexplode(col.attacl)" in statement
+    assert "p.proowner=(SELECT oid FROM pg_roles WHERE rolname='game_app') OR (p.proname" in statement

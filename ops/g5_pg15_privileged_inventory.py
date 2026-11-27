@@ -140,12 +140,13 @@ def inspect_privileged_inventory(
         "AND (p.oid>=16384 OR n.nspname NOT IN ('pg_catalog','information_schema')))",
         # These server-file operations must never be executable by the
         # application identity, even if a catalog baseline is incomplete.
-        # Ownership grants implicit EXECUTE independent of an explicit ACL.
+        # Owners retain the ability to grant privileges to themselves even
+        # when the ordinary privilege is currently revoked.
         "NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
         "WHERE n.nspname='pg_catalog' AND "
-        "(p.proname IN ('lo_import','lo_export') "
-        f"OR p.proowner=(SELECT oid FROM pg_roles WHERE rolname='{app}')) "
-        f"AND has_function_privilege('{app}',p.oid,'EXECUTE')) AND "
+        f"(p.proowner=(SELECT oid FROM pg_roles WHERE rolname='{app}') "
+        "OR (p.proname IN ('lo_import','lo_export') "
+        f"AND has_function_privilege('{app}',p.oid,'EXECUTE')))) AND "
         # Detect nonstandard grants of built-in routine execution relative to
         # the initdb ACL, rather than classifying standard PUBLIC execution
         # of an unrelated overload as elevated authority. Explicit app grants
@@ -171,6 +172,21 @@ def inspect_privileged_inventory(
         "(c.relname='pg_shadow' AND a.attname='passwd') OR "
         "(c.relname='pg_subscription' AND a.attname='subconninfo')) "
         f"AND has_column_privilege('{app}',c.oid,a.attnum,'SELECT')) "
+        # The effective privilege inquiry can mask catalog writes under the
+        # server's current system-catalog policy. Reject latent raw grants
+        # too, and ownership, not only permissions currently usable.
+        "AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname='pg_catalog' AND c.relkind IN ('r','v','m','p','f','S','i','I','c','t') "
+        f"AND (c.relowner=(SELECT oid FROM pg_roles WHERE rolname='{app}') "
+        "OR EXISTS (SELECT 1 FROM aclexplode(c.relacl) a "
+        f"WHERE a.grantee IN (0,(SELECT oid FROM pg_roles WHERE rolname='{app}')) "
+        "AND a.privilege_type IN ('INSERT','UPDATE','DELETE','TRUNCATE','TRIGGER','USAGE') "
+        "AND NOT (c.relname='pg_settings' AND c.relkind='v' AND c.oid<16384 "
+        "AND a.grantee=0 AND a.privilege_type='UPDATE' AND NOT a.is_grantable)) "
+        "OR EXISTS (SELECT 1 FROM pg_attribute col CROSS JOIN LATERAL aclexplode(col.attacl) a "
+        "WHERE col.attrelid=c.oid AND col.attnum>0 AND NOT col.attisdropped "
+        f"AND a.grantee IN (0,(SELECT oid FROM pg_roles WHERE rolname='{app}')) "
+        "AND a.privilege_type IN ('INSERT','UPDATE')))) "
         "AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
         "WHERE n.nspname='pg_catalog' AND c.relkind IN ('r','v','m','p','f') "
         # pg_settings has stock PUBLIC UPDATE with permission-checked

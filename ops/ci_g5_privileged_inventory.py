@@ -85,6 +85,11 @@ def main():
             ("GRANT EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) TO game_app;",
              "REVOKE EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) FROM game_app;",
              "no_sensitive_builtin_execute", "game_ci"),
+            ("ALTER FUNCTION pg_catalog.lo_export(oid,text) OWNER TO game_app; "
+             "REVOKE EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) FROM game_app, PUBLIC;",
+             "ALTER FUNCTION pg_catalog.lo_export(oid,text) OWNER TO postgres; "
+             "GRANT EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) TO postgres;",
+             "no_sensitive_builtin_execute", "game_ci"),
             ("GRANT EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) TO PUBLIC;",
              "REVOKE EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) FROM PUBLIC;",
              "no_sensitive_builtin_execute", "postgres"),
@@ -97,6 +102,9 @@ def main():
             ("GRANT UPDATE ON pg_catalog.pg_authid TO game_app;",
              "REVOKE UPDATE ON pg_catalog.pg_authid FROM game_app;",
              "no_sensitive_catalog_access", "game_ci"),
+            ("GRANT UPDATE ON pg_catalog.pg_authid TO PUBLIC;",
+             "REVOKE UPDATE ON pg_catalog.pg_authid FROM PUBLIC;",
+             "no_sensitive_catalog_access", "postgres"),
             ("GRANT UPDATE (rolname) ON pg_catalog.pg_authid TO PUBLIC;",
              "REVOKE UPDATE (rolname) ON pg_catalog.pg_authid FROM PUBLIC;",
              "no_sensitive_catalog_access", "postgres"),

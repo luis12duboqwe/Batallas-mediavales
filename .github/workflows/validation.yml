@@ -463,3 +463,20 @@ jobs:
             python3 -m ops.ci_g5_actual_reopen "$scenario" "$workspace" || failed=1
           done
           test "$failed" -eq 0
+      - name: Rehearse immutable historical-to-candidate release transition
+        timeout-minutes: 45
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          workspace="$(mktemp -d)"
+          failed=0
+          for scenario in success pull backup create wrong-image retry replace; do
+            case "$scenario" in
+              backup|create|wrong-image|retry)
+                python3 -m ops.ci_g5_release_transition "$scenario" "$workspace" --approve-previous-recovery || failed=1 ;;
+              *)
+                python3 -m ops.ci_g5_release_transition "$scenario" "$workspace" || failed=1 ;;
+            esac
+          done
+          test "$failed" -eq 0
