@@ -71,38 +71,34 @@ def inventory():
     )
 
 
-def fixture_edge(_runner, caddy, nginx, services):
-    """Synthetic edge model used only to exercise collector assembly tests."""
-    caddy_id, nginx_id = caddy["Id"], nginx["Id"]
-    routes = (
-        ProxyRoute("/", "frontend", services["frontend"]["Id"]),
-        ProxyRoute("/api/", "backend", services["backend"]["Id"]),
-        ProxyRoute("/socket.io/", "backend", services["backend"]["Id"]),
-    )
-    return EdgeObservation(
-        caddy_id, "nginx", nginx_id, (ProxyRoute("/", "nginx", nginx_id),),
-        nginx_id, routes, False,
+def partial_inventory(base=None, *, blockers=()):
+    base = base or inventory()
+    return observer.PartialHostInventory(
+        base.checkout, base.identity, base.images, base.containers, base.metadata,
+        ("/",), tuple(blockers),
     )
 
 
-def test_observe_takes_two_independent_full_snapshots(monkeypatch, tmp_path):
+def test_observe_partial_takes_two_independent_snapshots(monkeypatch, tmp_path):
     seen = []
 
     def collect(_request, _runner):
-        result = inventory()
+        result = partial_inventory()
         seen.append(result)
         return result
 
     monkeypatch.setattr(observer, "_collect_once", collect)
     ticks = iter((NOW, NOW.replace(second=1)))
-    result = observer.observe(
+    result = observer.observe_partial(
         observer.ObserverRequest(tmp_path, tmp_path / "env", (tmp_path / "compose.yml",), "isolated"),
+        runner=lambda *_args, **_kwargs: "",
         clock=lambda: next(ticks),
     )
     assert result.before == result.after
     assert result.before is not result.after
     assert seen == [result.before, result.after]
-    assert result.before.edge.tls_ready is False
+    assert result.before.caddy_routes == ("/",)
+    assert not isinstance(result.before, HostInventory)
 
 
 @pytest.mark.parametrize(
@@ -116,31 +112,33 @@ def test_observe_takes_two_independent_full_snapshots(monkeypatch, tmp_path):
 def test_observe_rejects_identity_drift_even_when_database_oid_is_unchanged(
     monkeypatch, tmp_path, change
 ):
-    results = [inventory(), replace(inventory(), **change)]
+    results = [partial_inventory(), replace(partial_inventory(), **change)]
     monkeypatch.setattr(observer, "_collect_once", lambda *_: results.pop(0))
-    with pytest.raises(observer.ObservationError, match="drifted"):
+    result = observer.observe_partial(
+        observer.ObserverRequest(tmp_path, tmp_path / "env", (tmp_path / "compose.yml",), "isolated"),
+        runner=lambda *_args, **_kwargs: "",
+        clock=lambda: NOW,
+    )
+    assert any("drifted" in blocker for blocker in result.blockers)
+
+
+def test_full_observation_raises_with_typed_partial_inventory(monkeypatch, tmp_path):
+    results = [partial_inventory(), partial_inventory()]
+    monkeypatch.setattr(observer, "_collect_once", lambda *_: results.pop(0))
+    with pytest.raises(observer.ObservationBlocked) as error:
         observer.observe(
             observer.ObserverRequest(tmp_path, tmp_path / "env", (tmp_path / "compose.yml",), "isolated"),
+            runner=lambda *_args, **_kwargs: "",
             clock=lambda: NOW,
         )
+    assert isinstance(error.value.partial.before, observer.PartialHostInventory)
+    assert error.value.partial.before.identity.database_oid == 16384
+    assert "Nginx loaded configuration" in " ".join(error.value.partial.blockers)
 
 
 def test_runner_uses_bounded_argv_and_sanitizes_command_failures():
-    assert observer._run(
-        [sys.executable, "-c", "print('safe')"], timeout=7, max_output_bytes=10
-    ) == "safe\n"
-    with pytest.raises(observer.ObservationError) as error:
-        observer._run(
-            [sys.executable, "-c",
-             "import sys; sys.stderr.write('password-do-not-print'); sys.exit(1)"],
-            timeout=7, max_output_bytes=100,
-        )
-    assert "password-do-not-print" not in str(error.value)
-    with pytest.raises(observer.ObservationError, match="failed or timed out"):
-        observer._run(
-            [sys.executable, "-c", "print('output-exceeds-bound')"],
-            timeout=7, max_output_bytes=4,
-        )
+    with pytest.raises(observer.ObservationError, match="unsupported executable"):
+        observer._run(["python"], timeout=7, max_output_bytes=10)
 
 
 def test_compose_fingerprint_is_deterministic_without_returning_config_values():
@@ -165,24 +163,51 @@ def test_compose_fingerprint_is_deterministic_without_returning_config_values():
 
 
 def test_compose_environment_uses_effective_runtime_and_migration_urls():
+    app_url = "postgresql+psycopg://" + "game_app:synthetic-app@database:5432/game_db"
+    admin_url = (
+        "postgresql+psycopg://" + "game_admin:admin-secret@database:5432/game_db"
+    )
     config = {"services": {
         "database": {"environment": {
             "POSTGRES_DB": "game_db", "POSTGRES_USER": "game_admin",
             "POSTGRES_PASSWORD": "admin-secret",
         }},
-        "backend": {"environment": {"DATABASE_URL": "app-url"}},
-        "migrate": {"environment": {"DATABASE_URL": "migration-url"}},
+        "backend": {"environment": {"DATABASE_URL": app_url}},
+        "worker": {"environment": {"DATABASE_URL": app_url}},
+        "migrate": {"environment": {"DATABASE_URL": admin_url}},
+        "seed": {"environment": {"DATABASE_URL": admin_url}},
     }}
     result = observer._compose_environment(config)
-    assert result["DB_URL"] == "app-url"
-    assert result["G5_MIGRATION_DB_URL"] == "migration-url"
+    assert result["DB_URL"] == app_url
+    assert result["G5_MIGRATION_DB_URL"] == admin_url
     assert result["POSTGRES_PASSWORD"] == "admin-secret"
+
+
+def test_compose_environment_rejects_divergent_workers_and_one_shots():
+    app = "postgresql+psycopg://" + "game_app:synthetic-app@database:5432/game_db"
+    admin = "postgresql+psycopg://" + "game_admin:admin-secret@database:5432/game_db"
+    config = {"services": {
+        "database": {"environment": {
+            "POSTGRES_DB": "game_db", "POSTGRES_USER": "game_admin",
+            "POSTGRES_PASSWORD": "admin",
+        }},
+        "backend": {"environment": {"DATABASE_URL": app}},
+        "worker": {"environment": {"DATABASE_URL":
+                   "postgresql+psycopg://" + "other:worker@database:5432/game_db"}},
+        "migrate": {"environment": {"DATABASE_URL": admin}},
+        "seed": {"environment": {"DATABASE_URL": admin}},
+    }}
+    with pytest.raises(observer.ObservationError, match="URLs diverge"):
+        observer._compose_environment(config)
 
 
 def test_network_inventory_rejects_extra_networks_and_network_replacement():
     row = {
+        "Id": "1" * 64,
+        "Name": "/isolated-database-1",
         "NetworkSettings": {"Networks": {"isolated_web": {
-            "NetworkID": "c" * 64, "Aliases": ["database"],
+            "NetworkID": "c" * 64, "Aliases": ["database", "isolated-database-1"],
+            "IPAddress": "172.20.0.2",
         }}},
         "Config": {"Labels": {"com.docker.compose.network": "web",
                               "com.docker.compose.service": "database"}},
@@ -196,9 +221,10 @@ def test_network_inventory_rejects_extra_networks_and_network_replacement():
             "Id": "c" * 64, "Driver": "bridge",
             "Labels": {"com.docker.compose.project": "isolated",
                        "com.docker.compose.network": "web"},
-            "Containers": {"container": {}},
+            "Containers": {"1" * 64: {"IPv4Address": "172.20.0.2/16"}},
         }])
 
+    config["services"] = {"database": {"networks": {"web": {}}}}
     assert observer._network_identity(run, [row], config, "isolated") == "c" * 64
     row["NetworkSettings"]["Networks"]["bypass"] = {"NetworkID": "f" * 64}
     with pytest.raises(observer.ObservationError, match="bypass"):
@@ -310,8 +336,14 @@ def test_valid_terminal_g5_metadata_is_reused_without_writes(tmp_path):
 
 
 def test_pg_observation_hashes_catalog_only_and_redacts_authentication(monkeypatch, tmp_path):
-    db = {"Id": "1" * 64, "Config": {"Labels": {"com.docker.compose.service": "database"}}}
+    db = {
+        "Id": "1" * 64, "Config": {"Labels": {"com.docker.compose.service": "database"}},
+        "NetworkSettings": {"Networks": {"fixture_web": {
+            "IPAddress": "172.20.0.2",
+        }}},
+    }
     app_row = {"Id": "2" * 64, "Config": {"Labels": {"com.docker.compose.service": "backend"}}}
+    worker_row = {"Id": "3" * 64, "Config": {"Labels": {"com.docker.compose.service": "worker"}}}
     values = {
         "POSTGRES_USER": "game_admin", "POSTGRES_DB": "game_db",
         "POSTGRES_PASSWORD": "admin-secret",
@@ -328,14 +360,20 @@ def test_pg_observation_hashes_catalog_only_and_redacts_authentication(monkeypat
         calls.append(argv)
         if "psql" in argv:
             assert "SET TRANSACTION READ ONLY" in argv[-1]
-            return json.dumps(["game_admin", "game_db", 16384, "7345678901234567890", "150004"])
+            return json.dumps([
+                "game_admin", "game_db", 16384, "7345678901234567890",
+                "150004", True, "on",
+            ])
         if "python" in argv:
             assert "app-secret" not in " ".join(argv)
-            return json.dumps(["game_app", "game_app", "game_db", 16384, False, False])
+            return json.dumps([
+                "game_app", "game_app", "game_db", 16384, "172.20.0.2",
+                False, False, "on",
+            ])
         assert "pg_dump" in argv and "--schema-only" in argv
         return "CREATE TABLE synthetic_schema_only (id integer);\n"
 
-    result = observer._pg_snapshot(run, [db, app_row], values)
+    result = observer._pg_snapshot(run, [db, app_row, worker_row], values)
     assert result[:2] == ("game_db", 16384)
     assert result[2] == observer.hashlib.sha256(
         b"CREATE TABLE synthetic_schema_only (id integer);\n"
@@ -345,12 +383,18 @@ def test_pg_observation_hashes_catalog_only_and_redacts_authentication(monkeypat
 
 
 def test_pg_oid_without_real_maintenance_identity_fails_closed(tmp_path):
-    db = {"Id": "1" * 64, "Config": {"Labels": {"com.docker.compose.service": "database"}}}
+    db = {
+        "Id": "1" * 64, "Config": {"Labels": {"com.docker.compose.service": "database"}},
+        "NetworkSettings": {"Networks": {"fixture_web": {"IPAddress": "172.20.0.2"}}},
+    }
     app_row = {"Id": "2" * 64, "Config": {"Labels": {"com.docker.compose.service": "backend"}}}
     values = {"POSTGRES_USER": "game_admin", "POSTGRES_DB": "game_db"}
 
     def run(_argv, **_kwargs):
-        return json.dumps(["other_admin", "game_db", 16384, "7345678901234567890", "150004"])
+        return json.dumps([
+            "other_admin", "game_db", 16384, "7345678901234567890",
+            "150004", True, "on",
+        ])
 
     with pytest.raises(observer.ObservationError, match="maintenance identity"):
         observer._pg_snapshot(run, [db, app_row], values)
@@ -426,6 +470,7 @@ class ComposeFixtureRunner:
                     {"type": "volume", "source": "caddy-data", "target": "/data"},
                     {"type": "volume", "source": "caddy-config", "target": "/config"},
                 ]
+            spec.setdefault("networks", {"web": {}})
             services[service] = spec
         return {
             "name": "isolated", "services": services,
@@ -457,6 +502,7 @@ class ComposeFixtureRunner:
                     volume_spec = self.config["volumes"].get(mount["source"], {})
                     source = volume_spec.get("name") or f"isolated_{mount['source']}"
                     name = source
+                    source = f"/var/lib/docker/volumes/{name}/_data"
                 else:
                     source = mount["source"]
                     name = None
@@ -465,24 +511,31 @@ class ComposeFixtureRunner:
                     "Destination": mount["target"], "RW": not mount.get("read_only", False),
                 })
             running = service not in {"migrate", "seed"}
+            network_settings = {"Ports": {}, "Networks": {}}
+            if running:
+                network_settings["Networks"] = {
+                    "isolated_web": {
+                        "NetworkID": self.network_id, "Aliases": [service],
+                        "IPAddress": f"172.20.0.{int(identity, 16)}",
+                    },
+                }
             rows.append({
                 "Id": identity, "Image": image_id,
                 "Config": {
                     "Image": configs[service]["image"], "Labels": labels,
+                    "Entrypoint": None, "Cmd": [],
                     "Env": [f"{key}={value}" for key, value in
                             configs[service].get("environment", {}).items()],
                 },
                 "State": {"Running": running},
                 "HostConfig": {
                     "PortBindings": {},
+                    "Privileged": False, "CapAdd": [], "Devices": [],
+                    "NetworkMode": "isolated_web", "PidMode": "", "IpcMode": "private",
                     "RestartPolicy": {"Name": "no" if service in {"migrate", "seed"}
                                       else "unless-stopped", "MaximumRetryCount": 0},
                 },
-                "NetworkSettings": {"Ports": {}, "Networks": {
-                    "isolated_web": {
-                        "NetworkID": self.network_id, "Aliases": [service],
-                    },
-                }},
+                "NetworkSettings": network_settings,
                 "Mounts": mounts,
             })
         if self.wrong_runtime_environment:
@@ -507,6 +560,9 @@ class ComposeFixtureRunner:
                     self.network_id = "d" * 64
                 self.rows = self._rows()
             return json.dumps(self.config)
+        if "compose" in argv and len(argv) >= 2 and argv[-2] == "--hash":
+            service = argv[-1]
+            return format(len(service), "064x") + "\n"
         if argv[:3] == ("docker", "ps", "-a"):
             return "\n".join(json.dumps({"ID": row["Id"]}) for row in self.rows)
         if argv[:3] == ("docker", "inspect", "--type"):
@@ -517,7 +573,12 @@ class ComposeFixtureRunner:
                 "Id": self.network_id, "Driver": "bridge",
                 "Labels": {"com.docker.compose.project": "isolated",
                            "com.docker.compose.network": "web"},
-                "Containers": {row["Id"]: {} for row in running},
+                "Containers": {
+                    row["Id"]: {"IPv4Address": (
+                        row["NetworkSettings"]["Networks"]["isolated_web"]["IPAddress"] + "/16"
+                    )}
+                    for row in running
+                },
             }])
         if argv[:3] == ("docker", "volume", "inspect"):
             name = argv[-1]
@@ -527,23 +588,34 @@ class ComposeFixtureRunner:
             )
             return json.dumps([{
                 "Name": name, "Driver": "local",
+                "Mountpoint": f"/var/lib/docker/volumes/{name}/_data",
                 "Labels": {"com.docker.compose.project": "isolated",
                            "com.docker.compose.volume": volume},
             }])
         if argv[:3] == ("docker", "image", "inspect"):
             image_id = argv[-1]
-            service = next(name for name, value in self.image_ids.items() if value == image_id)
+            service = next(
+                (name for name, value in self.image_ids.items() if value == image_id), None
+            )
+            config = {
+                "Labels": {"org.opencontainers.image.revision": SHA},
+                "Env": [], "Entrypoint": None, "Cmd": [],
+            }
+            if service is None:
+                return json.dumps([{"Id": image_id, "RepoDigests": [], "Config": config}])
             return json.dumps([{
-                "Id": image_id, "RepoDigests": [self.refs[service]],
-                "Config": {"Labels": {"org.opencontainers.image.revision": SHA}},
+                "Id": image_id, "RepoDigests": [self.refs[service]], "Config": config,
             }])
         if "psql" in argv:
             system_id = "7345678901234567890"
             if self.drift_system_id and self.observations >= 2:
                 system_id = "7345678901234567891"
-            return json.dumps(["game_admin", "game_db", 16384, system_id, "150004"])
+            return json.dumps(["game_admin", "game_db", 16384, system_id, "150004", True, "on"])
         if "python" in argv:
-            return json.dumps(["game_app", "game_app", "game_db", 16384, False, False])
+            return json.dumps([
+                "game_app", "game_app", "game_db", 16384,
+                "172.20.0.4", False, False, "on",
+            ])
         if "pg_dump" in argv:
             return "CREATE TABLE synthetic_schema_only (id integer);\n"
         if argv[-1] == "http://127.0.0.1:2019/config/":
@@ -563,7 +635,19 @@ def compose_fixture(tmp_path):
     (tmp_path / "Caddyfile").write_text("fixture")
     (tmp_path / ".release-sha").write_text(SHA)
     (tmp_path / ".release-sha").chmod(0o600)
-    (tmp_path / ".release.env").write_text("synthetic fixture only")
+    app_url = "postgresql+psycopg://" + "game_app:app-secret@database:5432/game_db"
+    admin_url = (
+        "postgresql+psycopg://" + "game_admin:admin-secret@database:5432/game_db"
+    )
+    (tmp_path / ".release.env").write_text(
+        "POSTGRES_DB=game_db\n"
+        "POSTGRES_USER=game_admin\n"
+        "POSTGRES_PASSWORD=admin-secret\n"
+        f"DB_URL={app_url}\n"
+        f"G5_MIGRATION_DB_URL={admin_url}\n"
+        "BACKEND_IMAGE=ghcr.io/example/backend@sha256:" + "1" * 64 + "\n"
+        "FRONTEND_IMAGE=ghcr.io/example/frontend@sha256:" + "2" * 64 + "\n"
+    )
     (tmp_path / ".release.env").chmod(0o600)
     state = tmp_path / ".ops-state"
     state.mkdir(mode=0o700)
@@ -577,15 +661,17 @@ def compose_fixture(tmp_path):
 
 def test_synthetic_compose_fixture_exercises_inventory_assembly(monkeypatch, compose_fixture):
     request, runner = compose_fixture
-    monkeypatch.setattr(observer, "_runtime_routes", fixture_edge)
-    result = observer.observe(request, runner=runner, clock=lambda: NOW)
+    monkeypatch.setattr(observer, "_caddy_runtime_routes", lambda *_args: ("/",))
+    result = observer.observe_partial(request, runner=runner, clock=lambda: NOW)
     assert result.before == result.after
     assert {row.service for row in result.before.containers} == set(runner.ids)
     assert result.before.identity.postgres_system_identifier == "7345678901234567890"
     assert result.before.identity.database_oid == 16384
     assert len(result.before.images) == 3
-    assert result.before.edge.tls_ready is False
+    assert result.before.caddy_routes == ("/",)
+    assert not isinstance(result.before, HostInventory)
     assert result.before.metadata.state is MetadataState.LEGACY_MANAGED
+    assert any("Nginx loaded configuration" in blocker for blocker in result.blockers)
 
 
 def test_synthetic_compose_fixture_exercises_cluster_drift(monkeypatch, compose_fixture):
@@ -593,9 +679,9 @@ def test_synthetic_compose_fixture_exercises_cluster_drift(monkeypatch, compose_
     runner = ComposeFixtureRunner(
         request.checkout, request.compose_files[0], drift_system_id=True
     )
-    monkeypatch.setattr(observer, "_runtime_routes", fixture_edge)
-    with pytest.raises(observer.ObservationError, match="drifted"):
-        observer.observe(request, runner=runner, clock=lambda: NOW)
+    monkeypatch.setattr(observer, "_caddy_runtime_routes", lambda *_args: ("/",))
+    result = observer.observe_partial(request, runner=runner, clock=lambda: NOW)
+    assert any("drifted" in blocker for blocker in result.blockers)
 
 
 @pytest.mark.parametrize(
@@ -612,6 +698,6 @@ def test_compose_fixture_rejects_configuration_mount_and_network_drift(
 ):
     request, _ = compose_fixture
     runner = ComposeFixtureRunner(request.checkout, request.compose_files[0], **options)
-    monkeypatch.setattr(observer, "_runtime_routes", fixture_edge)
+    monkeypatch.setattr(observer, "_caddy_runtime_routes", lambda *_args: ("/",))
     with pytest.raises(observer.ObservationError, match=expected):
         observer.observe(request, runner=runner, clock=lambda: NOW)

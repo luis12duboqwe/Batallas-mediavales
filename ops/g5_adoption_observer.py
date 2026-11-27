@@ -15,9 +15,11 @@ import os
 from pathlib import Path
 import re
 import selectors
+import signal
 import stat
 import subprocess
 import time
+import shlex
 from typing import Callable, Sequence
 
 from ops.g5_adoption_plan import (
@@ -50,10 +52,43 @@ class ObserverRequest:
 
 
 Runner = Callable[..., str]
+
+
+@dataclass(frozen=True)
+class PartialHostInventory:
+    """Observed host evidence that deliberately lacks a trusted edge inventory."""
+
+    checkout: CheckoutObservation
+    identity: TargetIdentity
+    images: tuple[ImageObservation, ...]
+    containers: tuple[ContainerObservation, ...]
+    metadata: MetadataObservation
+    caddy_routes: tuple[str, ...]
+    blockers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PartialHostObservations:
+    before: PartialHostInventory
+    after: PartialHostInventory
+    observed_from: datetime
+    observed_until: datetime
+    blockers: tuple[str, ...]
+
+
+class ObservationBlocked(ObservationError):
+    """Full inventory is unavailable, with typed partial observations attached."""
+
+    def __init__(self, message: str, partial: PartialHostObservations):
+        super().__init__(message)
+        self.partial = partial
+
+
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}\Z")
 _PROJECT = re.compile(r"[a-z0-9][a-z0-9_-]{0,127}\Z")
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_IMAGE_DIGEST = re.compile(r".+@sha256:[0-9a-f]{64}\Z")
 _SERVICES = frozenset({
     "backend", "frontend", "worker", "database", "nginx", "caddy", "migrate", "seed"
 })
@@ -63,14 +98,40 @@ _TIMEOUT = 20
 
 
 def _run(argv: Sequence[str], *, timeout: int, max_output_bytes: int) -> str:
-    """Run a bounded argv command without a shell or forwarding diagnostics."""
+    """Run only read-only Git/local-Docker commands in GitHub-hosted CI."""
+    if (os.environ.get("GITHUB_ACTIONS") != "true"
+            or os.environ.get("CI") != "true"
+            or not Path("/var/run/docker.sock").is_socket()):
+        raise ObservationError("default observer runner is restricted to GitHub CI local Docker")
+    args = list(argv)
+    if not args:
+        raise ObservationError("read-only command is empty")
+    if args[0] == "git":
+        if (len(args) < 5 or args[1] != "-C"
+                or not _inside_workspace(Path(args[2]))
+                or args[3:5] not in (["rev-parse", "--verify"], ["status", "--porcelain=v1"])):
+            raise ObservationError("default runner refused a non-read-only Git command")
+    elif args[0] == "docker":
+        if len(args) < 2 or args[1] not in {
+            "compose", "ps", "inspect", "image", "network", "volume", "exec"
+        }:
+            raise ObservationError("default runner refused a non-read-only Docker command")
+        args[1:1] = ["--host", "unix:///var/run/docker.sock"]
+    else:
+        raise ObservationError("default runner refused an unsupported executable")
+
     process = None
     selector = selectors.DefaultSelector()
     output = {"stdout": bytearray(), "stderr": bytearray()}
+    environment = os.environ.copy()
+    for key in tuple(environment):
+        if key.startswith(("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_TLS", "DOCKER_CERT_PATH")):
+            environment.pop(key, None)
     try:
         process = subprocess.Popen(
-            list(argv), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, shell=False, close_fds=True,
+            start_new_session=True, env=environment,
         )
         selector.register(process.stdout, selectors.EVENT_READ, "stdout")
         selector.register(process.stderr, selectors.EVENT_READ, "stderr")
@@ -94,7 +155,7 @@ def _run(argv: Sequence[str], *, timeout: int, max_output_bytes: int) -> str:
             raise ObservationError("required read-only observation command returned nonzero")
     except (OSError, subprocess.SubprocessError, TimeoutError, BufferError):
         if process is not None and process.poll() is None:
-            process.kill()
+            os.killpg(process.pid, signal.SIGKILL)
             process.wait()
         raise ObservationError("required read-only observation command failed or timed out") from None
     finally:
@@ -107,6 +168,18 @@ def _run(argv: Sequence[str], *, timeout: int, max_output_bytes: int) -> str:
         return bytes(output["stdout"]).decode("utf-8")
     except UnicodeDecodeError:
         raise ObservationError("read-only observation output is not valid UTF-8") from None
+
+
+def _inside_workspace(path: Path) -> bool:
+    workspace = os.environ.get("GITHUB_WORKSPACE")
+    if not workspace:
+        return False
+    try:
+        return os.path.commonpath((str(Path(workspace).resolve()), str(path.resolve()))) == str(
+            Path(workspace).resolve()
+        )
+    except (OSError, ValueError):
+        return False
 
 
 def _command(runner: Runner, *argv: str, limit: int = _MAX_OUTPUT) -> str:
@@ -139,7 +212,12 @@ def _compose_argv(request: ObserverRequest) -> list[str]:
     return args
 
 
-def _read_metadata_unlocked(checkout: Path) -> MetadataObservation:
+def _read_metadata_unlocked(
+    checkout: Path,
+    *,
+    expected_values: dict[str, str] | None = None,
+    expected_images: dict[str, str] | None = None,
+) -> MetadataObservation:
     """Observe release and G5 state without creating files or acquiring a new lock."""
     for transient in (".release.env.next", ".release.env.previous"):
         path = checkout / transient
@@ -313,17 +391,58 @@ def _read_metadata_unlocked(checkout: Path) -> MetadataObservation:
         return MetadataObservation(MetadataState.ABSENT)
     if not safe_private_file(current_env):
         return MetadataObservation(MetadataState.INCIDENT)
+    if expected_values is not None:
+        try:
+            from ops.preflight import read_env
+
+            first = current_env.lstat()
+            fd = os.open(
+                current_env, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+            )
+            try:
+                opened = os.fstat(fd)
+                values = read_env(current_env)
+                after_fd = os.fstat(fd)
+                after_path = current_env.lstat()
+            finally:
+                os.close(fd)
+        except Exception:
+            return MetadataObservation(MetadataState.INCIDENT)
+        stamp = lambda item: (
+            item.st_dev, item.st_ino, item.st_mode, item.st_uid, item.st_nlink,
+            item.st_size, item.st_mtime_ns, item.st_ctime_ns,
+        )
+        if stamp(first) != stamp(opened) or stamp(opened) != stamp(after_fd) or stamp(first) != stamp(after_path):
+            return MetadataObservation(MetadataState.INCIDENT)
+        try:
+            if (any(values.get(key) != expected_values.get(key) for key in (
+                    "POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PASSWORD",
+                    "DB_URL", "G5_MIGRATION_DB_URL",
+            )) or validate_split(values) != validate_split(expected_values)):
+                return MetadataObservation(MetadataState.INCIDENT)
+        except (RoleSplitError, TypeError, ValueError):
+            return MetadataObservation(MetadataState.INCIDENT)
+        for key, image in (expected_images or {}).items():
+            if values.get(key) != image:
+                return MetadataObservation(MetadataState.INCIDENT)
     return MetadataObservation(MetadataState.LEGACY_MANAGED, legacy_release_sha=release_sha)
 
 
-def _read_metadata(checkout: Path) -> MetadataObservation:
+def _read_metadata(
+    checkout: Path,
+    *,
+    expected_values: dict[str, str] | None = None,
+    expected_images: dict[str, str] | None = None,
+) -> MetadataObservation:
     """Read metadata under an existing shared deploy lock, never creating it."""
     state_dir = checkout / ".ops-state"
     lock_path = state_dir / "deploy.lock"
     try:
         before = lock_path.lstat()
     except FileNotFoundError:
-        result = _read_metadata_unlocked(checkout)
+        result = _read_metadata_unlocked(
+            checkout, expected_values=expected_values, expected_images=expected_images
+        )
         return (result if result.state is MetadataState.ABSENT
                 else MetadataObservation(MetadataState.INCIDENT))
     except OSError:
@@ -350,7 +469,9 @@ def _read_metadata(checkout: Path) -> MetadataObservation:
             fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
         except BlockingIOError:
             return MetadataObservation(MetadataState.INCIDENT)
-        result = _read_metadata_unlocked(checkout)
+        result = _read_metadata_unlocked(
+            checkout, expected_values=expected_values, expected_images=expected_images
+        )
         current = lock_path.lstat()
         if stamp != (
             current.st_dev, current.st_ino, current.st_mode, current.st_uid,
@@ -376,41 +497,67 @@ def _container_rows(runner: Runner, request: ObserverRequest) -> list[dict]:
         "--format", "{{json .}}",
     )
     rows = decode_ps(raw)
-    ids = [row.get("ID") for row in rows]
-    if not ids or any(not isinstance(value, str) or not value for value in ids):
+    listed_ids = [row.get("ID") for row in rows]
+    if (not listed_ids or any(not isinstance(value, str)
+                             or not re.fullmatch(r"[0-9a-f]{64}", value)
+                             for value in listed_ids)
+            or len(set(listed_ids)) != len(listed_ids)):
         raise ObservationError("Compose container inventory is empty or incomplete")
-    inspected = _json(_command(runner, "docker", "inspect", "--type", "container", *ids),
+    inspected = _json(_command(runner, "docker", "inspect", "--type", "container", *listed_ids),
                       "container")
-    if not isinstance(inspected, list) or len(inspected) != len(ids):
+    inspected_ids = (
+        [row.get("Id") for row in inspected]
+        if isinstance(inspected, list) and all(isinstance(row, dict) for row in inspected)
+        else []
+    )
+    if (len(inspected_ids) != len(listed_ids) or len(set(inspected_ids)) != len(inspected_ids)
+            or set(inspected_ids) != set(listed_ids)):
         raise ObservationError("Compose container inspection is incomplete")
     return inspected
 
 
 def _compose_environment(config: dict) -> dict[str, str]:
-    values: dict[str, str] = {}
     services = config.get("services")
     if not isinstance(services, dict):
         raise ObservationError("effective Compose services are missing")
-    for service in ("database", "backend", "worker", "migrate", "seed"):
-        spec = services.get(service)
-        if not isinstance(spec, dict):
-            continue
-        environment = _environment_map(spec.get("environment", {}))
-        for key, value in environment.items():
-            if service == "database":
-                values.setdefault(key, value)
-            elif key == "DATABASE_URL":
-                target = "G5_MIGRATION_DB_URL" if service in {"migrate", "seed"} else "DB_URL"
-                values.setdefault(target, value)
+    database_env = _environment_map(services["database"].get("environment", {}))
+    backend_env = _environment_map(services["backend"].get("environment", {}))
+    worker_env = _environment_map(services["worker"].get("environment", {}))
+    migration_envs = [
+        _environment_map(services[name].get("environment", {}))
+        for name in ("migrate", "seed")
+    ]
+    app_url = backend_env.get("DATABASE_URL")
+    migration_url = migration_envs[0].get("DATABASE_URL")
+    if (not app_url or worker_env.get("DATABASE_URL") != app_url
+            or not migration_url
+            or any(env.get("DATABASE_URL") != migration_url for env in migration_envs)):
+        raise ObservationError("Compose application or migration database URLs diverge")
+    values = {
+        "POSTGRES_USER": database_env.get("POSTGRES_USER", ""),
+        "POSTGRES_PASSWORD": database_env.get("POSTGRES_PASSWORD", ""),
+        "POSTGRES_DB": database_env.get("POSTGRES_DB", ""),
+        "DB_URL": app_url,
+        "G5_MIGRATION_DB_URL": migration_url,
+    }
+    try:
+        split = validate_split(values)
+    except (RoleSplitError, TypeError, ValueError):
+        raise ObservationError("effective application/maintenance role split is invalid") from None
+    if split.application == split.maintenance:
+        raise ObservationError("application and maintenance database roles are not distinct")
     return values
 
 
 def _environment_map(raw: object) -> dict[str, str]:
     if isinstance(raw, list):
-        raw = dict(
+        pairs = [
             item.split("=", 1) for item in raw
             if isinstance(item, str) and "=" in item
-        )
+        ]
+        if len({key for key, _ in pairs}) != len(pairs):
+            raise ObservationError("effective Compose environment has duplicate keys")
+        raw = dict(pairs)
     if not isinstance(raw, dict):
         return {}
     return {
@@ -434,6 +581,43 @@ def _restart_matches(desired: str, actual: object) -> bool:
     )
 
 
+def _argv_value(value: object) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return shlex.split(value)
+    if isinstance(value, list) and all(isinstance(part, str) for part in value):
+        return value
+    raise ObservationError("effective Compose command or entrypoint is malformed")
+
+
+def _verify_runtime_service(
+    runner: Runner, service: str, row: dict, service_config: dict
+) -> None:
+    image_id = row.get("Image")
+    image_info = _json(
+        _command(runner, "docker", "image", "inspect", image_id), "container image"
+    )
+    if not isinstance(image_info, list) or len(image_info) != 1:
+        raise ObservationError("container image defaults cannot be inspected")
+    image_config = image_info[0].get("Config") or {}
+    configured_env = _environment_map(service_config.get("environment", {}))
+    expected_env = _environment_map(image_config.get("Env", []))
+    expected_env.update(configured_env)
+    actual_env = _environment_map(row.get("Config", {}).get("Env"))
+    if actual_env != expected_env:
+        raise ObservationError(f"{service} runtime environment differs from effective Compose")
+
+    entrypoint = _argv_value(
+        service_config.get("entrypoint", image_config.get("Entrypoint"))
+    )
+    command = _argv_value(service_config.get("command", image_config.get("Cmd")))
+    actual_entrypoint = row.get("Config", {}).get("Entrypoint")
+    actual_command = row.get("Config", {}).get("Cmd")
+    if actual_entrypoint != entrypoint or actual_command != command:
+        raise ObservationError(f"{service} runtime command differs from effective Compose")
+
+
 def _compose_fingerprint(config: dict, labels: Sequence[dict]) -> str:
     """Hash resolved Compose data and the non-secret runtime provenance labels."""
     payload = {
@@ -455,11 +639,33 @@ def _compose_fingerprint(config: dict, labels: Sequence[dict]) -> str:
     ).encode("utf-8")).hexdigest()
 
 
+def _validate_compose_config_hashes(
+    runner: Runner, request: ObserverRequest, rows_by_service: dict[str, dict]
+) -> None:
+    command = _compose_argv(request) + ["config"]
+    for service, row in rows_by_service.items():
+        actual = row["Config"]["Labels"]["com.docker.compose.config-hash"]
+        expected = _command(runner, *command, "--hash", service).strip()
+        if not _SHA256.fullmatch(expected) or actual != expected:
+            raise ObservationError("runtime Compose service hash differs from effective configuration")
+
+
 def _network_identity(
     runner: Runner, containers: list[dict], config: dict, project: str
 ) -> str:
     network_ids: set[str] = set()
+    expected_members: set[str] = set()
+    aliases_to_service: dict[str, str] = {}
+    addresses: set[str] = set()
     for row in containers:
+        if row.get("State", {}).get("Running") is not True:
+            networks = row.get("NetworkSettings", {}).get("Networks") or {}
+            if any(
+                isinstance(item, dict) and item.get("NetworkID")
+                for item in networks.values()
+            ):
+                raise ObservationError("stopped container retains an unexpected network attachment")
+            continue
         settings = row.get("NetworkSettings")
         networks = settings.get("Networks") if isinstance(settings, dict) else None
         if not isinstance(networks, dict) or len(networks) != 1:
@@ -480,6 +686,30 @@ def _network_identity(
         aliases = network.get("Aliases") if isinstance(network, dict) else None
         if not isinstance(aliases, list) or service not in aliases:
             raise ObservationError("Compose service network alias is unavailable")
+        service_config = config["services"].get(service)
+        networks_config = service_config.get("networks", {}) if isinstance(service_config, dict) else {}
+        network_config = networks_config.get("web", {}) if isinstance(networks_config, dict) else {}
+        configured_aliases = network_config.get("aliases", []) if isinstance(network_config, dict) else []
+        if not isinstance(configured_aliases, list) or any(
+            not isinstance(alias, str) or not alias for alias in configured_aliases
+        ):
+            raise ObservationError("effective Compose network aliases are malformed")
+        expected_aliases = {service, *(alias for alias in configured_aliases)}
+        container_name = row.get("Name", "").lstrip("/")
+        if container_name:
+            expected_aliases.add(container_name)
+        if set(aliases) != expected_aliases or len(aliases) != len(expected_aliases):
+            raise ObservationError("runtime network aliases differ from effective Compose")
+        for alias in aliases:
+            previous = aliases_to_service.setdefault(alias, service)
+            if previous != service:
+                raise ObservationError("Compose network alias is duplicated across services")
+        address = network.get("IPAddress") if isinstance(network, dict) else None
+        if (not isinstance(address, str) or not address
+                or address in addresses):
+            raise ObservationError("runtime container network address is missing or duplicated")
+        addresses.add(address)
+        expected_members.add(row["Id"])
     networks = config.get("networks")
     if not isinstance(networks, dict) or set(networks) != {"web"} or len(network_ids) != 1:
         raise ObservationError("effective Compose network topology is unexpected")
@@ -492,15 +722,24 @@ def _network_identity(
         raise ObservationError("Docker network inspection is incomplete")
     network = observed[0]
     labels = network.get("Labels") or {}
-    running_count = sum(
-        row.get("State", {}).get("Running") is True
-        for row in containers
-    )
+    members = network.get("Containers")
+    if not isinstance(members, dict):
+        raise ObservationError("Docker network member inventory is missing")
     if (network.get("Id") != network_id or network.get("Driver") != "bridge"
             or labels.get("com.docker.compose.project") != project
             or labels.get("com.docker.compose.network") != "web"
-            or len(network.get("Containers") or {}) != running_count):
+            or set(members) != expected_members):
         raise ObservationError("Docker network identity or membership is unexpected")
+    observed_addresses: set[str] = set()
+    for container_id, member in members.items():
+        if not isinstance(member, dict):
+            raise ObservationError("Docker network member is malformed")
+        address = member.get("IPv4Address", "").split("/", 1)[0]
+        if not address or address not in addresses or address in observed_addresses:
+            raise ObservationError("Docker network member address is unknown or duplicated")
+        observed_addresses.add(address)
+    if observed_addresses != addresses:
+        raise ObservationError("Docker network member address map is incomplete")
     return network_id
 
 
@@ -511,11 +750,21 @@ def _validate_mounts(
     if not isinstance(actual, list):
         raise ObservationError("container mount inventory is unavailable")
     spec = config["services"][service]
+    host_config = row.get("HostConfig") or {}
+    if (host_config.get("Privileged") is not False
+            or host_config.get("CapAdd") not in (None, [])
+            or host_config.get("Devices") not in (None, [])
+            or host_config.get("NetworkMode", "").startswith("host")
+            or host_config.get("PidMode") == "host"
+            or host_config.get("IpcMode") == "host"):
+        raise ObservationError("container has privileged host access or an extra capability")
     wanted = spec.get("volumes", [])
     if not isinstance(wanted, list) or len(wanted) != len(actual):
         raise ObservationError("runtime mounts differ from effective Compose mounts")
     by_target = {mount.get("target"): mount for mount in wanted if isinstance(mount, dict)}
-    if len(by_target) != len(wanted):
+    actual_targets = [mount.get("Destination") for mount in actual if isinstance(mount, dict)]
+    if (len(by_target) != len(wanted) or len(set(actual_targets)) != len(actual_targets)
+            or len(actual_targets) != len(actual)):
         raise ObservationError("effective Compose mount inventory is malformed")
     volume_id = None
     for mount in actual:
@@ -529,6 +778,8 @@ def _validate_mounts(
         if mount.get("RW") is not (not bool(expected.get("read_only", False))):
             raise ObservationError("runtime mount access differs from effective Compose")
         source = expected.get("source")
+        if isinstance(source, str) and "docker.sock" in source:
+            raise ObservationError("Docker socket mounts are forbidden")
         if expected_type == "volume":
             volume_spec = config.get("volumes", {}).get(source, {})
             expected_name = volume_spec.get("name") or f"{project}_{source}"
@@ -544,9 +795,13 @@ def _validate_mounts(
                     raise ObservationError("PostgreSQL volume inspection is incomplete")
                 volume = observed[0]
                 labels = volume.get("Labels") or {}
+                mountpoint = volume.get("Mountpoint")
                 if (volume.get("Name") != expected_name or volume.get("Driver") != "local"
                         or labels.get("com.docker.compose.project") != project
-                        or labels.get("com.docker.compose.volume") != source):
+                        or labels.get("com.docker.compose.volume") != source
+                        or mountpoint != f"/var/lib/docker/volumes/{expected_name}/_data"
+                        or not isinstance(mount.get("Source"), str)
+                        or mountpoint != mount["Source"]):
                     raise ObservationError("PostgreSQL volume identity or provenance is unexpected")
         elif expected_type == "bind":
             try:
@@ -557,20 +812,26 @@ def _validate_mounts(
                 )
             except (TypeError, OSError):
                 raise ObservationError("effective bind mount source is malformed") from None
-            if mount.get("Source") != resolved:
+            if (mount.get("Source") != resolved or Path(resolved).is_symlink()
+                    or not Path(resolved).exists()):
                 raise ObservationError("runtime bind mount differs from effective Compose")
         else:
             raise ObservationError("unsupported effective Compose mount type")
     return volume_id
 
 
-def _image_observations(runner: Runner, rows: list[dict], checkout_sha: str) -> tuple[ImageObservation, ...]:
+def _image_observations(
+    runner: Runner, rows: list[dict], checkout_sha: str, config: dict
+) -> tuple[ImageObservation, ...]:
     result: dict[str, ImageObservation] = {}
     for row in rows:
         labels = row.get("Config", {}).get("Labels") or {}
         service = labels.get("com.docker.compose.service")
         if service not in {"backend", "frontend", "worker"}:
             continue
+        desired = config["services"][service].get("image")
+        if not isinstance(desired, str) or not _IMAGE_DIGEST.fullmatch(desired):
+            raise ObservationError("effective application image is not pinned by digest")
         image_id = row.get("Image")
         if not isinstance(image_id, str) or not _SHA256.fullmatch(image_id.removeprefix("sha256:")):
             raise ObservationError("runtime image identity is missing")
@@ -582,11 +843,14 @@ def _image_observations(runner: Runner, rows: list[dict], checkout_sha: str) -> 
         image_labels = image_config.get("Labels") or {}
         source_sha = image_labels.get("org.opencontainers.image.revision")
         digests = image.get("RepoDigests")
-        matching = [value for value in digests or [] if isinstance(value, str) and "@sha256:" in value]
-        if (not isinstance(source_sha, str) or source_sha != checkout_sha or
-                len(matching) != 1 or image.get("Id") != image_id):
-            raise ObservationError("runtime image digest or source provenance is unverifiable")
-        result[service] = ImageObservation(service, matching[0], image_id, source_sha)
+        if (not isinstance(source_sha, str) or source_sha != checkout_sha
+                or not isinstance(digests, list) or desired not in digests
+                or image.get("Id") != image_id):
+            raise ObservationError("runtime image digest or source label does not match Compose")
+        # OCI revision labels are image-provided metadata, not signed build
+        # attestations. The digest binds exact image bytes; provenance remains
+        # an observed claim and cannot authorize publication or deployment.
+        result[service] = ImageObservation(service, desired, image_id, source_sha)
     if set(result) != {"backend", "frontend", "worker"}:
         raise ObservationError("backend, frontend, and worker image evidence is incomplete")
     return tuple(result[name] for name in ("backend", "frontend", "worker"))
@@ -615,20 +879,27 @@ def _pg_snapshot(
         raise ObservationError("effective PostgreSQL identity is missing or unsafe")
     sql = (
         "SET TRANSACTION READ ONLY; "
-        "SELECT json_build_array(current_user, current_database(), "
-        "(SELECT oid FROM pg_database WHERE datname=current_database()), "
-        "(SELECT system_identifier::text FROM pg_control_system()), "
-        "current_setting('server_version_num'))::text;"
+        "SELECT json_build_array(current_user,current_database(),"
+        "(SELECT oid FROM pg_database WHERE datname=current_database()),"
+        "(SELECT system_identifier::text FROM pg_control_system()),"
+        "current_setting('server_version_num'),"
+        "(SELECT rolsuper FROM pg_roles WHERE rolname=current_user),"
+        "current_setting('transaction_read_only'))::text;"
     )
     output = _command(
         runner, "docker", "exec", "-i", db_row["Id"], "psql", "-X", "-1", "-q",
         "-v", "ON_ERROR_STOP=1", "-U", maintenance, "-d", database, "-Atqc", sql,
     ).strip()
     admin = _json(output, "PostgreSQL maintenance connection")
-    if (not isinstance(admin, list) or len(admin) != 5 or admin[0] != maintenance
+    if (not isinstance(admin, list) or len(admin) != 7 or admin[0] != maintenance
             or admin[1] != database or type(admin[2]) is not int
-            or not isinstance(admin[3], str) or not admin[3].isdigit()
-            or not str(admin[4]).startswith("15")):
+            or not 0 < admin[2] <= 2**32 - 1
+            or not isinstance(admin[3], str)
+            or not re.fullmatch(r"[1-9][0-9]{0,19}", admin[3])
+            or int(admin[3]) > 2**64 - 1
+            or type(admin[4]) is not str
+            or not admin[4].isdigit() or not 150000 <= int(admin[4]) < 160000
+            or admin[5] is not True or admin[6] != "on"):
         raise ObservationError("effective PostgreSQL maintenance identity is unverified")
 
     app_python = (
@@ -637,26 +908,46 @@ def _pg_snapshot(
         "c=e.connect(); c.exec_driver_sql('SET TRANSACTION READ ONLY'); "
         "r=c.exec_driver_sql(\"SELECT current_user,session_user,current_database(),"
         "(SELECT oid FROM pg_database WHERE datname=current_database()),"
+        "inet_server_addr()::text,"
         "(SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls "
         "FROM pg_roles WHERE rolname=current_user),"
         "EXISTS (SELECT 1 FROM pg_roles p WHERE (p.rolsuper OR p.rolname IN "
         "('pg_write_all_data','pg_read_all_data','pg_execute_server_program',"
         "'pg_read_server_files','pg_write_server_files')) "
         "AND pg_has_role(current_user,p.oid,'MEMBER'))\").one(); "
-        "print(json.dumps(list(r))); c.close(); e.dispose()"
+        "print(json.dumps(list(r)+(c.exec_driver_sql(\"SELECT "
+        "current_setting('transaction_read_only')\").scalar_one(),))); "
+        "c.close(); e.dispose()"
     )
-    app_output = _command(
-        runner, "docker", "exec", app_row["Id"], "python", "-c", app_python,
-    ).strip()
-    app = _json(app_output, "application PostgreSQL connection")
     try:
         split = validate_split(values)
     except (RoleSplitError, TypeError, ValueError):
         raise ObservationError("effective application/maintenance role split is invalid") from None
-    if (not isinstance(app, list) or len(app) != 6 or app[0] != split.application
-            or app[1] != split.application or app[2] != database or app[3] != admin[2]
-            or app[4] is not False or app[5] is not False):
-        raise ObservationError("effective application database identity is unverified")
+    db_networks = db_row.get("NetworkSettings", {}).get("Networks", {})
+    db_ips = {
+        item.get("IPAddress") for item in db_networks.values()
+        if isinstance(item, dict) and isinstance(item.get("IPAddress"), str)
+    }
+    if len(db_ips) != 1:
+        raise ObservationError("PostgreSQL runtime network address is unavailable")
+    for service in ("backend", "worker"):
+        service_row = next(
+            (row for row in rows
+             if row.get("Config", {}).get("Labels", {}).get("com.docker.compose.service")
+             == service),
+            None,
+        )
+        if service_row is None:
+            raise ObservationError("application or worker PostgreSQL client is missing")
+        app_output = _command(
+            runner, "docker", "exec", service_row["Id"], "python", "-c", app_python,
+        ).strip()
+        app = _json(app_output, f"{service} PostgreSQL connection")
+        if (not isinstance(app, list) or len(app) != 8 or app[0] != split.application
+                or app[1] != split.application or app[2] != database or app[3] != admin[2]
+                or app[4] not in db_ips or app[5] is not False or app[6] is not False
+                or app[7] != "on"):
+            raise ObservationError(f"effective {service} PostgreSQL identity is unverified")
 
     # Hash only the schema-only dump. Never return or print SQL or user data.
     dump = _command(
@@ -724,9 +1015,7 @@ def _caddy_routes(config: dict) -> tuple[dict, ...]:
     return tuple(found)
 
 
-def _runtime_routes(
-    runner: Runner, caddy: dict, _nginx: dict, _services: dict[str, dict]
-) -> EdgeObservation:
+def _caddy_runtime_routes(runner: Runner, caddy: dict) -> tuple[str, ...]:
     caddy_id = caddy["Id"]
     # Caddy's admin endpoint reports its currently loaded config. The Compose
     # Caddyfile sets admin off; that is deliberately a blocker, not evidence.
@@ -737,11 +1026,17 @@ def _runtime_routes(
     caddy_config = _json(caddy_raw, "live Caddy configuration")
     if not isinstance(caddy_config, dict):
         raise ObservationError("live Caddy configuration is unavailable")
-    # Caddy's admin JSON is its live adapted runtime configuration. Resolve
-    # the Compose DNS target only after checking it is the sole proxy upstream.
     caddy_routes = _caddy_routes(caddy_config)
     if caddy_routes[0].get("dial") != "nginx:80":
         raise ObservationError("loaded Caddy route bypasses or differs from Nginx")
+    return tuple(route["path"] for route in caddy_routes)
+
+
+def _runtime_routes(
+    runner: Runner, caddy: dict, nginx: dict, services: dict[str, dict]
+) -> EdgeObservation:
+    caddy_id, nginx_id = caddy["Id"], nginx["Id"]
+    routes = _caddy_runtime_routes(runner, caddy)
     # Nginx has no read-only API for its in-memory configuration here.
     # `nginx -T`, a file hash, a route response, or an endpoint-supplied
     # "loaded-runtime" string cannot authenticate what its workers loaded.
@@ -750,7 +1045,7 @@ def _runtime_routes(
     )
 
 
-def _collect_once(request: ObserverRequest, runner: Runner) -> HostInventory:
+def _collect_once(request: ObserverRequest, runner: Runner) -> PartialHostInventory:
     checkout = request.checkout.absolute()
     if (not checkout.is_dir() or checkout.is_symlink()
             or not request.env_file.is_file() or request.env_file.is_symlink()
@@ -808,13 +1103,10 @@ def _collect_once(request: ObserverRequest, runner: Runner) -> HostInventory:
         ids.add(identity)
         service_rows[service] = row
         service_config = config["services"][service]
+        _verify_runtime_service(runner, service, row, service_config)
         desired_image = service_config.get("image")
         if desired_image is not None and row.get("Config", {}).get("Image") != desired_image:
             raise ObservationError("runtime image reference differs from effective Compose")
-        expected_env = _environment_map(service_config.get("environment", {}))
-        actual_env = _environment_map(row.get("Config", {}).get("Env"))
-        if any(actual_env.get(key) != value for key, value in expected_env.items()):
-            raise ObservationError("runtime environment differs from effective Compose")
         desired_restart = service_config.get("restart", "no")
         actual_restart = (row.get("HostConfig") or {}).get("RestartPolicy")
         if not isinstance(desired_restart, str) or not _restart_matches(desired_restart, actual_restart):
@@ -828,6 +1120,11 @@ def _collect_once(request: ObserverRequest, runner: Runner) -> HostInventory:
     if not _REQUIRED.issubset(service_rows):
         raise ObservationError("required Compose containers are missing")
 
+    partial_blockers: list[str] = []
+    try:
+        _validate_compose_config_hashes(runner, request, service_rows)
+    except ObservationError:
+        partial_blockers.append("Compose runtime service hashes do not match resolved configuration")
     # This fingerprint includes interpolated environment values, including
     # credentials, and the observed Compose provenance labels. Never log the
     # digest or accompany it with the resolved configuration.
@@ -837,11 +1134,15 @@ def _collect_once(request: ObserverRequest, runner: Runner) -> HostInventory:
     database, database_oid, schema_sha, system_id, app_role = _pg_snapshot(
         runner, rows, values
     )
-    images = _image_observations(runner, rows, sha)
-    image_map = {image.service: image for image in images}
-    if (image_map["backend"].image_id != image_map["worker"].image_id
-            or image_map["backend"].reference != image_map["worker"].reference):
-        raise ObservationError("backend and worker runtime images diverge")
+    try:
+        images = _image_observations(runner, rows, sha, config)
+        image_map = {image.service: image for image in images}
+        if (image_map["backend"].image_id != image_map["worker"].image_id
+                or image_map["backend"].reference != image_map["worker"].reference):
+            raise ObservationError("backend and worker runtime images diverge")
+    except ObservationError:
+        images = ()
+        partial_blockers.append("immutable image digest or provenance observation is incomplete")
 
     volume_id = None
     containers = []
@@ -873,9 +1174,25 @@ def _collect_once(request: ObserverRequest, runner: Runner) -> HostInventory:
     if volume_id is None:
         raise ObservationError("PostgreSQL volume identity is unavailable")
 
-    caddy, nginx = service_rows["caddy"], service_rows["nginx"]
-    edge = _runtime_routes(runner, caddy, nginx, service_rows)
-    metadata = _read_metadata(checkout)
+    caddy = service_rows["caddy"]
+    caddy_routes: tuple[str, ...] = ()
+    blockers = partial_blockers
+    try:
+        caddy_routes = _caddy_runtime_routes(runner, caddy)
+    except ObservationError:
+        blockers.append("Caddy loaded runtime route could not be verified")
+    # This runtime interface is intentionally unavailable until a trusted
+    # mechanism can bind Nginx routes to its active workers.
+    blockers.append(
+        "Nginx loaded configuration cannot be authenticated with a read-only runtime interface"
+    )
+    expected_images = {
+        "BACKEND_IMAGE": config["services"]["backend"].get("image", ""),
+        "FRONTEND_IMAGE": config["services"]["frontend"].get("image", ""),
+    }
+    metadata = _read_metadata(
+        checkout, expected_values=values, expected_images=expected_images
+    )
     if metadata.state is MetadataState.INCIDENT:
         raise ObservationError("G5 or legacy release metadata is unsafe or inconsistent")
     identity = TargetIdentity(
@@ -891,20 +1208,28 @@ def _collect_once(request: ObserverRequest, runner: Runner) -> HostInventory:
                 or manifest.identity.postgres_db != database
                 or manifest.identity.candidate_sha != sha):
             raise ObservationError("G5 release receipt differs from the observed host identity")
-    return HostInventory(
-        CheckoutObservation(sha, True), identity, images, tuple(containers), metadata, edge
+    return PartialHostInventory(
+        CheckoutObservation(sha, True), identity, images, tuple(containers), metadata,
+        caddy_routes, tuple(blockers),
     )
 
 
-def observe(
+def observe_partial(
     request: ObserverRequest,
     *,
-    runner: Runner = _run,
+    runner: Runner,
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-) -> HostObservations:
-    """Collect two complete independent inventories, rejecting any drift."""
+) -> PartialHostObservations:
+    """Collect two independent non-edge inventories without claiming completeness."""
     if not isinstance(request, ObserverRequest):
         raise ObservationError("observer request is missing or malformed")
+    if runner is _run and (
+        not _inside_workspace(request.checkout)
+        or not re.fullmatch(r"bm-g5-adoption-[0-9a-f]{32}", request.project)
+        or os.environ.get("GITHUB_ACTIONS") != "true"
+        or os.environ.get("CI") != "true"
+    ):
+        raise ObservationError("default observer runner accepts only an owned GitHub CI fixture")
     try:
         start = clock()
         before = _collect_once(request, runner)
@@ -918,7 +1243,24 @@ def observe(
             or start.tzinfo is None or end.tzinfo is None
             or start.utcoffset() is None or end.utcoffset() is None or end < start):
         raise ObservationError("observation timestamps are invalid")
-    observations = HostObservations(before, after, start, end)
+    blockers = list(dict.fromkeys(before.blockers + after.blockers))
+    if not blockers:
+        blockers.append(
+            "Nginx loaded configuration cannot be authenticated with a read-only runtime interface"
+        )
     if before != after:
-        raise ObservationError("host inventory drifted during independent observation")
-    return observations
+        blockers.append("partial host inventory drifted during independent observation")
+    return PartialHostObservations(before, after, start, end, tuple(dict.fromkeys(blockers)))
+
+
+def observe(
+    request: ObserverRequest,
+    *,
+    runner: Runner,
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> HostObservations:
+    """Require a full inventory; retain typed partial evidence on explicit block."""
+    partial = observe_partial(request, runner=runner, clock=clock)
+    raise ObservationBlocked(
+        "full host inventory is blocked: " + "; ".join(partial.blockers), partial
+    )
