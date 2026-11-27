@@ -40,6 +40,16 @@ class PolicyTests(unittest.TestCase):
         })
         self.assertNotIn("alembic_version", policy.OBSERVED_INTERNAL_OPERATIONS)
 
+    def test_candidate_wonder_observations_do_not_apply_to_previous_schema(self):
+        self.assertEqual(policy.OBSERVED_WONDER_OPERATIONS, {
+            "wonder_funding": {"SELECT", "INSERT", "UPDATE"},
+            "wonder_contributions": {"SELECT", "INSERT"},
+        })
+        self.assertTrue(set(policy.OBSERVED_WONDER_OPERATIONS)
+                        <= policy.allowed_tables(policy.CANDIDATE))
+        self.assertFalse(set(policy.OBSERVED_WONDER_OPERATIONS)
+                         & policy.expected_tables(policy.PREVIOUS))
+
     def test_read_only_inventory_uses_existing_session_and_rejects_unknown(self):
         class Session:
             def __init__(self):
@@ -51,11 +61,16 @@ class PolicyTests(unittest.TestCase):
                 return "\n".join(self.names)
 
         session = Session()
+        session.names = [name + "|r" for name in session.names]
         target = Pg15FenceTarget("game_ci", "game_app", "postgres")
         policy.inspect_tables(target, session, policy.PREVIOUS)
         self.assertEqual(session.queries[0][0], "game_ci")
         self.assertTrue(session.queries[0][1].startswith("SELECT "))
-        session.names.append("unexpected")
+        session.names.append("unexpected|r")
+        with self.assertRaises(policy.ObjectPolicyError):
+            policy.inspect_tables(target, session, policy.PREVIOUS)
+        session.names.pop()
+        session.names[0] = session.names[0][:-1] + "v"
         with self.assertRaises(policy.ObjectPolicyError):
             policy.inspect_tables(target, session, policy.PREVIOUS)
 
