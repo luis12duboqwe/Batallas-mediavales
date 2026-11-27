@@ -27,10 +27,12 @@ CLUSTER_CHECKS = (
     "no_role_membership", "role_state", "client_sessions",
     "no_prepared_transactions", "no_replication_slots", "no_subscriptions",
     "known_backend_types", "no_preload_libraries", "no_preload_overrides",
+    "no_other_database_access",
 )
 DATABASE_CHECKS = (
     "target_identity", "only_standard_extension", "no_foreign_tables",
     "no_event_triggers", "no_custom_security_definers", "no_preload_libraries",
+    "no_native_routines", "no_sensitive_builtin_execute", "no_sensitive_catalog_access",
 )
 
 
@@ -116,20 +118,39 @@ def inspect_privileged_inventory(
         "NOT EXISTS (SELECT 1 FROM pg_db_role_setting s CROSS JOIN LATERAL unnest(s.setconfig) AS v(setting) "
         "WHERE split_part(v.setting,'=',1) IN ('shared_preload_libraries',"
         "'session_preload_libraries','local_preload_libraries'))",
+        f"NOT EXISTS (SELECT 1 FROM pg_database WHERE datname<>'{db}' AND "
+        f"datallowconn AND has_database_privilege('{app}',oid,'CONNECT'))",
     ))
-    catalog = _select((
-        f"current_database()='{db}' AND {identity}",
+    def catalog(database):
+        return _select((
+        f"current_database()='{database}' AND {identity}",
         "NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname<>'plpgsql')",
         "NOT EXISTS (SELECT 1 FROM pg_foreign_table)",
         "NOT EXISTS (SELECT 1 FROM pg_event_trigger)",
         "NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
         "WHERE p.prosecdef AND (p.oid>=16384 OR n.nspname NOT IN ('pg_catalog','information_schema')))",
         preload,
+        "NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang "
+        "JOIN pg_namespace n ON n.oid=p.pronamespace WHERE "
+        "(l.lanname IN ('internal','c') OR NOT l.lanpltrusted) "
+        "AND (p.oid>=16384 OR n.nspname NOT IN ('pg_catalog','information_schema')))",
+        "NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+        "WHERE n.nspname='pg_catalog' AND "
+        "(p.proname IN ('lo_import','lo_export','pg_read_file','pg_read_binary_file',"
+        "'pg_stat_file','pg_ls_dir','pg_ls_logdir','pg_ls_waldir','pg_ls_archive_statusdir',"
+        "'pg_ls_tmpdir','pg_ls_logicalsnapdir','pg_ls_logicalmapdir','pg_ls_replslotdir') "
+        "OR (p.proname LIKE 'pg_file_%')) "
+        f"AND has_function_privilege('{app}',p.oid,'EXECUTE'))",
+        "NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname='pg_catalog' AND c.relname IN ('pg_authid','pg_shadow','pg_subscription') "
+        f"AND (has_table_privilege('{app}',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') "
+        f"OR has_any_column_privilege('{app}',c.oid,'SELECT,INSERT,UPDATE,REFERENCES')))",
     ))
     first = _flags(session, "postgres", cluster, CLUSTER_CHECKS)
     # Do not connect to an untrusted or already ambiguous target.
     if first:
         return InventoryObservation(first)
-    second = _flags(session, db, catalog, DATABASE_CHECKS)
+    maintenance = _flags(session, "postgres", catalog("postgres"), DATABASE_CHECKS)
+    second = _flags(session, db, catalog(db), DATABASE_CHECKS)
     last = _flags(session, "postgres", cluster, CLUSTER_CHECKS)
-    return InventoryObservation(tuple(dict.fromkeys((*second, *last))))
+    return InventoryObservation(tuple(dict.fromkeys((*maintenance, *second, *last))))

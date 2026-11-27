@@ -8,9 +8,13 @@ devuelve bloqueadores, no permisos. Revisa PG15 y la identidad de
 mantenimiento, base objetivo, bases ajenas, roles adicionales incluso
 NOLOGIN, membresías de roles, atributos del rol app, sesiones cliente,
 transacciones preparadas, slots, suscripciones y tipos de backend
-inesperados. Rechaza bibliotecas preload y overrides; en la base objetivo
+inesperados. Rechaza bibliotecas preload y overrides; en la base objetivo y postgres
 rechaza extensiones fuera de plpgsql, tablas extranjeras, event triggers y
-funciones SECURITY DEFINER no estándar. Reobserva el clúster después
+funciones SECURITY DEFINER no estándar y rutinas nativas/no confiables
+ajenas al catálogo estándar. Rechaza CONNECT efectivo del rol app a otras
+bases y privilegios efectivos (incluido PUBLIC y columnas) en funciones
+sensibles de archivos y catálogos de credenciales/suscripciones. La lista
+sensible es deliberadamente explícita, no una auditoría universal de ACL. Reobserva el clúster después
 de cerrar la conexión temporal de mantenimiento. Ante evidencia ambigua,
 no devuelve una observación positiva.
 
@@ -31,3 +35,5 @@ después del fence persistente. Se preservan las demás compuertas G5.
 `tests/test_g5_pg15_privileged_inventory.py` cubre respuestas ambiguas,
 todas las categorías y deriva entre observaciones. Certificación pendiente
 del HEAD exacto.
+
+Revisión P2: las tres categorías de Codex se cubren con casos de grants directos y PUBLIC, ACL de columna, rutina nativa inocua y rutina privilegiada en postgres, además de CONNECT a postgres/template1. Pendiente nueva CI y revisión.

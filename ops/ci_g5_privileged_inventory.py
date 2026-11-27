@@ -44,6 +44,8 @@ def main():
         target = Pg15FenceTarget("game_ci", "game_app", "postgres")
         admin.sql("CREATE ROLE game_app LOGIN;")
         admin.sql("CREATE DATABASE game_ci;")
+        # Restrict cross-database CONNECT even through PUBLIC defaults.
+        admin.sql("REVOKE CONNECT ON DATABASE postgres, template1 FROM PUBLIC;")
         admin.sql("CREATE TABLE evidence (id int PRIMARY KEY);", "game_ci")
 
         def expect(*blockers, fenced=False):
@@ -68,6 +70,30 @@ def main():
             ("CREATE FUNCTION public.privileged_probe() RETURNS integer LANGUAGE SQL SECURITY DEFINER "
              "AS 'SELECT 1';", "DROP FUNCTION public.privileged_probe();",
              "no_custom_security_definers", "game_ci"),
+            ("GRANT CONNECT ON DATABASE postgres TO game_app;",
+             "REVOKE CONNECT ON DATABASE postgres FROM game_app;",
+             "no_other_database_access", "postgres"),
+            ("GRANT CONNECT ON DATABASE template1 TO PUBLIC;",
+             "REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;",
+             "no_other_database_access", "postgres"),
+            ("GRANT EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) TO game_app;",
+             "REVOKE EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) FROM game_app;",
+             "no_sensitive_builtin_execute", "game_ci"),
+            ("GRANT EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) TO PUBLIC;",
+             "REVOKE EXECUTE ON FUNCTION pg_catalog.lo_export(oid,text) FROM PUBLIC;",
+             "no_sensitive_builtin_execute", "postgres"),
+            ("GRANT SELECT ON pg_catalog.pg_authid TO game_app;",
+             "REVOKE SELECT ON pg_catalog.pg_authid FROM game_app;",
+             "no_sensitive_catalog_access", "game_ci"),
+            ("GRANT SELECT (rolpassword) ON pg_catalog.pg_authid TO PUBLIC;",
+             "REVOKE SELECT (rolpassword) ON pg_catalog.pg_authid FROM PUBLIC;",
+             "no_sensitive_catalog_access", "postgres"),
+            ("CREATE FUNCTION public.native_probe(integer) RETURNS integer LANGUAGE internal "
+             "AS 'int4abs';", "DROP FUNCTION public.native_probe(integer);",
+             "no_native_routines", "game_ci"),
+            ("CREATE FUNCTION public.maintenance_probe() RETURNS integer LANGUAGE SQL SECURITY DEFINER "
+             "AS 'SELECT 1';", "DROP FUNCTION public.maintenance_probe();",
+             "no_custom_security_definers", "postgres"),
             ("BEGIN; INSERT INTO evidence VALUES (1); PREPARE TRANSACTION 'g5_probe';",
              "ROLLBACK PREPARED 'g5_probe';", "no_prepared_transactions", "game_ci"),
             ("ALTER ROLE game_app SET session_preload_libraries TO '';",

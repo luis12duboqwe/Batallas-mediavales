@@ -34,10 +34,10 @@ class Reader:
 
 @pytest.mark.parametrize("fenced", [False, True])
 def test_positive_observation_is_not_authority(fenced):
-    reader = Reader(flags(CLUSTER_CHECKS), flags(DATABASE_CHECKS), flags(CLUSTER_CHECKS))
+    reader = Reader(flags(CLUSTER_CHECKS), flags(DATABASE_CHECKS), flags(DATABASE_CHECKS), flags(CLUSTER_CHECKS))
     observation = inspect_privileged_inventory(TARGET, reader, fenced=fenced)
     assert observation.blockers == ()
-    assert [db for db, _ in reader.calls] == ["postgres", "game_ci", "postgres"]
+    assert [db for db, _ in reader.calls] == ["postgres", "postgres", "game_ci", "postgres"]
     assert all("transaction_read_only" in sql for _, sql in reader.calls)
     assert ("NOT rolcanlogin" if fenced else "AND rolcanlogin") in reader.calls[0][1]
 
@@ -51,12 +51,12 @@ def test_cluster_blocker_prevents_target_connection(blocker):
 
 @pytest.mark.parametrize("blocker", DATABASE_CHECKS)
 def test_target_blockers_rechecked_after_connection_closes(blocker):
-    reader = Reader(flags(CLUSTER_CHECKS), flags(DATABASE_CHECKS, blocker),
+    reader = Reader(flags(CLUSTER_CHECKS), flags(DATABASE_CHECKS), flags(DATABASE_CHECKS, blocker),
                     flags(CLUSTER_CHECKS, "client_sessions"))
     assert inspect_privileged_inventory(TARGET, reader, fenced=True).blockers == (
         blocker, "client_sessions"
     )
-    assert len(reader.calls) == 3
+    assert len(reader.calls) == 4
 
 
 @pytest.mark.parametrize("invalid", [None, True, "", "1", "1|0|bogus", "2|" * 12,
@@ -78,3 +78,11 @@ def test_template_database_rejected(name):
     with pytest.raises(InventoryError):
         inspect_privileged_inventory(Pg15FenceTarget(name, "game_app", "postgres"),
                                      Reader(), fenced=False)
+
+
+@pytest.mark.parametrize("blocker", DATABASE_CHECKS)
+def test_maintenance_catalog_not_ignored(blocker):
+    reader = Reader(flags(CLUSTER_CHECKS), flags(DATABASE_CHECKS, blocker),
+                    flags(DATABASE_CHECKS), flags(CLUSTER_CHECKS))
+    assert inspect_privileged_inventory(TARGET, reader, fenced=False).blockers == (blocker,)
+    assert [db for db, _ in reader.calls] == ["postgres", "postgres", "game_ci", "postgres"]
