@@ -71,3 +71,10 @@ def test_ambiguous_evidence_fails_without_credentials(invalid):
 def test_invalid_fence_flag_rejected():
     with pytest.raises(InventoryError):
         inspect_privileged_inventory(TARGET, Reader(), fenced=1)
+
+
+@pytest.mark.parametrize("name", ["template0", "template1"])
+def test_template_database_rejected(name):
+    with pytest.raises(InventoryError):
+        inspect_privileged_inventory(Pg15FenceTarget(name, "game_app", "postgres"),
+                                     Reader(), fenced=False)

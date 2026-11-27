@@ -61,6 +61,8 @@ def main():
              "no_role_membership", "postgres"),
             ("CREATE DATABASE unrelated_ci;", "DROP DATABASE unrelated_ci;",
              "dedicated_databases", "postgres"),
+            ("ALTER DATABASE game_ci OWNER TO game_app;", "ALTER DATABASE game_ci OWNER TO postgres;",
+             "dedicated_databases", "postgres"),
             ("SELECT pg_create_physical_replication_slot('g5_probe');",
              "SELECT pg_drop_replication_slot('g5_probe');", "no_replication_slots", "postgres"),
             ("CREATE FUNCTION public.privileged_probe() RETURNS integer LANGUAGE SQL SECURITY DEFINER "
@@ -86,6 +88,14 @@ def main():
                   "WHERE datname='game_ci' AND usename='postgres';")
         expect()
 
+        # The exact app role may be active before fencing, but must be
+        # disconnected by the durable fence.
+        run(["exec", "-d", container, "psql", "-X", "-U", "game_app",
+             "-d", "game_ci", "-Atqc", "SELECT pg_sleep(90);"])
+        wait_until(lambda: admin.sql("SELECT count(*) FROM pg_stat_activity WHERE "
+                                    "datname='game_ci' AND usename='game_app';") == "1",
+                   "application session not established")
+        expect()
         gate = Pg15PersistentFence(target, admin)
         gate.engage()
         expect(fenced=True)

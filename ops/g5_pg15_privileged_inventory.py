@@ -71,7 +71,8 @@ def inspect_privileged_inventory(
     maintenance connection, closed before returning. Recheck cluster state
     after it closes. A caller still needs continuous external exclusivity.
     """
-    if not isinstance(target, Pg15FenceTarget) or type(fenced) is not bool:
+    if (not isinstance(target, Pg15FenceTarget) or type(fenced) is not bool
+            or target.database in {'template0', 'template1'}):
         raise InventoryError("invalid privileged inventory target")
     db, app, admin = target.database, target.application_role, target.maintenance_role
     # Pg15FenceTarget already validates all identifiers. Do not interpolate
@@ -86,10 +87,12 @@ def inspect_privileged_inventory(
     ))
     role_login = "NOT rolcanlogin" if fenced else "rolcanlogin"
     limit = "datconnlimit=0" if fenced else "datconnlimit<>0"
-    other_sessions = "" if fenced else f" AND NOT (usename='{app}' AND datname='{db}')"
+    other_sessions = "" if fenced else f" AND (usename='{app}' AND datname='{db}') IS NOT TRUE"
     cluster = _select((
         f"current_database()='postgres' AND {identity}",
-        f"EXISTS (SELECT 1 FROM pg_database WHERE datname='{db}' AND {limit}) "
+        f"EXISTS (SELECT 1 FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba "
+        f"WHERE d.datname='{db}' AND {limit} AND NOT d.datistemplate "
+        f"AND d.datallowconn AND r.rolname='{admin}') "
         f"AND NOT EXISTS (SELECT 1 FROM pg_database WHERE datname NOT IN "
         f"('postgres','template0','template1','{db}'))",
         "NOT EXISTS (SELECT 1 FROM pg_roles WHERE "
