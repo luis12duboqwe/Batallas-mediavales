@@ -372,11 +372,18 @@ def plan_adoption(
                 or not isinstance(restore.clone_id, str) or not restore.clone_id
                 or restore.restored is not True or restore.isolated is not True):
             blockers.append("Restore evidence in an isolated clone is only declared or missing.")
+        target_identity = (
+            observations.identity_after
+            if isinstance(observations, HostObservations)
+            and isinstance(observations.identity_after, TargetIdentity)
+            else None
+        )
         if (isinstance(copy, ExternalCopyDeclaration)
-                and isinstance(restore, CloneRestoreDeclaration)):
+                and isinstance(restore, CloneRestoreDeclaration)
+                and target_identity is not None):
             if (copy.sha256 != restore.source_sha256
-                    or copy.database_oid != getattr(observations.identity_after, "database_oid", None)
-                    or restore.clone_id == getattr(observations.identity_after, "volume_id", None)):
+                    or copy.database_oid != target_identity.database_oid
+                    or restore.clone_id == target_identity.volume_id):
                 blockers.append("External copy and isolated-clone evidence do not match the observed target.")
         if (type(declarations.capacity_available_bytes) is not int
                 or type(declarations.capacity_required_bytes) is not int

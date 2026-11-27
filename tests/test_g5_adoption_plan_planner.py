@@ -269,3 +269,10 @@ def test_malformed_typed_collections_and_caddy_identity_fail_closed():
     containers[-1] = replace(containers[-1], container_id="f" * 64)
     result = plan(replace(observations, containers=tuple(containers)), declarations)
     assert any("Caddy identity" in blocker for blocker in result.blockers)
+
+
+def test_missing_observations_with_external_declarations_fail_closed_without_crashing():
+    _, declarations = valid_evidence()
+    result = plan_adoption(None, declarations, now=NOW)
+    assert result.status is PlanStatus.NO_GO_PLAN_ONLY
+    assert any("Typed host observations are missing" in blocker for blocker in result.blockers)
