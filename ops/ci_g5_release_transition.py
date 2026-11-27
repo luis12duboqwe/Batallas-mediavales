@@ -204,6 +204,28 @@ def _hold_supervised_recovery_lease(host_root: str, operation_id: str,
             os.close(lock_fd)
 
 
+@contextmanager
+def _reclosure_guard(port):
+    """Reclose every writer if an authorized reopening or its final checks fail.
+
+    The caller arms the guard only after obtaining the recovery lease and
+    validating the no-mutation evidence. It spans context-manager exit as
+    well as the final receipt, not merely the reopen implementation.
+    """
+    armed = False
+
+    def arm():
+        nonlocal armed
+        armed = True
+
+    try:
+        yield arm
+    except BaseException:
+        if armed:
+            port._restrict_after_failure()
+        raise
+
+
 class EvidenceLog:
     """Append-only, fsync'd, secret-free, hash-chained fixture evidence."""
 
@@ -1520,13 +1542,15 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
                     pass
                 raise
             if scenario == "replace":
+                preserve = True
+                port._restrict_after_failure()
                 manifest = port.store.show()
                 if manifest.phase is not Phase.COMMITTED_WRITERS_ALLOWED or not port.migration_started:
                     preserve = True
                     raise StateError("replacement failure phase or mutation evidence is uncertain") from exc
-                port._restrict_after_failure()
                 evidence.append("replacement_failure_closed",
                                 phase=manifest.phase.value, snapshot_restore=False)
+                preserve = False
                 print("replace: candidate replacement failed after COMMITTED; all writers and edge remain closed")
                 return
             if scenario not in {"backup", "create", "wrong-image", "retry"}:
@@ -1548,50 +1572,57 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
                     if port.store.show() != before_manifest or evidence.previous != before_evidence_tip:
                         raise StateError("unsafe retry changed durable lifecycle evidence")
                     evidence.append("unsafe_retry_rejected")
-                with _hold_supervised_recovery_lease(
-                    port.request.host_root, port.request.operation_id, port.request, evidence,
-                ) as (assert_lease, manifest):
-                    phase = manifest.phase if manifest else None
-                    if phase not in (None, Phase.RECOVERY_REQUIRED):
-                        raise StateError("pre-mutation recovery manifest phase is not eligible")
-                    rows = evidence.verify()
-                    if (port.migration_started
-                            or any(row.get("event") == "migration_started" for row in rows)):
-                        raise StateError("migration evidence blocks previous-release recovery")
-                    current_hash = port._database_hash()
-                    previous_observed = _container(old_backend).get("Image")
-                    recovery_is_authorized(
-                        approved=approved_recovery,
-                        marker_operation=port.request.operation_id,
-                        operation_id=port.request.operation_id,
-                        migration_started=port.migration_started,
-                        baseline_sha256=port.baseline, current_sha256=current_hash,
-                        previous_image_id=images["previous"],
-                        observed_image_id=previous_observed, phase=phase,
-                    )
-                    port.supervised_recover_previous(assert_lease)
-                    evidence.append(
-                        "supervised_previous_release_recovery_complete",
-                        manifest_phase=phase.value if phase else "NO_MANIFEST_BEFORE_BACKUP",
-                        snapshot_restore=False, marker_retained=True,
-                    )
+                with _reclosure_guard(port) as arm_reclosure:
+                    with _hold_supervised_recovery_lease(
+                        port.request.host_root, port.request.operation_id, port.request, evidence,
+                    ) as (assert_lease, manifest):
+                        phase = manifest.phase if manifest else None
+                        if phase not in (None, Phase.RECOVERY_REQUIRED):
+                            raise StateError("pre-mutation recovery manifest phase is not eligible")
+                        rows = evidence.verify()
+                        if (port.migration_started
+                                or any(row.get("event") == "migration_started" for row in rows)):
+                            raise StateError("migration evidence blocks previous-release recovery")
+                        current_hash = port._database_hash()
+                        previous_observed = _container(old_backend).get("Image")
+                        recovery_is_authorized(
+                            approved=approved_recovery,
+                            marker_operation=port.request.operation_id,
+                            operation_id=port.request.operation_id,
+                            migration_started=port.migration_started,
+                            baseline_sha256=port.baseline, current_sha256=current_hash,
+                            previous_image_id=images["previous"],
+                            observed_image_id=previous_observed, phase=phase,
+                        )
+                        arm_reclosure()
+                        port.supervised_recover_previous(assert_lease)
+                        evidence.append(
+                            "supervised_previous_release_recovery_complete",
+                            manifest_phase=phase.value if phase else "NO_MANIFEST_BEFORE_BACKUP",
+                            snapshot_restore=False, marker_retained=True,
+                        )
+                        assert_lease()
                 print(f"{scenario}: supervised previous release recovery; marker retained; no snapshot restore")
                 return
             except BaseException:
                 preserve = True
                 raise
-        if (scenario != "success" or result.phase is not Phase.COMMITTED_WRITERS_ALLOWED
-                or port.store.show() != result or not port.player_worker_verified):
-            preserve = True
-            raise StateError("release transition did not meet all success assertions")
-        evidence.append("transition_complete", phase=result.phase.value,
-                        previous_sha=PREVIOUS_SHA, candidate_sha=candidate_sha,
-                        previous_image_id=images["previous"],
-                        candidate_image_id=images["candidate"],
-                        base_image_digest=base_reference,
-                        volume=volume, network_id=project_network_id)
-        print("success: distinct 0019/0020 releases; HTTP, authenticated Socket.IO, version, "
-              "candidate write and worker persistence verified")
+        preserve = True
+        with _reclosure_guard(port) as arm_reclosure:
+            arm_reclosure()
+            if (scenario != "success" or result.phase is not Phase.COMMITTED_WRITERS_ALLOWED
+                    or port.store.show() != result or not port.player_worker_verified):
+                preserve = True
+                raise StateError("release transition did not meet all success assertions")
+            evidence.append("transition_complete", phase=result.phase.value,
+                            previous_sha=PREVIOUS_SHA, candidate_sha=candidate_sha,
+                            previous_image_id=images["previous"],
+                            candidate_image_id=images["candidate"],
+                            base_image_digest=base_reference,
+                            volume=volume, network_id=project_network_id)
+            print("success: distinct 0019/0020 releases; HTTP, authenticated Socket.IO, version, "
+                  "candidate write and worker persistence verified")
+        preserve = False
     finally:
         try:
             if preserve:

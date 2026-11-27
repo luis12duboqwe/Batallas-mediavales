@@ -153,3 +153,7 @@ cierra #174 y no se debe mergear como autorización de despliegue.
 ## Revisión de responsable técnica
 
 Se reemplaza el SHA histórico por el padre exacto de 0020, `eafc5bbd5fdc9caad698db48cbb8ad80df942f0e`, que conserva 0019 e incorpora la corrección de importación del worker #140 (`46aa895936ed2f42bd42062c4c44b4089fbadfa4`). Se exige ejecución real de una cola en la release anterior antes del cutover y otra tras recuperar esa misma release; ambos escritores deben estar activos. Los resultados previos del sandbox no certifican este cambio. Se integra la compuerta oficial CI, sin eliminar las anteriores. El fallo de arranque del worker del SHA anterior no se oculta con un wrapper ni se cambia su código histórico.
+
+## CI oficial y cierre de evidencias
+
+Validation 46022219240 y journeys 46022219284 aprobaron en HEAD 42a9b196: los siete escenarios se ejecutaron, incluido procesamiento de colas histórico y candidato. La revisión posterior detectó una última ventana de error entre reapertura y salida del lease/recibo final. Se amplía la protección a toda la fase de cierre de evidencia, incluyendo verificación final de candidata tras COMMITTED; los fallos preservan el fixture y reintentan restricciones. En replace se preserva antes de inspeccionar el estado y solo se limpia tras prueba positiva. Nuevas regresiones de recibo, salida del lease, prueba postcommit y contención previa a autorización. Nueva CI/revisión obligatorias.

@@ -487,3 +487,34 @@ def test_ci_gate_and_recovery_flag_are_required_before_fixture_creation(tmp_path
     workspace.chmod(0o700)
     assert main(["create", str(workspace)]) == 2
     assert not list(workspace.iterdir())
+
+
+@pytest.mark.parametrize("failure_point", ["receipt", "lease_exit", "postcommit_proof"])
+def test_final_reopening_failure_recloses_all_writers(failure_point):
+    from contextlib import contextmanager
+    port = SimpleNamespace(_restrict_after_failure=Mock())
+
+    @contextmanager
+    def lease():
+        yield
+        if failure_point == "lease_exit":
+            raise StateError("final lease drift")
+
+    with pytest.raises(StateError):
+        with transition._reclosure_guard(port) as arm:
+            with lease():
+                arm()
+                if failure_point != "lease_exit":
+                    raise StateError("final proof or receipt failed")
+    port._restrict_after_failure.assert_called_once_with()
+
+
+def test_reclosure_guard_does_not_mutate_before_authorization_or_on_success():
+    port = SimpleNamespace(_restrict_after_failure=Mock())
+    with pytest.raises(StateError):
+        with transition._reclosure_guard(port):
+            raise StateError("lease contention before authorization")
+    port._restrict_after_failure.assert_not_called()
+    with transition._reclosure_guard(port) as arm:
+        arm()
+    port._restrict_after_failure.assert_not_called()
