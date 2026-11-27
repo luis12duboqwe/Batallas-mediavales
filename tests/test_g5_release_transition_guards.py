@@ -556,3 +556,33 @@ def test_export_uses_verified_canonical_records(tmp_path):
         assert (tmp_path / "g5-release-transition-success-fixture.jsonl").read_bytes() == log.path.read_bytes()
     finally:
         log.close()
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+def test_privileged_inventory_gate_refuses_any_observed_blocker(monkeypatch, fenced):
+    from ops.g5_pg15_privileged_inventory import InventoryObservation
+    session, evidence = Mock(), Mock()
+    observed = Mock(return_value=InventoryObservation(("no_parameter_grants",)))
+    monkeypatch.setattr(transition, "inspect_privileged_inventory", observed)
+    with pytest.raises(transition.PrivilegedInventoryBlocked) as error:
+        transition._require_inventory(session, evidence, fenced=fenced)
+    assert error.value.blockers == ("no_parameter_grants",)
+    assert observed.call_args.kwargs == {"fenced": fenced}
+    evidence.append.assert_called_once_with("privileged_inventory_observed",
+                                           fenced=fenced, blockers=["no_parameter_grants"])
+
+
+def test_privileged_inventory_gate_refuses_uncertain_observation(monkeypatch):
+    monkeypatch.setattr(transition, "inspect_privileged_inventory", Mock(return_value=True))
+    with pytest.raises(StateError, match="invalid privileged inventory"):
+        transition._require_inventory(Mock(), Mock(), fenced=True)
+
+
+def test_privileged_inventory_gate_accepts_clean_observation(monkeypatch):
+    from ops.g5_pg15_privileged_inventory import InventoryObservation
+    monkeypatch.setattr(transition, "inspect_privileged_inventory",
+                        Mock(return_value=InventoryObservation(())))
+    evidence = Mock()
+    transition._require_inventory(Mock(), evidence, fenced=True)
+    evidence.append.assert_called_once_with("privileged_inventory_observed",
+                                           fenced=True, blockers=[])
