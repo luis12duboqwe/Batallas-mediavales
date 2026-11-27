@@ -36,6 +36,8 @@ from ops.g5_activation_fence import (
 from ops.g5_docker_writer_fence import DockerWriterFence
 from ops.g5_edge_admission import EdgeAdmission
 from ops.g5_pg15_writer_fence import Pg15FenceTarget, Pg15PersistentFence
+from ops.g5_pg15_privileged_inventory import inspect_privileged_inventory, InventoryObservation
+from ops.g5_incident_inspect import inspect_incident, Disposition
 
 
 PREVIOUS_SHA = "eafc5bbd5fdc9caad698db48cbb8ad80df942f0e"
@@ -43,9 +45,41 @@ PREVIOUS_REVISION = "0019_privacy_active_unique"
 _SHA = re.compile(r"[0-9a-f]{40}")
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
-_SCENARIOS = {"success", "pull", "backup", "create", "wrong-image", "retry", "replace"}
+_SCENARIOS = {"success", "pull", "backup", "create", "wrong-image", "retry", "replace", "privileged-drift", "mixed-drift"}
 _TEST_SECRET = "disposable-g5-transition-ci-key-not-production-2026"
 _MAX_EVIDENCE_BYTES = 4 * 1024 * 1024
+
+
+class PrivilegedInventoryBlocked(StateError):
+    """A verified dedicated-cluster observation contains blockers."""
+
+    def __init__(self, blockers):
+        super().__init__("privileged PostgreSQL inventory blocked transition")
+        self.blockers = blockers
+
+
+class TransitionInventorySession(Admin):
+    """Fresh read-only PG15 sessions in the disposable fixture only."""
+
+    def query(self, database, statement):
+        return run(["exec", "-e", "PGOPTIONS=-c default_transaction_read_only=on",
+                    self.container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
+                    "-U", ADMIN, "-d", database, "-Atqc", statement]).strip()
+
+
+def _require_inventory(session, evidence, *, fenced, reopening_limit=None):
+    kwargs = {"fenced": fenced}
+    if reopening_limit is not None:
+        kwargs["reopening_limit"] = reopening_limit
+    observation = inspect_privileged_inventory(
+        Pg15FenceTarget(DATABASE, APP, ADMIN), session, **kwargs,
+    )
+    if type(observation) is not InventoryObservation or type(observation.blockers) is not tuple:
+        raise StateError("invalid privileged inventory evidence")
+    evidence.append("privileged_inventory_observed", **kwargs,
+                    blockers=list(observation.blockers))
+    if observation.blockers:
+        raise PrivilegedInventoryBlocked(observation.blockers)
 
 
 class ScenarioFault(StateError):
@@ -624,7 +658,7 @@ class TransitionPort:
         self.candidate_id, self.candidate_worker = candidate_id, candidate_worker
         self.candidate_image_ids = {}
         self.images, self.scenario, self.baseline = images, scenario, baseline
-        self.admin = Admin(database)
+        self.admin = TransitionInventorySession(database)
         self.edge = EdgeAdmission(str(root / "host"), project, nginx, run, probe)
         self.sql = Pg15PersistentFence(Pg15FenceTarget(DATABASE, APP, ADMIN), self.admin)
         self.docker = DockerWriterFence(project, run)
@@ -710,6 +744,7 @@ class TransitionPort:
         self.sql.assert_closed()
         self.docker.assert_closed()
         self._check_old_stopped()
+        _require_inventory(self.admin, self.evidence, fenced=True)
         return True
 
     def capture_snapshot(self):
@@ -736,6 +771,11 @@ class TransitionPort:
         finally:
             os.close(fd)
         self.evidence.append("backup_complete", sha256=snapshot_hash)
+        if self.scenario == "privileged-drift":
+            # Deliberate ACL drift AFTER the snapshot, before PREPARED.
+            # No setting or data is changed, and no new session is opened.
+            self.admin.sql(f"GRANT ALTER SYSTEM ON PARAMETER shared_preload_libraries TO {APP};")
+            self.evidence.append("privileged_drift_injected")
         return BackupReceipt(str(backup_path), snapshot_hash)
 
     def verify_continuity(self, identity):
@@ -768,6 +808,7 @@ class TransitionPort:
         self.sql.assert_closed()
         self._oneshot(self.images["candidate"], "python", "-m", "app.seed", maintenance_url)
         self.sql.assert_closed()
+        _require_inventory(self.admin, self.evidence, fenced=True)
         self.evidence.append("migration_and_seed_complete", revision=CANDIDATE)
 
     def _create_candidate(self, image_id):
@@ -882,7 +923,21 @@ class TransitionPort:
         self.admin.execute_committed(
             f'ALTER DATABASE "{DATABASE}" CONNECTION LIMIT {self.original_db.connection_limit};'
         )
+        if self.scenario == "mixed-drift":
+            self.admin.sql(f"GRANT ALTER SYSTEM ON PARAMETER shared_preload_libraries TO {APP};")
+            self.evidence.append("mixed_drift_injected")
+        try:
+            _require_inventory(self.admin, self.evidence, fenced=True,
+                               reopening_limit=self.original_db.connection_limit)
+        except PrivilegedInventoryBlocked:
+            if (self.admin.sql(f"SELECT rolcanlogin FROM pg_roles WHERE rolname='{APP}';") != "f"
+                    or self.admin.sql(f"SELECT datconnlimit FROM pg_database WHERE datname='{DATABASE}';")
+                    != str(self.original_db.connection_limit)):
+                raise StateError("mixed reopening barrier identity changed") from None
+            self.evidence.append("mixed_inventory_blocked_before_login")
+            raise
         self.admin.execute_committed(f'ALTER ROLE "{APP}" LOGIN;')
+        _require_inventory(self.admin, self.evidence, fenced=False)
         if self.scenario == "replace":
             _inject_scenario_fault(
                 self.evidence, "replace", "candidate-replacement",
@@ -901,6 +956,7 @@ class TransitionPort:
         self.candidate_address = _container_ip(self.candidate_id, self.project)
         self._check_old_stopped()
         self._route_nginx_to_candidate()
+        _require_inventory(self.admin, self.evidence, fenced=False)
         self._open_edge()
         _api_version(self.images["candidate"], self.project, self.nginx_address, 401)
         self.evidence.append(
@@ -911,6 +967,7 @@ class TransitionPort:
         _app_call(self.images["candidate"], self.project, self.nginx_address, "socket",
                   {"token": self.access_token, "user": self.user_id})
         self._prove_player_and_worker()
+        _require_inventory(self.admin, self.evidence, fenced=False)
         self.evidence.append("candidate_http_socket_worker_verified")
 
     def _candidate_container(self, cid, *, stopped):
@@ -1067,6 +1124,8 @@ class TransitionPort:
         ) != ("t" if role_open else "f"):
             raise StateError("application role fence changed during recovery")
         self.edge.assert_closed()
+        if role_open and not database_open:
+            raise StateError("unsupported recovery SQL barrier order")
         if self.admin.sql("SELECT version_num FROM alembic_version;", DATABASE) != PREVIOUS_REVISION:
             raise StateError("previous schema revision is not positively established")
         self._assert_persistent_resources()
@@ -1091,6 +1150,9 @@ class TransitionPort:
                         or row.get("State", {}).get("Running") is not False
                         or row.get("HostConfig", {}).get("RestartPolicy", {}).get("Name") != "no"):
                     raise StateError("candidate writer identity is uncertain during recovery")
+        _require_inventory(self.admin, self.evidence, fenced=not role_open,
+                           reopening_limit=self.original_db.connection_limit
+                           if database_open and not role_open else None)
         assert_lease()
 
     def supervised_recover_previous(self, assert_lease):
@@ -1174,6 +1236,7 @@ class TransitionPort:
             if not all(_container(cid)["State"].get("Running") is True
                        for cid in (self.previous, self.previous_worker)):
                 raise StateError("recovered historical writer did not remain running")
+            _require_inventory(self.admin, self.evidence, fenced=False)
             self.evidence.append("previous_worker_queue_completed")
             assert_lease()
             if self.release_receipt.exists():
@@ -1384,6 +1447,7 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
         admin = Admin(database)
         admin.sql(f"CREATE ROLE {APP} LOGIN PASSWORD '{APP_PASSWORD}';")
         admin.sql(f"CREATE DATABASE {DATABASE};")
+        admin.sql("REVOKE CONNECT ON DATABASE postgres, template1 FROM PUBLIC;")
         database_address = _container_ip(database, network)
         maintenance_url = (
             f"postgresql+psycopg://{ADMIN}:{ADMIN_PASSWORD}@{database_address}:5432/{DATABASE}"
@@ -1490,6 +1554,7 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
             database_sha256=baseline_hash,
         )
 
+        _require_inventory(TransitionInventorySession(database), evidence, fenced=False)
         if scenario == "pull":
             try:
                 _inject_scenario_fault(evidence, "pull", "candidate-acquisition")
@@ -1549,6 +1614,45 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
             result = _execute_candidate_lifecycle(G5Lifecycle(), port)
         except BaseException as exc:
             preserve = True
+            if scenario == "privileged-drift" and isinstance(exc, PrivilegedInventoryBlocked):
+                rows = evidence.verify()
+                if (exc.blockers != ("no_parameter_grants",)
+                        or not any(row.get("event") == "privileged_drift_injected" for row in rows)
+                        or not any(row.get("event") == "backup_complete" for row in rows)
+                        or port.migration_started
+                        or any(row.get("event") == "migration_started" for row in rows)):
+                    raise StateError("unexpected privileged drift failure") from exc
+                port._restrict_after_failure()
+                incident = inspect_incident(port.request.host_root)
+                if (incident.disposition is not Disposition.PREPARATION_UNCERTAIN
+                        or incident.operation_id != port.request.operation_id
+                        or incident.observed_phase is not None
+                        or port._database_hash() != port.baseline
+                        or port.admin.sql("SELECT version_num FROM alembic_version;", DATABASE)
+                        != PREVIOUS_REVISION):
+                    raise StateError("privileged drift incident evidence is uncertain") from exc
+                evidence.append("privileged_drift_blocked_before_prepared",
+                                blockers=list(exc.blockers), snapshot_restore=False,
+                                migration_started=False, marker_retained=True)
+                preserve = False
+                print("privileged-drift: post-snapshot ACL drift blocked PREPARED and migration; app fence retained")
+                return
+            if scenario == "mixed-drift" and isinstance(exc, PrivilegedInventoryBlocked):
+                rows = evidence.verify()
+                if (exc.blockers != ("no_parameter_grants",)
+                        or not any(row.get("event") == "mixed_drift_injected" for row in rows)
+                        or not any(row.get("event") == "mixed_inventory_blocked_before_login" for row in rows)
+                        or not port.migration_started
+                        or port.store.show().phase is not Phase.COMMITTED_WRITERS_ALLOWED):
+                    raise StateError("unexpected mixed reopening failure") from exc
+                port._restrict_after_failure()
+                if port.admin.sql("SELECT version_num FROM alembic_version;", DATABASE) != CANDIDATE:
+                    raise StateError("committed candidate schema changed") from exc
+                evidence.append("mixed_drift_blocked_before_login", snapshot_restore=False,
+                                phase=Phase.COMMITTED_WRITERS_ALLOWED.value)
+                preserve = False
+                print("mixed-drift: privileged ACL drift blocked LOGIN after COMMITTED; writers and edge closed")
+                return
             if not _scenario_fault_reached(evidence, exc, scenario):
                 preserve = True
                 try:
@@ -1696,7 +1800,7 @@ def main(argv=None):
     if len(argv) not in (2, 3) or argv[0] not in _SCENARIOS:
         print(
             "usage: python -m ops.ci_g5_release_transition "
-            "{success,pull,backup,create,wrong-image,retry,replace} "
+            "{success,pull,backup,create,wrong-image,retry,replace,privileged-drift,mixed-drift} "
             "PRIVATE_WORKSPACE [--approve-previous-recovery]",
             file=sys.stderr,
         )

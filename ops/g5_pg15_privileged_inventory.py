@@ -61,20 +61,26 @@ def _select(checks):
 
 
 def inspect_privileged_inventory(
-    target: Pg15FenceTarget, session: ReadOnlySession, *, fenced: bool
+    target: Pg15FenceTarget, session: ReadOnlySession, *, fenced: bool,
+    reopening_limit: int | None = None,
 ) -> InventoryObservation:
     """Reject topology outside a deliberately narrow dedicated-cluster policy.
 
     The maintenance session must use a read-only transaction. In the unfenced
     observation only runtime app sessions in the target DB are admitted; in
-    the fenced observation no other client sessions are admitted. All
+    the fenced observation no other client sessions are admitted. A mixed
+    reopening observation retains NOLOGIN and zero client sessions, while
+    requiring the exact previously captured nonzero database limit. All
     unexpected user roles, even NOLOGIN, and explicit role grants involving
     user roles are blockers. The target catalog inspection uses one temporary
     maintenance connection, closed before returning. Recheck cluster state
     after it closes. A caller still needs continuous external exclusivity.
     """
     if (not isinstance(target, Pg15FenceTarget) or type(fenced) is not bool
-            or target.database in {'template0', 'template1'}):
+            or target.database in {'template0', 'template1'}
+            or (reopening_limit is not None and (
+                fenced is not True or type(reopening_limit) is not int
+                or not -1 <= reopening_limit <= 2147483647 or reopening_limit == 0))):
         raise InventoryError("invalid privileged inventory target")
     db, app, admin = target.database, target.application_role, target.maintenance_role
     # Pg15FenceTarget already validates all identifiers. Do not interpolate
@@ -88,7 +94,8 @@ def inspect_privileged_inventory(
         "shared_preload_libraries", "session_preload_libraries", "local_preload_libraries"
     ))
     role_login = "NOT rolcanlogin" if fenced else "rolcanlogin"
-    limit = "datconnlimit=0" if fenced else "datconnlimit<>0"
+    limit = (f"datconnlimit={reopening_limit}" if reopening_limit is not None
+             else "datconnlimit=0" if fenced else "datconnlimit<>0")
     other_sessions = "" if fenced else f" AND (usename='{app}' AND datname='{db}') IS NOT TRUE"
     cluster = _select((
         f"current_database()='postgres' AND {identity}",
