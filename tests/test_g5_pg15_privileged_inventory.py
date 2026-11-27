@@ -124,3 +124,24 @@ def test_raw_catalog_acl_and_ownership_are_checked_independent_of_effective_priv
     assert "aclexplode(c.relacl)" in statement
     assert "aclexplode(col.attacl)" in statement
     assert "p.proowner=(SELECT oid FROM pg_roles WHERE rolname='game_app') OR (p.proname" in statement
+
+
+@pytest.mark.parametrize("limit", [-1, 1, 35])
+def test_mixed_inventory_requires_exact_limit_no_login_and_no_clients(limit):
+    reader = Reader(flags(CLUSTER_CHECKS), flags(DATABASE_CHECKS),
+                    flags(DATABASE_CHECKS), flags(CLUSTER_CHECKS))
+    assert not inspect_privileged_inventory(TARGET, reader, fenced=True,
+                                            reopening_limit=limit).blockers
+    for _, sql in (reader.calls[0], reader.calls[-1]):
+        assert f"datconnlimit={limit}" in sql
+        assert "NOT rolcanlogin" in sql
+        assert "(usename='game_app' AND datname='game_ci') IS NOT TRUE" not in sql
+
+
+@pytest.mark.parametrize("fenced,limit", [(True, 0), (True, -2), (True, True),
+                                         (True, "5"), (True, 2**31), (False, -1)])
+def test_mixed_inventory_rejects_invalid_expectations(fenced, limit):
+    reader = Reader()
+    with pytest.raises(InventoryError):
+        inspect_privileged_inventory(TARGET, reader, fenced=fenced, reopening_limit=limit)
+    assert not reader.calls
