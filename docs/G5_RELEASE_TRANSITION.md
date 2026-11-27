@@ -47,7 +47,9 @@ python -m ops.ci_g5_release_transition replace "$RUNNER_TEMP/g5-transition"
 Los casos de fallo son puntos de inyección deterministas, no cortes de red
 externos. `pull` inyecta un fallo de adquisición antes de cerrar el servicio
 previo; `backup` falla después de calcular una huella de solo lectura y antes
-de guardar el snapshot; `create` deja un contenedor candidato creado y detenido
+de guardar el snapshot; esa huella normaliza únicamente los tokens aleatorios
+de integridad del dump SQL y el archivo de respaldo conserva su hash propio.
+`create` deja un contenedor candidato creado y detenido
 antes de fallar la creación del worker; `wrong-image` intenta usar la imagen
 previa como candidata; `retry` repite una operación cuyo marcador ya existe;
 `replace` falla después de COMMITTED y exige mantener las barreras cerradas.

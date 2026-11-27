@@ -8,10 +8,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from ops import ci_g5_release_transition as transition
 from ops.ci_g5_release_transition import (
     EvidenceLog,
     PREVIOUS_SHA,
     TransitionPort,
+    _database_fingerprint,
+    _remove_fixture_image,
     image_provenance,
     main,
     recovery_is_authorized,
@@ -147,6 +150,50 @@ def test_nginx_route_accepts_candidate_reusing_previous_private_address(tmp_path
     assert [row["event"] for row in evidence.verify()] == [
         "nginx_candidate_route_address_reused",
     ]
+
+
+def test_database_fingerprint_normalizes_pg_dump_stream_tokens(monkeypatch):
+    template = (
+        b"--\n-- PostgreSQL database dump\n"
+        b"\\restrict first-token\nCREATE TABLE fixture (id integer);\n"
+        b"\\unrestrict first-token\n"
+    )
+    monkeypatch.setattr(transition, "binary", lambda _args: template)
+    first = _database_fingerprint("container")
+    monkeypatch.setattr(
+        transition, "binary",
+        lambda _args: template.replace(b"first-token", b"second-token"),
+    )
+    assert _database_fingerprint("container") == first
+
+    changed = template.replace(b"fixture", b"changed")
+    monkeypatch.setattr(transition, "binary", lambda _args: changed)
+    assert _database_fingerprint("container") != first
+
+
+def test_fixture_image_cleanup_tolerates_absent_tag_and_checks_provenance(monkeypatch):
+    row = {
+        "Id": CANDIDATE_IMAGE,
+        "Config": {"Labels": {
+            "org.opencontainers.image.revision": CANDIDATE_SHA,
+            "medievol.g5.source-sha": CANDIDATE_SHA,
+            "medievol.g5.scope": "github-ci-disposable",
+        }},
+    }
+    removed = []
+    monkeypatch.setattr(transition, "probe", lambda _args: (
+        1, "[]\n", "Error response from daemon: No such image: candidate:ci",
+    ))
+    _remove_fixture_image("candidate:ci", CANDIDATE_SHA)
+
+    monkeypatch.setattr(transition, "probe", lambda _args: (0, json.dumps([row]), ""))
+    monkeypatch.setattr(transition, "run", lambda args: removed.append(args) or "")
+    _remove_fixture_image("candidate:ci", CANDIDATE_SHA)
+    assert removed == [["image", "rm", "candidate:ci"]]
+
+    with pytest.raises(StateError):
+        _remove_fixture_image("candidate:ci", "d" * 40)
+    assert removed == [["image", "rm", "candidate:ci"]]
 
 
 def test_ci_gate_and_recovery_flag_are_required_before_fixture_creation(tmp_path, monkeypatch):

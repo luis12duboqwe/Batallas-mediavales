@@ -241,11 +241,47 @@ def _container_ip(identity: str, network: str) -> str:
         raise StateError("private fixture container address unavailable") from None
 
 
+def _database_fingerprint(database: str) -> str:
+    payload = binary([
+        "exec", database, "pg_dump", "-U", ADMIN, "-d", DATABASE, "-Fp",
+    ])
+    if not payload.startswith(b"--\n-- PostgreSQL database dump\n"):
+        raise StateError("isolated PostgreSQL fingerprint is unavailable")
+    normalized, count = re.subn(
+        rb"(?m)^(\\(?:un)?restrict) [A-Za-z0-9_+/=-]+$",
+        lambda match: match.group(1) + b" normalized",
+        payload,
+    )
+    if count != 2:
+        raise StateError("isolated PostgreSQL fingerprint metadata is ambiguous")
+    return hashlib.sha256(normalized).hexdigest()
+
+
 def _image(image: str) -> dict:
     rows = json.loads(run(["image", "inspect", image]))
     if not isinstance(rows, list) or len(rows) != 1:
         raise StateError("image reference is ambiguous")
     return rows[0]
+
+
+def _remove_fixture_image(tag: str, expected_sha: str) -> None:
+    code, stdout, stderr = probe(["image", "inspect", tag])
+    if code != 0:
+        try:
+            absent = json.loads(stdout) == []
+        except (ValueError, TypeError):
+            absent = False
+        if absent and "No such image:" in stderr:
+            return
+        raise StateError("fixture image cleanup identity is unavailable")
+    try:
+        rows = json.loads(stdout)
+    except (ValueError, TypeError):
+        raise StateError("fixture image cleanup identity is invalid") from None
+    if not isinstance(rows, list) or len(rows) != 1:
+        raise StateError("fixture image cleanup identity is ambiguous")
+    image_provenance(rows[0], expected_sha)
+    run(["image", "rm", tag])
 
 
 def _build_image(repo: Path, sha: str, tag: str, context: Path) -> tuple[str, str]:
@@ -379,11 +415,7 @@ class TransitionPort:
                 raise StateError("previous release was restarted or changed")
 
     def _database_hash(self) -> str:
-        payload = binary(["exec", self.database, "pg_dump", "-U", ADMIN,
-                          "-d", DATABASE, "-Fc"])
-        if not payload.startswith(b"PGDMP"):
-            raise StateError("isolated PostgreSQL dump verification failed")
-        return hashlib.sha256(payload).hexdigest()
+        return _database_fingerprint(self.database)
 
     def close_admission(self):
         self.evidence.append("edge_close_started")
@@ -414,9 +446,9 @@ class TransitionPort:
                           "-d", DATABASE, "-Fc"])
         if not payload.startswith(b"PGDMP"):
             raise StateError("isolated PostgreSQL snapshot missing")
-        digest = hashlib.sha256(payload).hexdigest()
-        self.baseline = digest
-        self.evidence.append("pre_migration_database_fingerprint", sha256=digest)
+        snapshot_hash = hashlib.sha256(payload).hexdigest()
+        self.baseline = self._database_hash()
+        self.evidence.append("pre_migration_database_fingerprint", sha256=self.baseline)
         if self.scenario == "backup":
             raise StateError("injected snapshot failure before migration")
         backup_dir = self.root / "backups"
@@ -431,8 +463,8 @@ class TransitionPort:
             os.fsync(fd)
         finally:
             os.close(fd)
-        self.evidence.append("backup_complete", sha256=digest)
-        return BackupReceipt(str(backup_path), digest)
+        self.evidence.append("backup_complete", sha256=snapshot_hash)
+        return BackupReceipt(str(backup_path), snapshot_hash)
 
     def verify_continuity(self, identity):
         if (identity.compose_project != self.project or identity.postgres_db != DATABASE):
@@ -498,9 +530,10 @@ class TransitionPort:
                 raise StateError("candidate container was not created stopped with exact image identity")
             if service == "backend":
                 self.candidate_id = created
-                if self.scenario == "create":
+                if self.scenario in {"create", "retry"}:
                     self.evidence.append("candidate_container_create_failed",
-                                         created_stopped=True, migration_started=False)
+                                         scenario=self.scenario, created_stopped=True,
+                                         migration_started=False)
                     raise StateError("injected candidate worker creation failure")
             else:
                 self.candidate_worker = created
@@ -892,7 +925,7 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
         _local_docker(["pull", "python:3.11-slim"])
         _local_docker(["pull", "postgres:15-alpine"])
         _local_docker(["pull", "nginx:1.28-alpine"])
-        image_tags.append(previous_tag)
+        image_tags.append((previous_tag, PREVIOUS_SHA))
         with _worktree(repo, root, PREVIOUS_SHA) as old_tree:
             previous_image, base_digest = _build_image(
                 repo, PREVIOUS_SHA, previous_tag,
@@ -1006,11 +1039,7 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
             raise StateError("previous release login did not issue an access token")
         _app_call(previous_image, network, nginx_address, "socket",
                   {"token": access, "user": user_id})
-        baseline = binary(["exec", database, "pg_dump", "-U", ADMIN,
-                           "-d", DATABASE, "-Fc"])
-        if not baseline.startswith(b"PGDMP"):
-            raise StateError("pre-transition database fingerprint unavailable")
-        baseline_hash = hashlib.sha256(baseline).hexdigest()
+        baseline_hash = _database_fingerprint(database)
         evidence.append(
             "previous_release_ready", previous_sha=PREVIOUS_SHA,
             previous_image_id=previous_image,
@@ -1033,12 +1062,11 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
             return
 
         with _worktree(repo, root, candidate_sha) as current_tree:
-            image_tags.append(candidate_tag)
+            image_tags.append((candidate_tag, candidate_sha))
             candidate_image, candidate_base_digest = _build_image(
                 repo, candidate_sha, candidate_tag,
                 current_tree / "batalla_medieval_backend",
             )
-        image_tags.append(candidate_tag)
         release_pair(PREVIOUS_SHA, candidate_sha, previous_image, candidate_image)
         evidence.append(
             "candidate_image_provenance", previous_sha=PREVIOUS_SHA,
@@ -1150,8 +1178,8 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
                 cleanup_fixture(project)
                 for volume in volumes:
                     run(["volume", "rm", volume])
-                for tag in image_tags:
-                    run(["image", "rm", tag])
+                for tag, sha in image_tags:
+                    _remove_fixture_image(tag, sha)
                 shutil.rmtree(root)
             except BaseException:
                 print(f"fixture cleanup uncertain; project={project}; root={root}", file=sys.stderr)
