@@ -176,7 +176,11 @@ def inspect_privileged_inventory(
         "OR (c.relname='pg_settings' AND EXISTS (SELECT 1 FROM aclexplode(c.relacl) a "
         "WHERE a.privilege_type='UPDATE' "
         f"AND (a.grantee=(SELECT oid FROM pg_roles WHERE rolname='{app}') "
-        "OR (a.grantee=0 AND a.is_grantable))))))",
+        "OR (a.grantee=0 AND a.is_grantable)))) "
+        "OR (c.relname='pg_settings' AND EXISTS (SELECT 1 FROM pg_attribute col "
+        "CROSS JOIN LATERAL aclexplode(col.attacl) a WHERE col.attrelid=c.oid "
+        "AND col.attnum>0 AND NOT col.attisdropped AND a.privilege_type='UPDATE' "
+        f"AND a.grantee IN (0,(SELECT oid FROM pg_roles WHERE rolname='{app}'))))))",
     ))
     first = _flags(session, "postgres", cluster, CLUSTER_CHECKS)
     # Do not connect to an untrusted or already ambiguous target.

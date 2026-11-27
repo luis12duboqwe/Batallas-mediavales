@@ -67,7 +67,7 @@ def main():
             ("GRANT pg_write_all_data TO game_app;", "REVOKE pg_write_all_data FROM game_app;",
              "no_role_membership", "postgres"),
             ("CREATE DATABASE unrelated_ci;", "DROP DATABASE unrelated_ci;",
-             "dedicated_databases", "postgres"),
+             ("dedicated_databases", "no_other_database_access"), "postgres"),
             ("ALTER DATABASE game_ci OWNER TO game_app;", "ALTER DATABASE game_ci OWNER TO postgres;",
              "dedicated_databases", "postgres"),
             ("SELECT pg_create_physical_replication_slot('g5_probe');",
@@ -89,6 +89,9 @@ def main():
              "no_sensitive_builtin_execute", "postgres"),
             ("GRANT UPDATE ON pg_catalog.pg_settings TO game_app;",
              "REVOKE UPDATE ON pg_catalog.pg_settings FROM game_app;",
+             "no_sensitive_catalog_access", "game_ci"),
+            ("GRANT UPDATE (setting) ON pg_catalog.pg_settings TO PUBLIC;",
+             "REVOKE UPDATE (setting) ON pg_catalog.pg_settings FROM PUBLIC;",
              "no_sensitive_catalog_access", "game_ci"),
             ("GRANT UPDATE ON pg_catalog.pg_authid TO game_app;",
              "REVOKE UPDATE ON pg_catalog.pg_authid FROM game_app;",
@@ -123,7 +126,7 @@ def main():
              "ALTER ROLE game_app RESET session_preload_libraries;", "no_preload_overrides", "postgres"),
         ):
             admin.sql(create, db)
-            expect(blocker)
+            expect(*(blocker if isinstance(blocker, tuple) else (blocker,)))
             admin.sql(remove, db)
             expect()
 
