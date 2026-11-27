@@ -31,7 +31,7 @@ from ops.g5_cutover_prepare import G5Preparation
 from ops.g5_cutover_prepare import BackupReceipt, PreparationRequest
 from ops.g5_cutover_state import CutoverStore, Phase, StateError
 from ops.g5_activation_fence import (
-    DEPLOY_LOCK, MARKER, _check_lock, _check_marker,
+    DEPLOY_LOCK, MARKER, _check_lock, _check_marker, arm_cutover,
 )
 from ops.g5_docker_writer_fence import DockerWriterFence
 from ops.g5_edge_admission import EdgeAdmission
@@ -51,18 +51,20 @@ _MAX_EVIDENCE_BYTES = 4 * 1024 * 1024
 class ScenarioFault(StateError):
     """A narrowly injected, explicitly evidenced rehearsal failure."""
 
-    def __init__(self, scenario: str, point: str):
+    def __init__(self, scenario: str, point: str, migration_started: bool = False):
         super().__init__("injected G5 rehearsal failure")
         self.scenario = scenario
         self.point = point
+        self.migration_started = migration_started
 
 
-def _inject_scenario_fault(evidence, scenario: str, point: str) -> None:
+def _inject_scenario_fault(evidence, scenario: str, point: str,
+                           *, migration_started: bool = False) -> None:
     evidence.append(
         "scenario_fault_reached", scenario=scenario, point=point,
-        migration_started=False,
+        migration_started=migration_started,
     )
-    raise ScenarioFault(scenario, point)
+    raise ScenarioFault(scenario, point, migration_started)
 
 
 def _scenario_fault_reached(evidence, fault: BaseException, scenario: str) -> bool:
@@ -73,7 +75,7 @@ def _scenario_fault_reached(evidence, fault: BaseException, scenario: str) -> bo
         and row.get("fields") == {
             "scenario": fault.scenario,
             "point": fault.point,
-            "migration_started": False,
+            "migration_started": fault.migration_started,
         }
         for row in evidence.verify()
     )
@@ -588,6 +590,7 @@ class TransitionPort:
         self.nginx_address = _container_ip(nginx, project)
         self.previous_address = _container_ip(previous, project)
         self.candidate_id, self.candidate_worker = candidate_id, candidate_worker
+        self.candidate_image_ids = {}
         self.images, self.scenario, self.baseline = images, scenario, baseline
         self.admin = Admin(database)
         self.edge = EdgeAdmission(str(root / "host"), project, nginx, run, probe)
@@ -764,10 +767,12 @@ class TransitionPort:
                 raise StateError("candidate container was not created stopped with exact image identity")
             if service == "backend":
                 self.candidate_id = created
+                self.candidate_image_ids[created] = image_id
                 if self.scenario in {"create", "retry"}:
                     _inject_scenario_fault(self.evidence, self.scenario, "candidate-worker")
             else:
                 self.candidate_worker = created
+                self.candidate_image_ids[created] = image_id
 
     def _oneshot(self, image, *command):
         database_url = command[-1]
@@ -843,7 +848,10 @@ class TransitionPort:
         )
         self.admin.execute_committed(f'ALTER ROLE "{APP}" LOGIN;')
         if self.scenario == "replace":
-            _inject_scenario_fault(self.evidence, "replace", "candidate-replacement")
+            _inject_scenario_fault(
+                self.evidence, "replace", "candidate-replacement",
+                migration_started=self.migration_started,
+            )
         for cid in (self.candidate_id, self.candidate_worker):
             if not _container(cid)["State"].get("Running"):
                 run(["start", cid])
@@ -918,24 +926,26 @@ class TransitionPort:
     def _restrict_after_failure(self):
         errors = []
 
-        def attempt(action):
+        def attempt(name, action):
             try:
                 action()
-            except BaseException:
-                errors.append(True)
+            except BaseException as exc:
+                errors.append(name + ":" + type(exc).__name__)
 
-        for action in (
-            self.edge.close,
-            lambda: self.admin.execute_committed(
+        for name, action in (
+            ("edge.close", self.edge.close),
+            ("database.connection_limit", lambda: self.admin.execute_committed(
                 f'ALTER DATABASE "{DATABASE}" CONNECTION LIMIT 0;'
-            ),
-            lambda: self.admin.execute_committed(f'ALTER ROLE "{APP}" NOLOGIN;'),
-            lambda: self.admin.execute_committed(
+            )),
+            ("application_role.login", lambda: self.admin.execute_committed(
+                f'ALTER ROLE "{APP}" NOLOGIN;'
+            )),
+            ("database.terminate_sessions", lambda: self.admin.execute_committed(
                 f"SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity "
                 f"WHERE datname='{DATABASE}' AND pid<>pg_backend_pid();"
-            ),
+            )),
         ):
-            attempt(action)
+            attempt(name, action)
         writers = (
             self.previous, self.previous_worker,
             self.candidate_id, self.candidate_worker,
@@ -943,20 +953,29 @@ class TransitionPort:
         for cid in writers:
             if not isinstance(cid, str) or not _CONTAINER_ID.fullmatch(cid):
                 if cid is not None:
-                    errors.append(True)
+                    errors.append("writer.invalid_identity")
                 continue
             row = None
             try:
                 row = _container(cid)
-            except BaseException:
-                errors.append(True)
-            attempt(lambda item=cid: run(["update", "--restart=no", item]))
+            except BaseException as exc:
+                errors.append("writer.inspect:" + type(exc).__name__)
+            attempt(
+                "writer.disable_restart",
+                lambda item=cid: run(["update", "--restart=no", item]),
+            )
             row_state = row.get("State", {}) if isinstance(row, dict) else {}
             if (row is None or row_state.get("Running") is True
                     or row_state.get("Status") not in {"created", "exited"}):
-                attempt(lambda item=cid: run(["stop", "--time", "10", item]))
-        for action in (self.edge.assert_closed, self.sql.assert_closed):
-            attempt(action)
+                attempt(
+                    "writer.stop",
+                    lambda item=cid: run(["stop", "--time", "10", item]),
+                )
+        for name, action in (
+            ("edge.verify_closed", self.edge.assert_closed),
+            ("database.verify_closed", self.sql.assert_closed),
+        ):
+            attempt(name, action)
         for cid in writers:
             if not isinstance(cid, str) or not _CONTAINER_ID.fullmatch(cid):
                 continue
@@ -967,9 +986,9 @@ class TransitionPort:
                 if (state.get("Running") is not False
                         or state.get("Status") not in {"created", "exited"}
                         or policy != "no"):
-                    errors.append(True)
-            except BaseException:
-                errors.append(True)
+                    errors.append("writer.verify_state")
+            except BaseException as exc:
+                errors.append("writer.verify_inspect:" + type(exc).__name__)
         try:
             if (self.admin.sql(
                     f"SELECT connection_limit FROM pg_database WHERE datname='{DATABASE}';",
@@ -979,11 +998,14 @@ class TransitionPort:
                         f"SELECT rolcanlogin FROM pg_roles WHERE rolname='{APP}';",
                         "postgres",
                     ) != "f"):
-                errors.append(True)
-        except BaseException:
-            errors.append(True)
+                    errors.append("database.verify_fence")
+        except BaseException as exc:
+            errors.append("database.verify_query:" + type(exc).__name__)
         if errors:
-            self.evidence.append("failure_reclosure_uncertain", actions_failed=len(errors))
+            self.evidence.append(
+                    "failure_reclosure_uncertain",
+                    actions_failed=len(errors), failed_actions=errors,
+            )
             raise StateError("one or more barriers or writer stops are uncertain")
         self.evidence.append("failure_reclosure_verified", writers=len(writers))
 
@@ -1029,7 +1051,7 @@ class TransitionPort:
         for cid in (self.candidate_id, self.candidate_worker):
             if isinstance(cid, str) and _CONTAINER_ID.fullmatch(cid):
                 row = _container(cid)
-                if (row.get("Image") != self.images["candidate"]
+                if (row.get("Image") != self.candidate_image_ids.get(cid)
                         or row.get("State", {}).get("Running") is not False
                         or row.get("HostConfig", {}).get("RestartPolicy", {}).get("Name") != "no"):
                     raise StateError("candidate writer identity is uncertain during recovery")
@@ -1460,7 +1482,7 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
                 PREVIOUS_SHA, candidate_sha, project, DATABASE,
             ),
             root, evidence, project, project_network_id, volume, database, frontend,
-            nginx, old_backend, old_worker, "", "", images, scenario, baseline_hash,
+            nginx, old_backend, old_worker, None, None, images, scenario, baseline_hash,
         )
         port.access_token, port.user_id, port.world_id = access, user_id, int(world_id_raw)
         try:

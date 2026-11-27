@@ -237,6 +237,11 @@ def test_scenario_faults_require_the_expected_typed_fault_and_durable_receipt(tm
         assert _scenario_fault_reached(log, fault, "pull")
         assert not _scenario_fault_reached(log, RuntimeError("unrelated"), "pull")
         assert not _scenario_fault_reached(log, ScenarioFault("backup", "backup"), "pull")
+        with pytest.raises(ScenarioFault):
+            _inject_scenario_fault(log, "replace", "candidate-replacement", migration_started=True)
+        assert _scenario_fault_reached(
+            log, ScenarioFault("replace", "candidate-replacement", True), "replace",
+        )
         path.write_bytes(path.read_bytes()[:-3])
         with pytest.raises(StateError):
             _scenario_fault_reached(log, fault, "pull")
