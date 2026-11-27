@@ -175,3 +175,30 @@ def test_candidate_http_client_uses_distinct_fixture_accounts(monkeypatch, capsy
     assert names == ["g5_role_player_candidate", "g5_role_other_candidate",
                      "g5_role_admin_candidate"]
     assert json.loads(capsys.readouterr().out)["queue"] == 12
+
+
+def test_hero_http_probe_exercises_same_slot_swap_and_invalid_item(monkeypatch, capsys):
+    selected = []
+    calls = []
+    class HeroClient(Client):
+        def post(self, path, **kwargs):
+            calls.append(path)
+            if path == "/auth/token":
+                class Login(Response):
+                    def raise_for_status(self):
+                        pass
+                return Login(200, {"access_token": "fixture"})
+            item = int(path.split("/")[3])
+            if item == 0:
+                return Response(400, {})
+            selected[:] = [item] if path.endswith("/equip") else []
+            class Items(Response):
+                def raise_for_status(self):
+                    pass
+            return Items(200, [{"id": i, "is_equipped": i in selected} for i in (41, 42)])
+    monkeypatch.setitem(sys.modules, "httpx", types.SimpleNamespace(Client=HeroClient))
+    monkeypatch.setattr(sys, "argv", ["-", "7", "g5_role_player", "41", "42"])
+    exec(role._HERO_CLIENT, {})
+    assert calls == ["/auth/token", "/hero/items/41/equip", "/hero/items/42/equip",
+                     "/hero/items/0/equip", "/hero/items/42/unequip", "/hero/items/41/equip"]
+    assert json.loads(capsys.readouterr().out) == {"equipped": 41}

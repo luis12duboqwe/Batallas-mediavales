@@ -324,3 +324,13 @@ def test_provision_issues_only_named_policy_grants(monkeypatch, revision, grante
     expected.append('GRANT USAGE, SELECT ON SEQUENCE "worlds_id_seq" TO "game_app";')
     assert statements == [("BEGIN; " + " ".join(expected) + " COMMIT;", TARGET.database)]
     assert inspections == [granted, revision]
+
+
+@pytest.mark.parametrize("revision", [policy.PREVIOUS, policy.CANDIDATE])
+def test_hero_catalog_lock_requires_update_but_not_insert_or_delete(revision):
+    assert policy.table_privileges(revision)["item_templates"] == {"SELECT", "UPDATE"}
+    evidence = catalog(revision, revision)
+    obj(evidence, "item_templates")["acl"].remove(["game_app", "UPDATE", False, "postgres"])
+    with pytest.raises(policy.ObjectPolicyError):
+        policy.inspect_objects(TARGET, CatalogSession(evidence), revision,
+                               granted_revision=revision)

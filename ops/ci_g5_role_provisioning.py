@@ -124,12 +124,16 @@ def table_privileges(revision: str) -> dict[str, frozenset[str]]:
     """
     expected_tables(revision)
     read_only = {
-        "achievements", "item_templates", "quests", "shop_items", "themes",
+        "achievements", "quests", "shop_items", "themes", "item_templates",
     }
     grants = {name: frozenset({"SELECT"}) for name in read_only}
     grants.update({name: frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"})
                    for name in GAME_TABLES - read_only - {"wiki_articles"}})
     grants["wiki_articles"] = frozenset({"SELECT", "INSERT", "UPDATE"})
+    # Both immutable releases lock ItemTemplate through a joined FOR UPDATE.
+    # This experimental upper bound permits UPDATE but not INSERT or DELETE.
+    # A future narrower production policy should lock only HeroItem.
+    grants["item_templates"] = frozenset({"SELECT", "UPDATE"})
     grants.update(OBSERVED_INTERNAL_OPERATIONS)
     if revision == CANDIDATE:
         grants.update(OBSERVED_WONDER_OPERATIONS)
@@ -443,6 +447,83 @@ print(json.dumps({"city": city, "queue": queue, "case": case_id, "privacy": priv
 '''
 
 
+
+_HERO_CLIENT = r'''
+import json
+import sys
+import httpx
+
+world, username, *items = sys.argv[1:]
+params = {"world_id": int(world)}
+with httpx.Client(base_url="http://127.0.0.1:8000", timeout=20, trust_env=False) as client:
+    login = client.post("/auth/token", data={
+        "username": username, "password": "G5-Role-Fixture-Password-2026!"})
+    login.raise_for_status()
+    headers = {"Authorization": "Bearer " + login.json()["access_token"]}
+    if not items:
+        response = client.get("/hero/", params=params, headers=headers)
+        response.raise_for_status()
+        hero = response.json()
+        assert type(hero["id"]) is int and hero["status"] == "home"
+        print(json.dumps({"hero": hero["id"]}))
+    else:
+        first, second = map(int, items)
+        def change(item, action, expected):
+            response = client.post(f"/hero/items/{item}/{action}", params=params, headers=headers)
+            response.raise_for_status()
+            rows = response.json()
+            assert isinstance(rows, list)
+            selected = [row["id"] for row in rows if row["is_equipped"]]
+            assert selected == expected, "equipment replacement did not persist"
+        change(first, "equip", [first])
+        change(second, "equip", [second])
+        invalid = client.post("/hero/items/0/equip", params=params, headers=headers)
+        assert invalid.status_code == 400, "invalid inventory item unexpectedly accepted"
+        change(second, "unequip", [])
+        change(first, "equip", [first])
+        print(json.dumps({"equipped": first}))
+'''
+
+
+def _hero_probe(backend, admin, world, player):
+    from ops.ci_g5_actual_migration import DATABASE
+    from ops.ci_g5_integrated_runtime import binary
+
+    def request(*args):
+        result = json.loads(binary(["exec", "-i", backend, "python", "-",
+                                   str(world), player, *args], input=_HERO_CLIENT.encode()))
+        if not isinstance(result, dict):
+            raise ObjectPolicyError("invalid hero HTTP evidence")
+        return result
+
+    hero = request().get("hero")
+    if type(hero) is not int or hero <= 0:
+        raise ObjectPolicyError("hero identity unavailable")
+    # Synthetic loot only; the equipped state is written by the runtime
+    # HTTP endpoints, never the maintenance identity.
+    if admin.sql(
+        f"SELECT count(*) FROM heroes h JOIN users u ON u.id=h.user_id "
+        f"WHERE h.id={hero} AND h.world_id={world} AND u.username='{player}';", DATABASE
+    ) != "1":
+        raise ObjectPolicyError("unexpected hero ownership")
+    result = admin.sql(
+        f"INSERT INTO hero_items(hero_id,template_id,is_equipped) "
+        f"SELECT {hero},id,false FROM item_templates WHERE name IN "
+        "('Espada de Madera','Hacha de Guerra') AND slot='weapon' "
+        "RETURNING id;", DATABASE
+    ).splitlines()
+    if len(result) != 2 or any(not item.isdecimal() or int(item) <= 0 for item in result):
+        raise ObjectPolicyError("same-slot hero fixture items missing")
+    first, second = sorted(map(int, result))
+    if request(str(first), str(second)) != {"equipped": first}:
+        raise ObjectPolicyError("hero equipment response mismatch")
+    if admin.sql(
+        f"SELECT id FROM hero_items WHERE hero_id={hero} AND is_equipped;", DATABASE
+    ) != str(first):
+        raise ObjectPolicyError("hero equipment not committed")
+    print("runtime hero equip, same-slot replacement, invalid item and unequip verified", flush=True)
+
+
 def _http_probes(project, image, app_url, world, admin, *, candidate=False):
     """Run actual HTTP and worker workload under the experimental SQL role."""
     if type(candidate) is not bool:
@@ -499,6 +580,7 @@ def _http_probes(project, image, app_url, world, admin, *, candidate=False):
             f"WHERE s.id IN ({case},{privacy}) AND u.username='{player}';", DATABASE
         ) != "2":
             raise ObjectPolicyError("HTTP writes not persisted")
+        _hero_probe(backend, admin, world, player)
         level = admin.sql(f"SELECT target_level FROM building_queue WHERE id={queue} "
                           f"AND city_id={city};", DATABASE)
         if not level.isdecimal() or int(level) <= 0:
