@@ -79,6 +79,31 @@ Pruebas unitarias de las guardas:
 pytest -q -o addopts= tests/test_g5_release_transition_guards.py
 ```
 
+## Resultados de esta revisión
+
+En el sandbox aislado con Docker local se ejecutó el harness del commit
+`c66e0517a51e7a9294ee2a9d9f23c119b9ec08ab`; se configuraron las variables de
+guard requeridas por el harness. No fue una ejecución de GitHub Actions ni una
+integración de workflow. Los siete comandos terminaron con código 0:
+
+| Caso | Resultado |
+| --- | --- |
+| `success` | Transición 0019→0020; HTTP, Socket.IO autenticado, versión, escritura y persistencia del worker candidatos verificados. |
+| `pull` | Release previa seguía disponible; sin marcador, migración ni restauración. |
+| `backup` | Recuperación supervisada previa, sin restaurar snapshot. |
+| `create` | Recuperación supervisada previa tras creación parcial, sin restaurar snapshot. |
+| `wrong-image` | Imagen candidata incorrecta rechazada; recuperación supervisada previa. |
+| `retry` | Reintento inseguro rechazado; recuperación supervisada previa. |
+| `replace` | Fallo tras COMMITTED; cierre verificado de escritores y edge. |
+
+Las ejecuciones finales exportaron sus recibos y limpiaron sus fixtures Docker.
+En los cuatro casos de recuperación previa, el backend anterior y su ruta HTTP
+se comprobaron, pero el worker histórico que ya estaba detenido permaneció
+detenido: no se intentó iniciarlo ni se afirma procesamiento de tareas con la
+release histórica. Su fallo de arranque existente por importación circular
+queda fuera de este cambio; `success` sí verifica la escritura persistente del
+worker candidato.
+
 ## Recuperación y límites
 
 Los fallos pre-migración `backup`, `create`, `wrong-image` y `retry` solo
