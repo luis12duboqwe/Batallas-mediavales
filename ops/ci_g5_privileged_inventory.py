@@ -48,8 +48,9 @@ def main():
         admin.sql("REVOKE CONNECT ON DATABASE postgres, template1 FROM PUBLIC;")
         admin.sql("CREATE TABLE evidence (id int PRIMARY KEY);", "game_ci")
 
-        def expect(*blockers, fenced=False, case="baseline"):
-            observation = inspect_privileged_inventory(target, admin, fenced=fenced)
+        def expect(*blockers, fenced=False, case="baseline", reopening_limit=None):
+            observation = inspect_privileged_inventory(target, admin, fenced=fenced,
+                                                       reopening_limit=reopening_limit)
             if set(observation.blockers) != set(blockers):
                 raise RuntimeError(f"{case}: expected {sorted(blockers)}, observed {sorted(observation.blockers)}")
 
@@ -178,6 +179,21 @@ def main():
         admin.sql("DROP ROLE rogue_admin;")
         expect(fenced=True)
         gate.assert_closed()
+        # Mixed reopening: the original database limit is open but the
+        # application role remains NOLOGIN, with no admitted client sessions.
+        admin.sql("ALTER DATABASE game_ci CONNECTION LIMIT -1;")
+        expect(fenced=True, reopening_limit=-1, case="mixed clean")
+        expect("dedicated_databases", fenced=True, reopening_limit=5, case="mixed wrong limit")
+        admin.sql("GRANT ALTER SYSTEM ON PARAMETER shared_preload_libraries TO game_app;")
+        expect("no_parameter_grants", fenced=True, reopening_limit=-1, case="mixed ACL drift")
+        admin.sql("REVOKE ALTER SYSTEM ON PARAMETER shared_preload_libraries FROM game_app;")
+        admin.sql("ALTER ROLE game_app LOGIN;")
+        expect("role_state", fenced=True, reopening_limit=-1, case="mixed premature login")
+        admin.sql("ALTER ROLE game_app NOLOGIN;")
+        expect(fenced=True, reopening_limit=-1, case="mixed clean restored")
+        admin.sql("ALTER DATABASE game_ci CONNECTION LIMIT 0;")
+        gate.assert_closed()
+        print("PG15 mixed reopening inventory: exact limit, NOLOGIN and ACL drift verified")
         print("PG15 dedicated-cluster privileged inventory: positive and adversarial observations passed")
         return 0
     finally:

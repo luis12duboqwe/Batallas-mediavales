@@ -471,7 +471,7 @@ jobs:
           set -euo pipefail
           workspace="$(mktemp -d)"
           failed=0
-          for scenario in success pull backup create wrong-image retry replace privileged-drift; do
+          for scenario in success pull backup create wrong-image retry replace privileged-drift mixed-drift; do
             case "$scenario" in
               backup|create|wrong-image|retry)
                 python3 -m ops.ci_g5_release_transition "$scenario" "$workspace" --approve-previous-recovery || failed=1 ;;

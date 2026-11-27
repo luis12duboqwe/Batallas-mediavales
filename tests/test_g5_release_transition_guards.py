@@ -586,3 +586,15 @@ def test_privileged_inventory_gate_accepts_clean_observation(monkeypatch):
     transition._require_inventory(Mock(), evidence, fenced=True)
     evidence.append.assert_called_once_with("privileged_inventory_observed",
                                            fenced=True, blockers=[])
+
+
+def test_mixed_gate_refuses_blocker_before_remaining_barrier_is_removed(monkeypatch):
+    from ops.g5_pg15_privileged_inventory import InventoryObservation
+    observed = Mock(return_value=InventoryObservation(("no_parameter_grants",)))
+    monkeypatch.setattr(transition, "inspect_privileged_inventory", observed)
+    evidence = Mock()
+    with pytest.raises(transition.PrivilegedInventoryBlocked):
+        transition._require_inventory(Mock(), evidence, fenced=True, reopening_limit=-1)
+    assert observed.call_args.kwargs == {"fenced": True, "reopening_limit": -1}
+    evidence.append.assert_called_once_with("privileged_inventory_observed",
+        fenced=True, reopening_limit=-1, blockers=["no_parameter_grants"])

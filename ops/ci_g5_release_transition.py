@@ -45,7 +45,7 @@ PREVIOUS_REVISION = "0019_privacy_active_unique"
 _SHA = re.compile(r"[0-9a-f]{40}")
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
-_SCENARIOS = {"success", "pull", "backup", "create", "wrong-image", "retry", "replace", "privileged-drift"}
+_SCENARIOS = {"success", "pull", "backup", "create", "wrong-image", "retry", "replace", "privileged-drift", "mixed-drift"}
 _TEST_SECRET = "disposable-g5-transition-ci-key-not-production-2026"
 _MAX_EVIDENCE_BYTES = 4 * 1024 * 1024
 
@@ -67,13 +67,16 @@ class TransitionInventorySession(Admin):
                     "-U", ADMIN, "-d", database, "-Atqc", statement]).strip()
 
 
-def _require_inventory(session, evidence, *, fenced):
+def _require_inventory(session, evidence, *, fenced, reopening_limit=None):
+    kwargs = {"fenced": fenced}
+    if reopening_limit is not None:
+        kwargs["reopening_limit"] = reopening_limit
     observation = inspect_privileged_inventory(
-        Pg15FenceTarget(DATABASE, APP, ADMIN), session, fenced=fenced,
+        Pg15FenceTarget(DATABASE, APP, ADMIN), session, **kwargs,
     )
     if type(observation) is not InventoryObservation or type(observation.blockers) is not tuple:
         raise StateError("invalid privileged inventory evidence")
-    evidence.append("privileged_inventory_observed", fenced=fenced,
+    evidence.append("privileged_inventory_observed", **kwargs,
                     blockers=list(observation.blockers))
     if observation.blockers:
         raise PrivilegedInventoryBlocked(observation.blockers)
@@ -920,6 +923,19 @@ class TransitionPort:
         self.admin.execute_committed(
             f'ALTER DATABASE "{DATABASE}" CONNECTION LIMIT {self.original_db.connection_limit};'
         )
+        if self.scenario == "mixed-drift":
+            self.admin.sql(f"GRANT ALTER SYSTEM ON PARAMETER shared_preload_libraries TO {APP};")
+            self.evidence.append("mixed_drift_injected")
+        try:
+            _require_inventory(self.admin, self.evidence, fenced=True,
+                               reopening_limit=self.original_db.connection_limit)
+        except PrivilegedInventoryBlocked:
+            if (self.admin.sql(f"SELECT rolcanlogin FROM pg_roles WHERE rolname='{APP}';") != "f"
+                    or self.admin.sql(f"SELECT datconnlimit FROM pg_database WHERE datname='{DATABASE}';")
+                    != str(self.original_db.connection_limit)):
+                raise StateError("mixed reopening barrier identity changed") from None
+            self.evidence.append("mixed_inventory_blocked_before_login")
+            raise
         self.admin.execute_committed(f'ALTER ROLE "{APP}" LOGIN;')
         _require_inventory(self.admin, self.evidence, fenced=False)
         if self.scenario == "replace":
@@ -1108,8 +1124,8 @@ class TransitionPort:
         ) != ("t" if role_open else "f"):
             raise StateError("application role fence changed during recovery")
         self.edge.assert_closed()
-        if database_open is role_open:
-            _require_inventory(self.admin, self.evidence, fenced=not database_open)
+        if role_open and not database_open:
+            raise StateError("unsupported recovery SQL barrier order")
         if self.admin.sql("SELECT version_num FROM alembic_version;", DATABASE) != PREVIOUS_REVISION:
             raise StateError("previous schema revision is not positively established")
         self._assert_persistent_resources()
@@ -1134,6 +1150,9 @@ class TransitionPort:
                         or row.get("State", {}).get("Running") is not False
                         or row.get("HostConfig", {}).get("RestartPolicy", {}).get("Name") != "no"):
                     raise StateError("candidate writer identity is uncertain during recovery")
+        _require_inventory(self.admin, self.evidence, fenced=not role_open,
+                           reopening_limit=self.original_db.connection_limit
+                           if database_open and not role_open else None)
         assert_lease()
 
     def supervised_recover_previous(self, assert_lease):
@@ -1618,6 +1637,22 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
                 preserve = False
                 print("privileged-drift: post-snapshot ACL drift blocked PREPARED and migration; app fence retained")
                 return
+            if scenario == "mixed-drift" and isinstance(exc, PrivilegedInventoryBlocked):
+                rows = evidence.verify()
+                if (exc.blockers != ("no_parameter_grants",)
+                        or not any(row.get("event") == "mixed_drift_injected" for row in rows)
+                        or not any(row.get("event") == "mixed_inventory_blocked_before_login" for row in rows)
+                        or not port.migration_started
+                        or port.store.show().phase is not Phase.COMMITTED_WRITERS_ALLOWED):
+                    raise StateError("unexpected mixed reopening failure") from exc
+                port._restrict_after_failure()
+                if port.admin.sql("SELECT version_num FROM alembic_version;", DATABASE) != CANDIDATE:
+                    raise StateError("committed candidate schema changed") from exc
+                evidence.append("mixed_drift_blocked_before_login", snapshot_restore=False,
+                                phase=Phase.COMMITTED_WRITERS_ALLOWED.value)
+                preserve = False
+                print("mixed-drift: privileged ACL drift blocked LOGIN after COMMITTED; writers and edge closed")
+                return
             if not _scenario_fault_reached(evidence, exc, scenario):
                 preserve = True
                 try:
@@ -1765,7 +1800,7 @@ def main(argv=None):
     if len(argv) not in (2, 3) or argv[0] not in _SCENARIOS:
         print(
             "usage: python -m ops.ci_g5_release_transition "
-            "{success,pull,backup,create,wrong-image,retry,replace,privileged-drift} "
+            "{success,pull,backup,create,wrong-image,retry,replace,privileged-drift,mixed-drift} "
             "PRIVATE_WORKSPACE [--approve-previous-recovery]",
             file=sys.stderr,
         )
