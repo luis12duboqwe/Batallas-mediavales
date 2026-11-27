@@ -226,6 +226,16 @@ def _reclosure_guard(port):
         raise
 
 
+def _execute_candidate_lifecycle(lifecycle, port):
+    """Cover lease/phase checks after the reopening callback returns."""
+    try:
+        return lifecycle.execute(port.request, port)
+    except BaseException:
+        if port.candidate_reopen_attempted:
+            port._restrict_after_failure()
+        raise
+
+
 class EvidenceLog:
     """Append-only, fsync'd, secret-free, hash-chained fixture evidence."""
 
@@ -642,6 +652,7 @@ class TransitionPort:
         self.candidate_created = False
         self.published = False
         self.player_worker_verified = False
+        self.candidate_reopen_attempted = False
         self.recovery_started = set()
         self.release_receipt = root / "host" / ".release.json"
 
@@ -852,6 +863,7 @@ class TransitionPort:
     def reopen_writers(self, identity):
         try:
             require_committed_receipt_locked(self.store, identity)
+            self.candidate_reopen_attempted = True
             self._reopen_candidate(identity)
         except BaseException:
             self._restrict_after_failure()
@@ -1322,7 +1334,8 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
     evidence = EvidenceLog(state / "transition.jsonl")
     containers, volumes, networks = [], [], []
     image_tags = []
-    preserve = False
+    preserve = True
+    port = None
     candidate_sha = _git(repo, "rev-parse", "HEAD")
     if not _SHA.fullmatch(candidate_sha) or candidate_sha == PREVIOUS_SHA:
         raise StateError("candidate checkout SHA is invalid or equals previous release")
@@ -1493,6 +1506,7 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
                     raise StateError("previous release became unavailable after candidate acquisition failure")
                 evidence.append("previous_service_still_available")
                 print("pull: previous service remained active; no marker, migration, or snapshot restore")
+            preserve = False
             return
 
         with _worktree(repo, root, candidate_sha) as current_tree:
@@ -1532,8 +1546,9 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
                         port.request, port, port.store, lease,
                     )
                 raise StateError("backup scenario unexpectedly passed its injection")
-            result = G5Lifecycle().execute(port.request, port)
+            result = _execute_candidate_lifecycle(G5Lifecycle(), port)
         except BaseException as exc:
+            preserve = True
             if not _scenario_fault_reached(evidence, exc, scenario):
                 preserve = True
                 try:
@@ -1603,6 +1618,7 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
                         )
                         assert_lease()
                 print(f"{scenario}: supervised previous release recovery; marker retained; no snapshot restore")
+                preserve = False
                 return
             except BaseException:
                 preserve = True
@@ -1626,11 +1642,18 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
     finally:
         try:
             if preserve:
-                print(f"uncertain fixture preserved closed for reconciliation: project={project}; root={root}",
+                print(f"uncertain fixture preserved for reconciliation (verify all barriers): project={project}; root={root}",
                       file=sys.stderr)
             else:
                 try:
-                    _export_evidence(evidence.path, workspace, scenario, project)
+                    try:
+                        _export_evidence(evidence, workspace, scenario, project)
+                    except BaseException:
+                        # Export is part of the evidence transaction, not
+                        # permission to delete the only reconciliation state.
+                        if port is not None:
+                            port._restrict_after_failure()
+                        raise
                     cleanup_fixture(project)
                     for volume in volumes:
                         run(["volume", "rm", volume])
@@ -1644,10 +1667,13 @@ def _fixture(scenario: str, workspace: Path, approved_recovery: bool):
             evidence.close()
 
 
-def _export_evidence(source: Path, workspace: Path, scenario: str, project: str):
-    if not source.exists():
-        return
-    data = source.read_bytes()
+def _export_evidence(evidence: EvidenceLog, workspace: Path, scenario: str, project: str):
+    # Export only verified canonical records from the pinned descriptor,
+    # never re-open the source pathname after verification.
+    data = b"".join(
+        json.dumps(row, sort_keys=True, separators=(",", ":"), allow_nan=False).encode() + b"\n"
+        for row in evidence.verify()
+    )
     destination = workspace / f"g5-release-transition-{scenario}-{project}.jsonl"
     fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "wb") as stream:
@@ -1690,7 +1716,7 @@ def main(argv=None):
     try:
         _fixture(argv[0], workspace, approved)
     except BaseException as exc:
-        print(f"G5 release transition failed closed: {type(exc).__name__}", file=sys.stderr)
+        print(f"G5 release transition failed; reconcile barrier state: {type(exc).__name__}", file=sys.stderr)
         return 1
     return 0
 

@@ -518,3 +518,41 @@ def test_reclosure_guard_does_not_mutate_before_authorization_or_on_success():
     with transition._reclosure_guard(port) as arm:
         arm()
     port._restrict_after_failure.assert_not_called()
+
+
+@pytest.mark.parametrize("reopened", [False, True])
+def test_lifecycle_exit_failure_recloses_only_after_candidate_reopening(reopened):
+    port = SimpleNamespace(request=object(), candidate_reopen_attempted=False,
+                           _restrict_after_failure=Mock())
+
+    def execute(request, current):
+        assert request is port.request
+        current.candidate_reopen_attempted = reopened
+        raise StateError("lifecycle final lease failure")
+
+    with pytest.raises(StateError, match="final lease"):
+        transition._execute_candidate_lifecycle(SimpleNamespace(execute=execute), port)
+    assert port._restrict_after_failure.call_count == int(reopened)
+
+
+def test_export_rejects_truncated_evidence_without_creating_receipt(tmp_path):
+    log = EvidenceLog(tmp_path / "transition.jsonl")
+    try:
+        log.append("first")
+        log.append("second")
+        log.path.write_bytes(log.path.read_bytes().splitlines(keepends=True)[0])
+        with pytest.raises(StateError):
+            transition._export_evidence(log, tmp_path, "success", "fixture")
+        assert not (tmp_path / "g5-release-transition-success-fixture.jsonl").exists()
+    finally:
+        log.close()
+
+
+def test_export_uses_verified_canonical_records(tmp_path):
+    log = EvidenceLog(tmp_path / "transition.jsonl")
+    try:
+        log.append("first", value=1)
+        transition._export_evidence(log, tmp_path, "success", "fixture")
+        assert (tmp_path / "g5-release-transition-success-fixture.jsonl").read_bytes() == log.path.read_bytes()
+    finally:
+        log.close()
