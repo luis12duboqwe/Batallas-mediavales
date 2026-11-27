@@ -991,7 +991,7 @@ class TransitionPort:
                 errors.append("writer.verify_inspect:" + type(exc).__name__)
         try:
             if (self.admin.sql(
-                    f"SELECT connection_limit FROM pg_database WHERE datname='{DATABASE}';",
+                f"SELECT datconnlimit FROM pg_database WHERE datname='{DATABASE}';",
                     "postgres",
                 ) != "0"
                     or self.admin.sql(
@@ -1022,7 +1022,7 @@ class TransitionPort:
             self.original_db.connection_limit if database_open else 0
         )
         if self.admin.sql(
-            f"SELECT connection_limit FROM pg_database WHERE datname='{DATABASE}';",
+            f"SELECT datconnlimit FROM pg_database WHERE datname='{DATABASE}';",
             "postgres",
         ) != str(expected_limit):
             raise StateError("database connection fence changed during recovery")
