@@ -596,6 +596,11 @@ class TransitionPort:
         self._route_nginx_to_candidate()
         self._open_edge()
         _api_version(self.images["candidate"], self.project, self.nginx_address, 401)
+        self.evidence.append(
+            "nginx_candidate_route_verified", address=self.candidate_address,
+            candidate_container_id=self.candidate_id,
+            candidate_image_id=self.images["candidate"],
+        )
         _app_call(self.images["candidate"], self.project, self.nginx_address, "socket",
                   {"token": self.access_token, "user": self.user_id})
         self._prove_player_and_worker()
@@ -607,6 +612,7 @@ class TransitionPort:
         row = _container(cid)
         networks = row.get("NetworkSettings", {}).get("Networks")
         status = row.get("State", {})
+        network = networks.get(self.project) if isinstance(networks, dict) else None
         return (
             row.get("Image") == self.images["candidate"]
             and row.get("Config", {}).get("Labels", {}).get(
@@ -615,7 +621,9 @@ class TransitionPort:
             and row.get("HostConfig", {}).get("RestartPolicy", {}).get("Name") == "no"
             and row.get("HostConfig", {}).get("PortBindings") in (None, {})
             and isinstance(networks, dict) and len(networks) == 1
-            and networks.get(self.project, {}).get("NetworkID") == self.network_id
+            and row.get("HostConfig", {}).get("NetworkMode") == self.project
+            and isinstance(network, dict)
+            and (stopped or network.get("NetworkID") == self.network_id)
             and status.get("Running") is (not stopped)
             and (not stopped or status.get("Status") == "created")
         )
@@ -739,6 +747,16 @@ class TransitionPort:
     def _route_nginx_to_candidate(self):
         config = self.root / "host" / "nginx.g5.conf"
         current = config.read_text()
+        if self.previous_address == self.candidate_address:
+            if current.count("server " + self.candidate_address + ":8000;") != 1:
+                raise StateError("Nginx release route could not be verified exactly")
+            self.evidence.append(
+                "nginx_candidate_route_address_reused",
+                previous_container_id=self.previous,
+                candidate_container_id=self.candidate_id,
+                address=self.candidate_address,
+            )
+            return
         updated = current.replace(
             "server " + self.previous_address + ":8000;",
             "server " + self.candidate_address + ":8000;",

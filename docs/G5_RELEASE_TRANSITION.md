@@ -30,20 +30,18 @@ suficiente (o acceso para buscar el SHA histórico), ejecutar:
 
 ```sh
 install -d -m 700 "$RUNNER_TEMP/g5-transition"
-CI=true GITHUB_ACTIONS=true python -m ops.ci_g5_release_transition \
-  success "$RUNNER_TEMP/g5-transition"
-CI=true GITHUB_ACTIONS=true python -m ops.ci_g5_release_transition \
-  pull "$RUNNER_TEMP/g5-transition"
-CI=true GITHUB_ACTIONS=true python -m ops.ci_g5_release_transition \
-  backup "$RUNNER_TEMP/g5-transition" --approve-previous-recovery
-CI=true GITHUB_ACTIONS=true python -m ops.ci_g5_release_transition \
-  create "$RUNNER_TEMP/g5-transition" --approve-previous-recovery
-CI=true GITHUB_ACTIONS=true python -m ops.ci_g5_release_transition \
-  wrong-image "$RUNNER_TEMP/g5-transition" --approve-previous-recovery
-CI=true GITHUB_ACTIONS=true python -m ops.ci_g5_release_transition \
-  retry "$RUNNER_TEMP/g5-transition" --approve-previous-recovery
-CI=true GITHUB_ACTIONS=true python -m ops.ci_g5_release_transition \
-  replace "$RUNNER_TEMP/g5-transition"
+export CI=true GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted
+python -m ops.ci_g5_release_transition success "$RUNNER_TEMP/g5-transition"
+python -m ops.ci_g5_release_transition pull "$RUNNER_TEMP/g5-transition"
+python -m ops.ci_g5_release_transition backup "$RUNNER_TEMP/g5-transition" \
+  --approve-previous-recovery
+python -m ops.ci_g5_release_transition create "$RUNNER_TEMP/g5-transition" \
+  --approve-previous-recovery
+python -m ops.ci_g5_release_transition wrong-image "$RUNNER_TEMP/g5-transition" \
+  --approve-previous-recovery
+python -m ops.ci_g5_release_transition retry "$RUNNER_TEMP/g5-transition" \
+  --approve-previous-recovery
+python -m ops.ci_g5_release_transition replace "$RUNNER_TEMP/g5-transition"
 ```
 
 Los casos de fallo son puntos de inyección deterministas, no cortes de red
@@ -60,9 +58,10 @@ contenedores one-shot (seed dos veces para idempotencia); los contenedores
 runtime candidatos se crean detenidos y no ejecutan migración ni seed por
 `depends_on`. Solo se inician después de COMMITTED. Se verifica que los
 contenedores previos siguen detenidos con el mismo `StartedAt`, Nginx enruta a
-la candidata, la versión anterior responde 404 en el endpoint introducido con
-0020 y la candidata responde 401 antes de autenticación. También se comprueban
-health HTTP, Socket.IO autenticado, una escritura real del jugador y su
+la candidata (incluso si Docker reasigna a la candidata la IP privada previa),
+la versión anterior responde 404 en el endpoint introducido con 0020 y la
+candidata responde 401 antes de autenticación. También se comprueban health
+HTTP, Socket.IO autenticado, una escritura real del jugador y su
 persistencia/consumo por el worker candidato.
 
 Pruebas unitarias de las guardas:

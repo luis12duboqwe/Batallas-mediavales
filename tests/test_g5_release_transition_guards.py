@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ops.ci_g5_release_transition import (
     EvidenceLog,
     PREVIOUS_SHA,
+    TransitionPort,
     image_provenance,
     main,
     recovery_is_authorized,
@@ -124,6 +125,28 @@ def test_evidence_log_is_private_append_only_and_detects_tampering(tmp_path):
     path.write_text("\n".join(lines) + "\n")
     with pytest.raises(StateError, match="chain"):
         log.verify()
+
+
+def test_nginx_route_accepts_candidate_reusing_previous_private_address(tmp_path):
+    host = tmp_path / "host"
+    host.mkdir()
+    config = host / "nginx.g5.conf"
+    original = "upstream backend { server 172.18.0.2:8000; }\n"
+    config.write_text(original)
+    evidence = EvidenceLog(tmp_path / "transition.jsonl")
+    port = TransitionPort.__new__(TransitionPort)
+    port.root = tmp_path
+    port.evidence = evidence
+    port.previous = "a" * 64
+    port.candidate_id = "b" * 64
+    port.previous_address = port.candidate_address = "172.18.0.2"
+
+    port._route_nginx_to_candidate()
+
+    assert config.read_text() == original
+    assert [row["event"] for row in evidence.verify()] == [
+        "nginx_candidate_route_address_reused",
+    ]
 
 
 def test_ci_gate_and_recovery_flag_are_required_before_fixture_creation(tmp_path, monkeypatch):
