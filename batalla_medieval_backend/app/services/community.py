@@ -83,6 +83,7 @@ def create_alliance_serialized(
     from . import alliance as alliance_service
 
     try:
+        world_lifecycle.require_world_open_http(db, payload.world_id)
         locked_founder = (
             db.query(models.User)
             .filter(models.User.id == founder.id)

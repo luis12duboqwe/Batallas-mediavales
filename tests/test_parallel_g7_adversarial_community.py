@@ -195,7 +195,49 @@ def test_transfer_leadership_is_rejected_when_world_is_paused(db_session, user):
     assert alliance.leader_id == user.id
 
 
-def test_mass_message_normalizes_and_respects_premium_inbox_limit_without_private_block_filter(
+@pytest.mark.skipif(
+    engine.dialect.name != "postgresql",
+    reason="Row-lock ordering requires PostgreSQL",
+)
+def test_alliance_creation_locks_world_before_founder_user(db_session, user):
+    from sqlalchemy import event
+
+    from app import schemas
+    from app.services import community as community_service
+
+    world = db_session.query(models.World).first()
+    _joined(db_session, user, world)
+    db_session.commit()
+    statements = []
+
+    def observe_locks(connection, cursor, statement, parameters, context, executemany):
+        lowered = statement.lower()
+        if "for update" in lowered and ("worlds" in lowered or "users" in lowered):
+            statements.append(lowered)
+
+    event.listen(engine, "before_cursor_execute", observe_locks)
+    try:
+        community_service.create_alliance_serialized(
+            db_session,
+            schemas.AllianceCreate(
+                name="G7 lock order alliance",
+                world_id=world.id,
+            ),
+            user,
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", observe_locks)
+
+    world_lock_index = next(
+        index for index, statement in enumerate(statements) if "worlds" in statement
+    )
+    founder_lock_index = next(
+        index for index, statement in enumerate(statements) if "users" in statement
+    )
+    assert world_lock_index < founder_lock_index
+
+
+def test_mass_message_normalizes_respects_inbox_limits_and_ignores_private_blocks(
     db_session,
     user,
 ):
@@ -208,9 +250,15 @@ def test_mass_message_normalizes_and_respects_premium_inbox_limit_without_privat
         hashed_password="placeholder",
         is_verified=True,
     )
-    db_session.add(peer)
+    base_peer = models.User(
+        username="g7_mass_message_base_peer",
+        email="g7-mass-message-base-peer@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add_all([peer, base_peer])
     db_session.flush()
-    alliance = _alliance(db_session, world, user, peer)
+    alliance = _alliance(db_session, world, user, peer, base_peer)
     db_session.add_all(
         [
             models.Message(
@@ -223,6 +271,18 @@ def test_mass_message_normalizes_and_respects_premium_inbox_limit_without_privat
                 + timedelta(days=index),
             )
             for index in range(50)
+        ]
+        + [
+            models.Message(
+                sender_id=user.id,
+                receiver_id=base_peer.id,
+                world_id=world.id,
+                subject=f"Base inbox {index}",
+                content="Existing",
+                timestamp=datetime(2021, 1, 1, tzinfo=timezone.utc)
+                + timedelta(days=index),
+            )
+            for index in range(52)
         ]
     )
     db_session.add(
@@ -242,6 +302,12 @@ def test_mass_message_normalizes_and_respects_premium_inbox_limit_without_privat
         .order_by(models.Message.timestamp.asc(), models.Message.id.asc())
         .first()[0]
     )
+    oldest_base_id = (
+        db_session.query(models.Message.id)
+        .filter_by(receiver_id=base_peer.id, world_id=world.id)
+        .order_by(models.Message.timestamp.asc(), models.Message.id.asc())
+        .first()[0]
+    )
 
     result = alliance_service.send_mass_message(
         db_session,
@@ -251,7 +317,7 @@ def test_mass_message_normalizes_and_respects_premium_inbox_limit_without_privat
         "  Alliance-wide notice  ",
     )
 
-    assert result == {"count": 2}
+    assert result == {"count": 3}
     peer_inbox = (
         db_session.query(models.Message)
         .filter_by(receiver_id=peer.id, world_id=world.id)
@@ -265,6 +331,13 @@ def test_mass_message_normalizes_and_respects_premium_inbox_limit_without_privat
         for message in peer_inbox
     )
     assert social_privacy.interaction_blocked(db_session, user.id, peer.id, world.id)
+    base_inbox = (
+        db_session.query(models.Message)
+        .filter_by(receiver_id=base_peer.id, world_id=world.id)
+        .all()
+    )
+    assert len(base_inbox) == 50
+    assert oldest_base_id not in {message.id for message in base_inbox}
 
 
 def test_mass_message_rejects_whitespace_without_side_effects(db_session, user):
@@ -411,7 +484,7 @@ def test_valid_full_inbox_send_evicts_oldest_only_for_selected_world_and_recipie
             timestamp=datetime(2021, 1, 1, tzinfo=timezone.utc)
             + timedelta(days=index),
         )
-        for index in range(50)
+        for index in range(52)
     ]
     other_recipient_message = models.Message(
         sender_id=user.id,
@@ -828,6 +901,91 @@ def test_pause_serializes_with_invitation_and_rejects_after_pause(db_session, us
 
     assert results == [409]
     assert db_session.query(models.AllianceInvitation).count() == 0
+
+
+@pytest.mark.skipif(
+    engine.dialect.name != "postgresql",
+    reason="World lifecycle row-lock validation requires PostgreSQL",
+)
+def test_rejected_send_after_pause_does_not_create_premium_status(db_session, user):
+    from app import schemas
+    from app.routers import message as message_router
+
+    world = db_session.query(models.World).first()
+    receiver = models.User(
+        username="g7_premium_pause_receiver",
+        email="g7-premium-pause-receiver@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(receiver)
+    db_session.flush()
+    user.world_id = world.id
+    receiver.world_id = world.id
+    _joined(db_session, user, world)
+    _joined(db_session, receiver, world)
+    db_session.commit()
+    sender_id = user.id
+    receiver_id = receiver.id
+    world_lifecycle.require_world_open(db_session, world.id, lock=True)
+
+    gate_query_started = threading.Event()
+    results = []
+
+    def observe_gate_query(connection, cursor, statement, parameters, context, executemany):
+        if (
+            threading.current_thread().name == "g7-message-writer"
+            and "worlds" in statement.lower()
+            and "for update" in statement.lower()
+        ):
+            gate_query_started.set()
+
+    from sqlalchemy import event
+
+    event.listen(engine, "before_cursor_execute", observe_gate_query)
+
+    def send_after_pause_gate():
+        session = SessionLocal()
+        try:
+            sender = session.query(models.User).filter_by(id=sender_id).one()
+            message_router.send_message(
+                schemas.MessageCreate(
+                    receiver_id=receiver_id,
+                    subject="Will not be persisted",
+                    content="No premium rows should be created",
+                ),
+                session,
+                sender,
+            )
+            results.append("sent")
+        except HTTPException as exc:
+            session.rollback()
+            results.append(exc.status_code)
+        finally:
+            session.close()
+
+    writer = threading.Thread(target=send_after_pause_gate, name="g7-message-writer")
+    try:
+        writer.start()
+        assert gate_query_started.wait(timeout=5)
+        db_session.refresh(world)
+        world.lifecycle_status = "paused"
+        world.is_active = False
+        db_session.commit()
+        writer.join(timeout=10)
+        assert not writer.is_alive(), "Private-message writer remained blocked after pause"
+    finally:
+        event.remove(engine, "before_cursor_execute", observe_gate_query)
+
+    assert results == [409]
+    assert (
+        db_session.query(models.PremiumStatus)
+        .filter(models.PremiumStatus.user_id.in_((sender_id, receiver_id)))
+        .count()
+        == 0
+    )
+    assert db_session.query(models.Message).count() == 0
+    assert db_session.query(models.Notification).count() == 0
 
 
 @pytest.mark.skipif(

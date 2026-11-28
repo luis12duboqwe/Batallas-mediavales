@@ -2,50 +2,47 @@
 
 ## Alcance y estado
 
-Trabajo anticipado para BM-0070–0074 y G16–G18; **no es certificación G7 ni declara G7 cerrado**. El árbol revisado tenía `b265eb02b754090b84f477d78bba61bdd7cfaf4d`, sobre la base `86adbd83dedc9a3e4c2d89b3adc247b72184d158`. La rama se sincronizó con `main` en `9ccc610a2974315a83223847457337439ed8a60d`; ese commit añadió archivos G5 ajenos a este cambio.
+Trabajo anticipado para BM-0070–0074 y G16–G18; **no es certificación G7 ni declara G7 cerrado**. Esta rama se sincronizó con `main` hasta `e06cd1b1841f8e4618e5d4bb64393cb35c6053d0`.
 
-Los cambios de aplicación se limitan a `batalla_medieval_backend/app/services/diplomacy.py`, `batalla_medieval_backend/app/services/alliance.py` y `batalla_medieval_backend/app/routers/message.py`. Las regresiones están en el módulo nuevo `tests/test_parallel_g7_adversarial_community.py`.
+El alcance de corrección incluye los servicios de alianza/diplomacia/comunidad, los routers de mensajes privados, alianzas y chat, y el módulo adversarial nuevo `tests/test_parallel_g7_adversarial_community.py`. No se modificaron otros servicios, pruebas existentes, workflows ni configuración.
 
-## Hallazgos corregidos y evidencia
+## Hallazgos corregidos y comportamiento cubierto
 
-Las cuatro reproducciones P2 iniciales ahora pasan sus expectativas:
-
-| Grupo | Corrección y prueba |
+| Grupo | Cambio y regresión |
 | --- | --- |
-| Diplomacia | `cancel_relation()` adquiere el lock del mundo abierto y no elimina relaciones durante pausa. `test_diplomacy_cannot_be_cancelled_after_world_is_paused`. |
-| Invitaciones | `invite_member()` exige mundo abierto bajo lock y serializa por el usuario invitado. `test_alliance_invitation_is_rejected_when_world_is_paused`. |
-| Mensajes masivos | `send_mass_message()` verifica mundo abierto y persiste todos los mensajes y notificaciones en una sola transacción antes de emitir notificaciones realtime. `test_alliance_mass_message_is_rejected_when_world_is_paused`. |
-| Bandeja privada | Asunto/contenido se normalizan antes de cualquier mutación. La expulsión del más antiguo, inserción nueva y notificación se comprometen juntas; el usuario receptor se bloquea para serializar envíos concurrentes. Hay casos de rollback, asunto/contenido en blanco y reemplazo válido que verifica aislamiento por mundo y destinatario. |
+| Diplomacia | Cancelar relaciones requiere el lock del mundo abierto. La cancelación en pausa devuelve HTTP 409 y conserva la relación. |
+| Alianzas | Creación, invitaciones, aceptación, mensajes masivos y cambios de membresía/rango exigen mundo abierto. La creación y transferencia de liderazgo toman el lock de mundo antes de bloquear usuario/alianza/membresías y vuelven a validar el estado canónico. |
+| WebSocket de chat | Cada mensaje toma el lock del mundo antes de los locks de participantes y revalida sesión/cuenta, mundo activo seleccionado, membresía, receptor y privacidad antes de escribir. Una pausa rechaza mensajes de sockets ya abiertos; el mismo socket puede enviar de nuevo tras reabrir el mundo. Mundos cerrados/archivados y receptores que dejan el mundo no reciben escrituras. Errores liberan/rollback la transacción antes de cualquier `await`. |
+| Mensaje privado | Normalización ocurre antes de mutar. El estado premium se consulta sin crearlo; un envío inválido, rechazado por pausa o que pierde la carrera de pausa no genera filas premium. El límite de bandeja se aplica por mundo/destinatario/nivel premium, retirando los mensajes más antiguos necesarios incluso si una bandeja heredada ya excedía el límite. Evicción, mensaje y notificación se guardan en una única transacción. |
+| Notificaciones | Los payloads se preparan antes del commit y la notificación realtime es best-effort posterior. Una falla de dispatch no convierte una entrega ya confirmada en una respuesta engañosa de error. |
+| Invitaciones duplicadas | La restricción única existente, el lock de destinatario y el savepoint evitan duplicados; la colisión se traduce a HTTP 400 sin persistencia parcial. |
 
-También se añadió el gate de mundo abierto a la creación de alianzas y se reordenó la aceptación de invitación para obtener el lock de mundo antes de bloquear la invitación/usuario. Las demás mutaciones en `alliance.py` ya conservaban el lock de mundo hasta su commit. Las lecturas históricas de mensajes siguen disponibles durante pausa; los recibos de lectura no mutan allí y borrar mensajes queda bloqueado.
+### Límites de política de mensajes grupales
 
-La restricción única existente de invitación `(alliance_id, invited_user_id)` se protege con una fila de usuario serializada y un `SAVEPOINT` alrededor del `flush`. Un conflicto único se convierte a HTTP 400; no filtra un 500 ni deja persistencia parcial. Hay prueba de reinvitación a una invitación ya procesada y prueba de solicitudes duplicadas concurrentes.
+Mensajes masivos siguen siendo comunicación de alianza: llegan a todos los miembros actuales, incluido el remitente. El bloqueo social está definido para interacción privada entre dos jugadores; por eso un bloqueo individual no oculta ni filtra el anuncio autorizado al grupo. Las pruebas verifican esta separación explícitamente. Se normalizan asunto/cuerpo, se respetan los límites de longitud existentes y se aplican los topes de bandeja base/premium. El prefijo `[ALLIANCE] ` cuenta dentro del límite de asunto persistido.
 
-### PostgreSQL 15
+La lectura de historial privado existente permanece visible a sus participantes después de bloquearse; el bloqueo previene nuevos mensajes privados, no borra el historial. Esta es la semántica actual y se deja como decisión de producto, no se cambió por inferencia. Del mismo modo, logros/quests tras aceptar una invitación permanecen como efectos de una acción ya confirmada; este cambio no introduce gates nuevos sobre progreso posterior al commit.
 
-Se ejecutó el módulo completo contra PostgreSQL **15.20** en contenedor temporal:
+## Evidencia PostgreSQL 15
 
-- **11 passed, 0 skipped**.
-- La carrera de invitaciones duplicadas terminó con un éxito, un conflicto HTTP 400 y una única fila.
-- La prueba de pausa confirmó que una escritura que llega al lock después de la transición se rechaza con HTTP 409.
-- Dos envíos simultáneos a una bandeja llena conservaron el límite de 50 y persistieron ambos envíos.
-- La inyección de fallo durante la notificación revirtió tanto la expulsión como la inserción.
+Se usó PostgreSQL **15.20**. El módulo adversarial y suites sociales enfocadas en esta iteración: **43 passed, 0 skipped**. Todas las suites de concurrencia PostgreSQL más el módulo adversarial: **60 passed**.
 
-## Hallazgos hermanos fuera del scope autorizado
+La cobertura específica incluye:
 
-No se modificaron otros servicios o routers. La revisión de rutas identificó estas escrituras que parecen poder continuar en mundos pausados/cerrados; se notifican para triage separado:
-
-1. **Transferencia de liderazgo:** `batalla_medieval_backend/app/routers/alliance.py`, `transfer_leadership()`, delega a `services/community.py::transfer_leadership()`. El router requiere membresía y capacidad, pero el servicio no exige el lock de mundo abierto antes de cambiar rangos y `leader_id`.
-2. **Chat WebSocket:** `batalla_medieval_backend/app/routers/chat.py`, `websocket_chat()`, valida sesión/membresía, pero el loop persiste `ChatMessage` y hace `commit()` sin comprobar ni bloquear lifecycle del mundo antes de cada escritura.
-
-Estos dos puntos se identificaron por inspección estática del flujo, no se presentan como reproducciones runtime de esta suite. Quedan fuera de los archivos permitidos para la corrección solicitada; requieren seguimiento en sus archivos responsables. Los handlers de escritura de foro revisados sí llaman `require_world_open_http()`.
+- Carrera entre pausa y transferencia de liderazgo: una transferencia que espera al lock ve la pausa y devuelve HTTP 409 sin cambiar líder/rangos.
+- La creación de alianza adquiere el lock de mundo antes del lock del usuario fundador, consistente con el orden de los envíos sociales y sin inversión de locks.
+- Carrera entre pausa y mensaje privado: la solicitud que pierde el lock se rechaza y no crea filas de estado premium, mensajes ni notificaciones.
+- Carrera entre pausa y WebSocket/mensajería existente, inbox lleno y duplicación de invitaciones.
+- Dos envíos simultáneos a una bandeja llena conservan el límite y ambas entregas; entrega completa revierte mensaje y expulsión si falla el commit.
+- Un socket existente no persiste chat durante pausa/cierre/archivo y vuelve a escribir después de reabrir el mundo.
 
 ## Pruebas ejecutadas
 
-- Módulo adversarial en SQLite: **8 passed, 3 skipped**; los skips son únicamente pruebas que requieren PostgreSQL.
-- Módulo adversarial en PostgreSQL 15.20: **11 passed**.
-- Suite relevante SQLite (alianzas, diplomacia, foro, mensajería, chat, lifecycle y casos nuevos): **51 passed, 6 skipped**.
-- Suites PostgreSQL de concurrencia social/lifecycle/anti-cheat más el módulo nuevo: **17 passed**.
-- Suite backend completa: **1530 passed, 45 skipped, 74 subtests passed**, con `umask 022` y un `basetemp` privado. La primera ejecución en el sandbox heredó una umask `002` que hizo que las pruebas G5 operativas rechazaran directorios escribibles por grupo; con el entorno temporal corregido, el conjunto completo pasó.
+- Módulo adversarial más suites de chat, alianza y mensajes en SQLite: **37 passed, 6 skipped**; los skips requieren locks PostgreSQL.
+- El mismo conjunto en PostgreSQL 15.20: **43 passed**.
+- Suites de concurrencia PostgreSQL (`tests/test_*concurrency*.py`) más el módulo adversarial: **60 passed**.
+- Suite backend completa en SQLite: **1573 passed, 49 skipped, 74 subtests passed**.
+- Suite backend completa en PostgreSQL 15.20: **1618 passed, 2 skipped, 2 deselected, 74 subtests passed**. Se excluyeron dos casos cuyo contrato es específicamente SQLite: la CLI exige un archivo SQLite y el test de movimiento fuerza una violación de FK que SQLite tolera.
+- Los gates browser no se ejecutaron.
 
-Los gates browser no se ejecutaron. No se afirma que G7 esté certificado; los dos hallazgos hermanos arriba permanecen pendientes y el PR debe seguir Draft.
+No se declara G7 certificado/cerrado. El PR debe permanecer Draft hasta la validación y triage de mantenimiento.

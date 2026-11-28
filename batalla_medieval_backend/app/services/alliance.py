@@ -626,17 +626,20 @@ def send_mass_message(
                 models.Message.world_id == alliance.world_id,
             )
             limit = limits.get(recipient_id, premium_service.BASE_MESSAGE_LIMIT)
-            if inbox_query.count() >= limit:
-                oldest = (
+            inbox_count = inbox_query.count()
+            if inbox_count >= limit:
+                excess_count = inbox_count - limit + 1
+                oldest_messages = (
                     inbox_query.order_by(
                         models.Message.timestamp.asc(),
                         models.Message.id.asc(),
                     )
                     .with_for_update()
-                    .first()
+                    .limit(excess_count)
+                    .all()
                 )
-                if oldest is not None:
-                    db.delete(oldest)
+                for oldest_message in oldest_messages:
+                    db.delete(oldest_message)
 
             db.add(
                 models.Message(

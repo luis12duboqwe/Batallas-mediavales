@@ -176,16 +176,20 @@ def send_message(
         models.Message.receiver_id == receiver.id,
         models.Message.world_id == world_id,
     )
-    oldest = None
-    if inbox_query.count() >= inbox_limit:
-        oldest = (
+    inbox_count = inbox_query.count()
+    if inbox_count >= inbox_limit:
+        excess_count = inbox_count - inbox_limit + 1
+        oldest_messages = (
             inbox_query.order_by(
                 models.Message.timestamp.asc(),
                 models.Message.id.asc(),
             )
             .with_for_update()
-            .first()
+            .limit(excess_count)
+            .all()
         )
+        for oldest_message in oldest_messages:
+            db.delete(oldest_message)
 
     message = models.Message(
         sender_id=sender.id,
@@ -195,8 +199,6 @@ def send_message(
         content=content,
     )
     db.add(message)
-    if oldest is not None:
-        db.delete(oldest)
 
     notification = models.Notification(
         user_id=receiver.id,
