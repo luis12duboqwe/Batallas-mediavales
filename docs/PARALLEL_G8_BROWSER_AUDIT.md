@@ -27,6 +27,8 @@ El 2026-11-28, en Linux con Node 22.23.5 y Playwright 1.55.0, se instalaron Fire
 
 También pasaron `npm run lint`, `npm run build` y `node --check` del nuevo script. El primer intento del arnés retuvo una preflight CORS y eligió coordenadas fuera del mundo; se corrigió el arnés y se repitió. No es un defecto de producto. La primera clasificación de logs también señaló como inesperados errores deliberados de 503/401; se restringió por endpoint y estado antes de repetir.
 
+En la continuación, el arnés aislado ejecutó el commit limpio `70574b00e3d99ce2993fbcfbcc68b507313efdce`: **20/20** escenarios (cinco por motor y viewport), `npm ci` con SHA-256 del lockfile `491412b84fd1f1bcceb6945913f0bc91b898dd36fa8a618cc33ec1f83fb78634`, Vite 8.3.8, WebKit y Firefox. Se comprobó el rechazo de HEAD incorrecto y checkout sucio y la limpieza tras SIGTERM. Una prueba local separada mostró que WebKit sigue una redirección de upgrade; el cliente sin redirecciones rechazó el 302 sin conectar al destino. Esta evidencia corresponde a ese commit, no implica que otro HEAD o CI hayan pasado.
+
 **Defectos reproducibles de producto agrupados:** ninguno confirmado en esta matriz. No se propone modificar frontend ajeno al alcance. Los defectos de mapa/militar descritos en la auditoría anterior deben mantenerse y volver a comprobarse por separado; este resultado no los cierra.
 
 ## Reproducir
@@ -36,6 +38,16 @@ También pasaron `npm run lint`, `npm run build` y `node --check` del nuevo scri
 El arnés `e2e/parallel-g8-ci.mjs` exige el SHA completo y un checkout limpio, exporta **ese commit** con `git archive` a un directorio temporal, instala únicamente el lockfile frontend con `npm ci`, migra y siembra una SQLite desechable, compila y arranca servicios loopback propios con puertos efímeros. Espera el anuncio de arranque de cada proceso y falla si alguno termina. Ejecuta obligatoriamente ambos motores y ambos tamaños, y elimina DB, export y procesos incluso al fallar o recibir SIGINT/SIGTERM. No instala ni actualiza paquetes en el checkout.
 
 Playwright no está incluido en el lockfile del frontend: el arnés exige una instalación externa de `@playwright/test` **1.55.0** ya preparada (como en CI existente), y comprueba su versión; no ejecuta `npm install` sobre el frontend ni altera su grafo fijado. El intérprete Python debe estar previamente preparado con `batalla_medieval_backend/requirements.txt`; sus dependencias transitivas no tienen lockfile y no se afirma reproducibilidad bit a bit. Instalar antes los navegadores y bibliotecas de sistema según la plataforma. Los únicos argumentos externos son rutas locales y el SHA; las URL y la configuración de test las fija el arnés.
+
+Por ejemplo, preparar las herramientas fuera del checkout, con acceso al registro y permisos adecuados para las bibliotecas de sistema:
+
+```bash
+python -m venv /tmp/medievol-g8-python
+/tmp/medievol-g8-python/bin/pip install -r batalla_medieval_backend/requirements.txt
+npm install --prefix /tmp/medievol-g8-tools --no-save --package-lock=false @playwright/test@1.55.0
+/tmp/medievol-g8-tools/node_modules/.bin/playwright install firefox webkit
+/tmp/medievol-g8-tools/node_modules/.bin/playwright install-deps firefox webkit
+```
 
 ```bash
 export G8_EXPECTED_HEAD="$(git rev-parse HEAD)"

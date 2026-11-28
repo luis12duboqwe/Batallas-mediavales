@@ -94,7 +94,7 @@ async function scenario(browser, label, options, work) {
   await context.routeWebSocket('**/*', (socket) => {
     const url = new URL(socket.url());
     if (url.protocol === 'ws:' && url.hostname === '127.0.0.1' && [new URL(UI).port, new URL(API).port].includes(url.port)) {
-      const peer = new WebSocketClient(url.href, { followRedirects: false });
+      const peer = new WebSocketClient(url.href, { followRedirects: false, origin: new URL(page.url()).origin });
       sockets.add(peer);
       const pending = [];
       socket.onMessage((data) => {

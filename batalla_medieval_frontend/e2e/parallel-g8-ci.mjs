@@ -3,7 +3,6 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,18 +23,22 @@ assert.equal(command('git', ['rev-parse', 'HEAD']), expected, 'Unexpected HEAD')
 assert.equal(command('git', ['status', '--porcelain', '--untracked-files=all']), '', 'Checkout must be clean');
 assert.equal(command('git', ['rev-parse', '--show-toplevel']), root);
 
-const scratch = await mkdtemp(join(tmpdir(), 'medievol-journey-g8-'));
+const scratch = await mkdtemp('/tmp/medievol-journey-g8-');
 const children = [];
+const groups = new Set();
 let interrupted = false;
-function signalGroup(child, signal) {
-  if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
-  try { process.kill(-child.pid, signal); } catch (error) {
+let escalation;
+function signalGroup(pid, signal) {
+  try { process.kill(-pid, signal); } catch (error) {
     if (error.code !== 'ESRCH') throw error;
   }
 }
 const stop = () => {
   interrupted = true;
-  for (const child of children) signalGroup(child, 'SIGTERM');
+  for (const pid of groups) signalGroup(pid, 'SIGTERM');
+  escalation ||= setTimeout(() => {
+    for (const pid of groups) signalGroup(pid, 'SIGKILL');
+  }, 5000);
 };
 process.once('SIGINT', stop);
 process.once('SIGTERM', stop);
@@ -51,11 +54,25 @@ async function port() {
   });
 }
 
+function track(child) {
+  const done = new Promise((resolveClose) => child.once('close', () => {
+    if (child.pid) {
+      try { process.kill(-child.pid, 0); } catch (error) {
+        if (error.code === 'ESRCH') groups.delete(child.pid);
+        else throw error;
+      }
+    }
+    resolveClose();
+  }));
+  children.push(done);
+  if (child.pid) groups.add(child.pid);
+}
+
 async function run(program, args, options) {
   assert.ok(!interrupted, 'Interrupted');
   await new Promise((resolveRun, reject) => {
     const child = spawn(program, args, { ...options, detached: true, stdio: 'inherit' });
-    children.push(child);
+    track(child);
     child.once('error', reject);
     child.once('exit', (code, signal) => {
       if (code === 0 && !interrupted) resolveRun();
@@ -67,7 +84,7 @@ async function run(program, args, options) {
 function start(program, args, cwd, env, marker) {
   return new Promise((resolveStart, reject) => {
     const child = spawn(program, args, { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    children.push(child);
+    track(child);
     let output = '';
     let ready = false;
     const timer = setTimeout(() => reject(new Error(`${program} did not announce startup: ${output.slice(-2000)}`)), 30000);
@@ -140,10 +157,23 @@ try {
   assert.ok(!interrupted, 'Interrupted');
 } finally {
   stop();
-  await Promise.all(children.map((child) => child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise((resolveExit) => {
-    const timer = setTimeout(() => signalGroup(child, 'SIGKILL'), 5000);
-    child.once('exit', () => { clearTimeout(timer); resolveExit(); });
-  })));
+  await Promise.all(children);
+  await new Promise((resolveDrain) => {
+    const deadline = Date.now() + 5000;
+    const check = () => {
+      for (const pid of groups) {
+        try { process.kill(-pid, 0); } catch (error) {
+          if (error.code === 'ESRCH') groups.delete(pid);
+          else throw error;
+        }
+      }
+      if (!groups.size || Date.now() >= deadline) return resolveDrain();
+      setTimeout(check, 50);
+    };
+    check();
+  });
+  for (const pid of groups) signalGroup(pid, 'SIGKILL');
+  clearTimeout(escalation);
   await rm(scratch, { recursive: true, force: true });
   process.removeListener('SIGINT', stop);
   process.removeListener('SIGTERM', stop);
