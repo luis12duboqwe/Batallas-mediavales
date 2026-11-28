@@ -29,7 +29,7 @@ class Reader:
 
 
 def test_observation_checks_scoped_effective_privileges_in_one_read_only_snapshot():
-    reader = Reader("|".join(["1"] * 16))
+    reader = Reader("|".join(["1"] * 22))
     assert inspect_runtime_privileges(TARGET, reader, RULES).blockers == ()
     assert len(reader.calls) == 1
     database, sql = reader.calls[0]
@@ -42,8 +42,8 @@ def test_observation_checks_scoped_effective_privileges_in_one_read_only_snapsho
 
 
 def test_missing_relation_and_missing_and_unexpected_privileges_are_distinct():
-    values = ["1"] * 16
-    values[7] = values[9] = values[11] = "0"
+    values = ["1"] * 22
+    values[11] = values[14] = values[16] = "0"
     result = inspect_runtime_privileges(TARGET, Reader("|".join(values)), RULES)
     assert result.blockers == ("hero_items:exists", "hero_items:missing:SELECT",
                                "hero_items:unexpected:DELETE")
@@ -51,7 +51,7 @@ def test_missing_relation_and_missing_and_unexpected_privileges_are_distinct():
 
 def test_forbidden_column_acl_is_checked():
     rule = RelationRule("item_templates", "table", frozenset({"SELECT"}), frozenset({"UPDATE"}))
-    reader = Reader("|".join(["1"] * 11))
+    reader = Reader("|".join(["1"] * 16))
     inspect_runtime_privileges(TARGET, reader, (rule,))
     assert "has_any_column_privilege('game_app'" in reader.calls[0][1]
 

@@ -63,6 +63,10 @@ def inspect_runtime_privileges(
         raise AuditError("invalid audit target or rules")
 
     app, admin, database = target.application_role, target.maintenance_role, target.database
+    grantable_grantee = (
+        f"(a.grantee=0 OR EXISTS (SELECT 1 FROM pg_roles r WHERE r.oid=a.grantee "
+        f"AND pg_has_role('{app}', r.oid, 'MEMBER')))"
+    )
     checks = [
         ("context", f"current_database()='{database}' AND current_user='{admin}' "
          "AND current_setting('transaction_read_only')='on' "
@@ -72,10 +76,20 @@ def inspect_runtime_privileges(
          "AND NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls))"),
         ("role_membership", "NOT EXISTS (SELECT 1 FROM pg_roles r "
          f"WHERE r.rolname<>'{app}' AND pg_has_role('{app}', r.oid, 'MEMBER'))"),
+        ("database_owner", "NOT EXISTS (SELECT 1 FROM pg_database d "
+         f"WHERE d.datname=current_database() AND pg_has_role('{app}', d.datdba, 'MEMBER'))"),
+        ("schema_owner", "NOT EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname='public' "
+         f"AND pg_has_role('{app}', n.nspowner, 'MEMBER'))"),
         ("schema_usage", f"has_schema_privilege('{app}', 'public', 'USAGE')"),
         ("schema_create", f"NOT has_schema_privilege('{app}', 'public', 'CREATE')"),
         ("database_create", f"NOT has_database_privilege('{app}', current_database(), 'CREATE')"),
         ("database_temp", f"NOT has_database_privilege('{app}', current_database(), 'TEMP')"),
+        ("database_grant_option", "NOT EXISTS (SELECT 1 FROM pg_database d "
+         "CROSS JOIN LATERAL aclexplode(d.datacl) a WHERE d.datname=current_database() "
+         f"AND a.is_grantable AND {grantable_grantee})"),
+        ("schema_grant_option", "NOT EXISTS (SELECT 1 FROM pg_namespace n "
+         "CROSS JOIN LATERAL aclexplode(n.nspacl) a WHERE n.nspname='public' "
+         f"AND a.is_grantable AND {grantable_grantee})"),
     ]
     for rule in rules:
         kind = "IN ('r','p')" if rule.kind == "table" else "='S'"
@@ -88,6 +102,14 @@ def inspect_runtime_privileges(
         checks.append((f"{rule.name}:exists", f"EXISTS ({relation})"))
         checks.append((f"{rule.name}:owner", f"NOT EXISTS ({relation} AND "
                        f"pg_has_role('{app}', c.relowner, 'MEMBER'))"))
+        checks.append((f"{rule.name}:grant_option",
+                       f"NOT EXISTS (SELECT 1 FROM pg_class c CROSS JOIN LATERAL "
+                       f"aclexplode(c.relacl) a WHERE c.oid={oid} "
+                       f"AND a.is_grantable AND {grantable_grantee})"
+                       + (f" AND NOT EXISTS (SELECT 1 FROM pg_attribute col CROSS JOIN LATERAL "
+                          f"aclexplode(col.attacl) a WHERE col.attrelid={oid} "
+                          f"AND col.attnum>0 AND NOT col.attisdropped AND a.is_grantable "
+                          f"AND {grantable_grantee})" if rule.kind == "table" else "")))
         function = "has_table_privilege" if rule.kind == "table" else "has_sequence_privilege"
         for privilege in sorted(rule.required):
             checks.append((f"{rule.name}:missing:{privilege}",
