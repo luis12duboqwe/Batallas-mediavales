@@ -27,9 +27,15 @@ assert.equal(command('git', ['rev-parse', '--show-toplevel']), root);
 const scratch = await mkdtemp(join(tmpdir(), 'medievol-journey-g8-'));
 const children = [];
 let interrupted = false;
+function signalGroup(child, signal) {
+  if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
+  try { process.kill(-child.pid, signal); } catch (error) {
+    if (error.code !== 'ESRCH') throw error;
+  }
+}
 const stop = () => {
   interrupted = true;
-  for (const child of children) if (child.exitCode === null) child.kill('SIGTERM');
+  for (const child of children) signalGroup(child, 'SIGTERM');
 };
 process.once('SIGINT', stop);
 process.once('SIGTERM', stop);
@@ -45,14 +51,22 @@ async function port() {
   });
 }
 
-function run(program, args, options) {
+async function run(program, args, options) {
   assert.ok(!interrupted, 'Interrupted');
-  command(program, args, { ...options, stdio: 'inherit' });
+  await new Promise((resolveRun, reject) => {
+    const child = spawn(program, args, { ...options, detached: true, stdio: 'inherit' });
+    children.push(child);
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      if (code === 0 && !interrupted) resolveRun();
+      else reject(new Error(`${program} failed: ${signal || code}`));
+    });
+  });
 }
 
 function start(program, args, cwd, env, marker) {
   return new Promise((resolveStart, reject) => {
-    const child = spawn(program, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(program, args, { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     children.push(child);
     let output = '';
     let ready = false;
@@ -94,6 +108,7 @@ try {
   const ui = `http://127.0.0.1:${uiPort}`;
   const env = {
     PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8',
+    ...(process.env.NODE_EXTRA_CA_CERTS ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS } : {}),
     PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || join(process.env.HOME, '.cache/ms-playwright'),
     G8_PLAYWRIGHT_MODULE: process.env.G8_PLAYWRIGHT_MODULE,
     G8_REQUIRE_ALL: '1',
@@ -108,24 +123,25 @@ try {
   const frontend = join(scratch, 'batalla_medieval_frontend');
   const python = process.env.G8_PYTHON;
   console.log(`Node ${process.version}; Python ${command(python, ['--version'])}`);
-  run('npm', ['ci', '--no-audit', '--no-fund'], { cwd: frontend, env });
-  run(python, ['-m', 'alembic', '-c', join(scratch, 'batalla_medieval_backend/alembic.ini'), 'upgrade', 'head'], { cwd: scratch, env });
-  run(python, ['-m', 'app.seed'], { cwd: scratch, env });
+  await run('npm', ['ci', '--no-audit', '--no-fund'], { cwd: frontend, env });
+  await run(python, ['-m', 'alembic', '-c', join(scratch, 'batalla_medieval_backend/alembic.ini'), 'upgrade', 'head'], { cwd: scratch, env });
+  await run(python, ['-m', 'app.seed'], { cwd: scratch, env });
   for (const fixture of ['g2', 'g14', 'g13']) {
     const script = fixture === 'g2' ? 'prepare_g2_e2e.py' : fixture === 'g14' ? 'prepare_g14_community_e2e.py' : 'prepare_g13_hero_e2e.py';
-    run(python, [join(scratch, 'scripts', script)], { cwd: scratch, env });
+    await run(python, [join(scratch, 'scripts', script)], { cwd: scratch, env });
   }
-  run('npm', ['run', 'build'], { cwd: frontend, env });
-  await start(python, ['-m', 'uvicorn', 'app.main:socket_app', '--app-dir', join(scratch, 'batalla_medieval_backend'), '--host', '127.0.0.1', '--port', String(apiPort)], scratch, env, `Uvicorn running on ${api}`);
-  await start(process.execPath, [join(frontend, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(uiPort), '--strictPort'], frontend, env, `${ui}/`);
-  assert.ok(children.every((child) => child.exitCode === null), 'A test service exited before the matrix');
-  run(process.execPath, [join(frontend, 'e2e/parallel-g8-browser.mjs')], { cwd: frontend, env });
-  assert.ok(children.every((child) => child.exitCode === null), 'A test service exited during the matrix');
+  await run('npm', ['run', 'build'], { cwd: frontend, env });
+  const backend = await start(python, ['-m', 'uvicorn', 'app.main:socket_app', '--app-dir', join(scratch, 'batalla_medieval_backend'), '--host', '127.0.0.1', '--port', String(apiPort)], scratch, env, `Uvicorn running on ${api}`);
+  const preview = await start(process.execPath, [join(frontend, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(uiPort), '--strictPort'], frontend, env, `${ui}/`);
+  const running = (child) => child.exitCode === null && child.signalCode === null;
+  assert.ok([backend, preview].every(running), 'A test service exited before the matrix');
+  await run(process.execPath, [join(frontend, 'e2e/parallel-g8-browser.mjs')], { cwd: frontend, env });
+  assert.ok([backend, preview].every(running), 'A test service exited during the matrix');
   assert.ok(!interrupted, 'Interrupted');
 } finally {
   stop();
-  await Promise.all(children.map((child) => child.exitCode !== null ? Promise.resolve() : new Promise((resolveExit) => {
-    const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
+  await Promise.all(children.map((child) => child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise((resolveExit) => {
+    const timer = setTimeout(() => signalGroup(child, 'SIGKILL'), 5000);
     child.once('exit', () => { clearTimeout(timer); resolveExit(); });
   })));
   await rm(scratch, { recursive: true, force: true });

@@ -12,6 +12,8 @@ const packagePath = require.resolve('@playwright/test/package.json', process.env
   ? { paths: [dirname(process.env.G8_PLAYWRIGHT_MODULE)] } : undefined);
 assert.equal(require(packagePath).version, '1.55.0', 'The existing browser tooling must be Playwright 1.55.0');
 const { firefox, webkit } = require(playwright);
+const corePath = require.resolve('playwright-core/package.json', { paths: [dirname(packagePath)] });
+const WebSocketClient = require(resolve(dirname(corePath), 'lib/utilsBundle.js')).ws;
 
 assertIsolated();
 for (const value of [process.env.VITE_SOCKET_URL, API, UI].filter(Boolean)) {
@@ -43,6 +45,7 @@ async function scenario(browser, label, options, work) {
   const unexpected = [];
   const consoleChecks = [];
   const expectedStatuses = new Set();
+  const sockets = new Set();
   let expectedConsole = () => false;
   let offline = false;
   let closing = false;
@@ -91,7 +94,18 @@ async function scenario(browser, label, options, work) {
   await context.routeWebSocket('**/*', (socket) => {
     const url = new URL(socket.url());
     if (url.protocol === 'ws:' && url.hostname === '127.0.0.1' && [new URL(UI).port, new URL(API).port].includes(url.port)) {
-      socket.connectToServer();
+      const peer = new WebSocketClient(url.href, { followRedirects: false });
+      sockets.add(peer);
+      const pending = [];
+      socket.onMessage((data) => {
+        if (peer.readyState === WebSocketClient.OPEN) peer.send(data);
+        else if (peer.readyState === WebSocketClient.CONNECTING) pending.push(data);
+      });
+      socket.onClose(() => { peer.terminate(); sockets.delete(peer); });
+      peer.on('open', () => { for (const data of pending) peer.send(data); });
+      peer.on('message', (data, binary) => socket.send(binary ? data : data.toString()));
+      peer.on('error', (error) => { if (!closing) unexpected.push(`WebSocket: ${error.message}`); });
+      peer.on('close', () => { sockets.delete(peer); void socket.close(); });
     } else {
       unexpected.push(`Blocked external WebSocket: ${url.origin}${url.pathname}`);
       socket.close();
@@ -108,6 +122,7 @@ async function scenario(browser, label, options, work) {
   } finally {
     await Promise.all(consoleChecks);
     closing = true;
+    for (const peer of sockets) peer.terminate();
     await context.close();
   }
   if (unexpected.length) {
