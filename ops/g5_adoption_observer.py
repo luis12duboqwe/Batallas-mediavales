@@ -1036,8 +1036,8 @@ def _pg_snapshot(
         "('pg_write_all_data','pg_read_all_data','pg_execute_server_program',"
         "'pg_read_server_files','pg_write_server_files')) "
         "AND pg_has_role(current_user,p.oid,'MEMBER'))\").one(); "
-        "print(json.dumps(list(r)+(c.exec_driver_sql(\"SELECT "
-        "current_setting('transaction_read_only')\").scalar_one(),))); "
+        "print(json.dumps(list(r)+[c.exec_driver_sql(\"SELECT "
+        "current_setting('transaction_read_only')\").scalar_one()])); "
         "c.close(); e.dispose()"
     )
     try:
