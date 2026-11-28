@@ -136,7 +136,12 @@ def test_full_observation_raises_with_typed_partial_inventory(monkeypatch, tmp_p
     assert "Nginx loaded configuration" in " ".join(error.value.partial.blockers)
 
 
-def test_runner_uses_bounded_argv_and_sanitizes_command_failures():
+def test_runner_uses_bounded_argv_and_sanitizes_command_failures(monkeypatch):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(observer.Path, "is_socket", lambda self: True)
+    monkeypatch.setattr(observer.subprocess, "Popen", lambda *a, **k: pytest.fail("unexpected subprocess"))
     with pytest.raises(observer.ObservationError, match="unsupported executable"):
         observer._run(["python"], timeout=7, max_output_bytes=10)
 

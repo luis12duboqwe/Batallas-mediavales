@@ -264,6 +264,25 @@ def _compose_file(root: Path, project: str, sha: str) -> tuple[Path, Path]:
     return compose_path, env_file
 
 
+
+_EXPECTED_PARTIAL_BLOCKERS = frozenset({
+    "immutable image digest or provenance observation is incomplete",
+    "Nginx loaded configuration cannot be authenticated with a read-only runtime interface",
+})
+
+
+def _assert_partial_observations(observed, sha: str) -> None:
+    """Do not treat a repeatable observation failure as a successful rehearsal."""
+    if (observed.before != observed.after
+            or observed.before.checkout.commit_sha != sha
+            or observed.before.caddy_routes != ("/",)
+            or observed.after.caddy_routes != ("/",)
+            or set(observed.before.blockers) != _EXPECTED_PARTIAL_BLOCKERS
+            or set(observed.after.blockers) != _EXPECTED_PARTIAL_BLOCKERS
+            or set(observed.blockers) != _EXPECTED_PARTIAL_BLOCKERS):
+        raise RuntimeError("live disposable inventory failed required partial evidence assertions")
+
+
 def run() -> None:
     """Create, observe, adversarially mutate, and clean up only a CI fixture."""
     workspace = os.environ.get("GITHUB_WORKSPACE")
@@ -359,14 +378,7 @@ def run() -> None:
             Path(workspace), env_file, (compose_path,), project
         )
         observed = observer.observe_partial(request, runner=observer._run)
-        if (observed.before != observed.after
-                or observed.before.checkout.commit_sha != sha
-                or observed.before.identity.postgres_system_identifier
-                != observed.after.identity.postgres_system_identifier
-                or observed.before.identity.database_oid != observed.after.identity.database_oid
-                or not any("Nginx loaded configuration" in blocker
-                           for blocker in observed.blockers)):
-            raise RuntimeError("live disposable inventory failed identity/drift assertions")
+        _assert_partial_observations(observed, sha)
 
         worker = next(
             row for row in observer._container_rows(observer._run, request)

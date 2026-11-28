@@ -45,3 +45,33 @@ def test_rehearsal_rejects_self_hosted_before_docker(monkeypatch):
     monkeypatch.setattr(lab, "_docker", lambda *_a, **_k: pytest.fail("must not access Docker"))
     with pytest.raises(RuntimeError, match="GitHub CI"):
         lab.run()
+
+
+def test_live_partial_observation_accepts_only_documented_limits():
+    from types import SimpleNamespace
+    from ops import ci_g5_adoption_observer as lab
+
+    sha = "a" * 40
+    blockers = tuple(sorted(lab._EXPECTED_PARTIAL_BLOCKERS))
+    row = SimpleNamespace(checkout=SimpleNamespace(commit_sha=sha),
+                          caddy_routes=("/",), blockers=blockers)
+    observations = SimpleNamespace(before=row, after=row, blockers=blockers)
+    lab._assert_partial_observations(observations, sha)
+    # Identical degraded snapshots must not pass.
+    for unexpected in (
+        "runtime Compose service hash differs from effective configuration",
+        "Caddy loaded runtime route could not be verified",
+        "partial host inventory drifted during independent observation",
+    ):
+        bad = SimpleNamespace(checkout=row.checkout, caddy_routes=row.caddy_routes,
+                              blockers=blockers + (unexpected,))
+        with pytest.raises(RuntimeError, match="required partial evidence"):
+            lab._assert_partial_observations(
+                SimpleNamespace(before=bad, after=bad, blockers=bad.blockers), sha)
+    no_route = SimpleNamespace(checkout=row.checkout, caddy_routes=(), blockers=blockers)
+    with pytest.raises(RuntimeError, match="required partial evidence"):
+        lab._assert_partial_observations(
+            SimpleNamespace(before=no_route, after=no_route, blockers=blockers), sha)
+    with pytest.raises(RuntimeError, match="required partial evidence"):
+        lab._assert_partial_observations(
+            SimpleNamespace(before=row, after=row, blockers=()), sha)
