@@ -56,6 +56,12 @@ jobs:
           docker info >/dev/null
           docker pull postgres:15-alpine
           docker image inspect postgres:15-alpine >/dev/null
+      - name: Verify runtime privilege matrix on isolated PG15
+        timeout-minutes: 8
+        env:
+          CI: "true"
+          G5_PRIVILEGE_AUDIT_PG15: "1"
+        run: pytest -q -o addopts= tests/test_g5_runtime_privilege_audit.py tests/test_g5_runtime_privilege_audit_pg15.py
       - name: Run backend tests
         run: pytest
 
