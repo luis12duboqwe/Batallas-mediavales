@@ -530,7 +530,8 @@ class ComposeFixtureRunner:
                 "State": {"Running": running},
                 "HostConfig": {
                     "PortBindings": {},
-                    "Privileged": False, "CapAdd": [], "Devices": [],
+                    "Privileged": False, "CapAdd": [], "CapDrop": [], "Devices": [],
+                    "SecurityOpt": [], "ReadonlyRootfs": False, "UsernsMode": "",
                     "NetworkMode": "isolated_web", "PidMode": "", "IpcMode": "private",
                     "RestartPolicy": {"Name": "no" if service in {"migrate", "seed"}
                                       else "unless-stopped", "MaximumRetryCount": 0},
@@ -684,11 +685,33 @@ def test_synthetic_compose_fixture_exercises_cluster_drift(monkeypatch, compose_
     assert any("drifted" in blocker for blocker in result.blockers)
 
 
+def test_effective_compose_rejects_unexpected_environment_mount_and_commands(compose_fixture):
+    _, runner = compose_fixture
+    observer._validate_service_configuration(runner.config)
+
+    config = json.loads(json.dumps(runner.config))
+    config["services"]["backend"]["environment"]["DOCKER_HOST"] = "tcp://example:2375"
+    with pytest.raises(observer.ObservationError, match="environment key"):
+        observer._validate_service_configuration(config)
+
+    config = json.loads(json.dumps(runner.config))
+    config["services"]["backend"]["volumes"] = [{
+        "type": "bind", "source": "/", "target": "/host"
+    }]
+    with pytest.raises(observer.ObservationError, match="mount"):
+        observer._validate_service_configuration(config)
+
+    config = json.loads(json.dumps(runner.config))
+    config["services"]["worker"]["command"] = ["sh", "-c", "unexpected"]
+    with pytest.raises(observer.ObservationError, match="unexpected command"):
+        observer._validate_service_configuration(config)
+
+
 @pytest.mark.parametrize(
     "options,expected",
     [
         ({"drift_config": True}, "drifted"),
-        ({"drift_volume": True}, "drifted"),
+        ({"drift_volume": True}, "project-local"),
         ({"drift_network": True}, "drifted"),
         ({"wrong_runtime_environment": True}, "runtime environment"),
     ],

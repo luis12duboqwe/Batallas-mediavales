@@ -1,37 +1,51 @@
 # G5 adoption observer (observation only)
 
-`ops.g5_adoption_observer` converts independently collected, read-only host
-evidence into the existing `HostInventory` and `HostObservations` types from
-`ops.g5_adoption_plan`. It has no production CLI, does not enable the G5
-deployment adapter, and cannot authorize backup, restore, writer reopening, or
-publication of metadata. The planner remains `NO_GO_PLAN_ONLY`; a pair of
-point-in-time observations is not a continuous barrier.
+`ops.g5_adoption_observer` collects independently observed, read-only host
+evidence. Because this repository cannot authenticate the routes loaded by
+Nginx workers, it returns `PartialHostInventory` from `observe_partial`;
+`observe` raises `ObservationBlocked` with those partial observations instead
+of manufacturing the planner's `HostInventory`. It has no production CLI,
+does not enable the G5 deployment adapter, and cannot authorize backup,
+restore, writer reopening, or publication of metadata. The planner remains
+`NO_GO_PLAN_ONLY`; point-in-time observations are not a continuous barrier.
 
 ## Calling the collector
 
-The public entry point is `observe(ObserverRequest, runner=..., clock=...)`.
+The entry points are `observe_partial(ObserverRequest, runner=..., clock=...)`
+and `observe(ObserverRequest, runner=..., clock=...)`.
 The request supplies the checkout, env file, Compose files, and project name.
 The runner accepts an argv sequence plus timeout and output limits and returns
-stdout. The default runner calls `subprocess.run` with `shell=False`, no stdin,
-a 20-second per-command timeout, and bounded accepted output. Tests replace it
-with a deterministic in-memory fixture; command errors and stderr are never
-copied into observer errors.
+stdout. The default runner is restricted to GitHub Actions, a local Unix Docker
+socket, and a unique fixture project; it uses argv without a shell, no stdin,
+a 20-second per-command timeout, bounded output, and process-group cleanup on
+timeouts. Tests replace it with a deterministic in-memory fixture; command
+errors and stderr are never copied into observer errors. This default runner
+is not a general-purpose host collector.
 
 Each collection independently checks the full Git SHA and clean worktree,
 resolved Compose configuration, all project containers (including stopped
 one-shots and orphans), Compose labels, container/image IDs and image source
 revision, actual network membership, mounts and published ports, and the
-PostgreSQL volume. Compose configuration and runtime identities are collected
-twice. Any missing field, unknown service, extra network/route/port/mount,
-duplicate, backend/worker image difference, command failure, or drift blocks
-the observation.
+PostgreSQL volume. Container `ps` IDs must exactly match full inspect IDs;
+actual network member IDs, aliases, and unique addresses must exactly match
+the inspected containers. Service hashes are compared with `docker compose
+config --hash`. Effective backend/worker URLs and migration/seed URLs must
+match their respective roles; runtime entrypoint, command, environment,
+privilege settings, ports, mounts, images, and PG connection roles are checked
+against the effective Compose configuration. Compose and runtime identities
+are collected twice. Missing fields, unknown services, extra
+network/route/port/mounts, duplicates, backend/worker divergence, command
+failures, or drift block the observation.
 
 PostgreSQL evidence is from the live PG15 instance: the maintenance connection
 reports its authenticated role, database OID, `system_identifier`, and server
-version. The backend container opens a separate read-only SQLAlchemy connection
-using its actual runtime `DATABASE_URL`; the returned `current_user` and
-`session_user` must match the statically validated split. No URL, password,
-complete environment, SQL dump, or user-table data is returned or logged.
+version in the PostgreSQL 15 range and must be a superuser maintenance
+connection. Backend and worker each open fresh, read-only SQLAlchemy
+connections using their actual runtime `DATABASE_URL`; the returned
+`current_user`, `session_user`, database OID, and server IP must match the
+statically validated role split and inspected database container. No URL,
+password, complete environment, SQL dump, or user-table data is returned or
+logged.
 `schema_sha256` hashes only the source-side `pg_dump --schema-only
 --no-owner --no-privileges` output. This is a source catalog fingerprint; it
 is not a data checksum and is not interchangeable with a restored catalog's
@@ -75,32 +89,40 @@ When present, the existing safe `deploy.lock` is opened read-only and held
 with a non-blocking shared lock; a busy, missing, unsafe, or replaced lock
 blocks non-absent metadata. Existing G5 state is classified through
 `g5_incident_inspect.inspect_incident` and rechecked under shared read locks.
-`.release.env` is checked only for safe file metadata and is never read.
-Malformed, unknown, non-terminal, or racing metadata blocks collection. A
-missing `.release-sha` is reported as absent only when no legacy/G5 state
-suggests an existing installation; it is never inferred from the checkout or
-container labels.
+When `.release.env` is present, its private values are compared in memory
+against observed database roles/settings and effective application image
+references; values are never returned or logged. A leftover `.release.env.next`
+or `.release.env.previous` is fail-closed: the current `ops/deploy_remote.sh`
+removes `.release.env.previous` on successful completion, so a surviving
+transient is not treated as an ordinary completed release. Malformed, unknown,
+non-terminal, or racing metadata blocks collection. A missing `.release-sha`
+is reported as absent only when no legacy/G5 state suggests an existing
+installation; it is never inferred from the checkout or container labels.
 
 ## Tests and later CI integration
 
-Run the executable, Docker-free command fixture and focused tests with:
+Run the Docker-free command fixture and focused tests with:
 
 ```text
 python -m pytest -q -o addopts= tests/test_g5_adoption_observer.py
 ```
 
 `ComposeFixtureRunner` returns synthetic command responses and never starts a
-container, opens a socket, or contacts a host. Its inventory-assembly test
-injects a synthetic edge observation and is not a successful runtime
-observation or real environment rehearsal. The default collector must block
-until trusted loaded-Nginx introspection can be implemented and independently
-verified.
+container, opens a socket, or contacts a host. Its inventory-assembly test is
+not successful runtime evidence or a real environment rehearsal. The live
+GitHub Actions runs for the follow-up commit were `action_required` with zero
+jobs, so they provided no live CI rehearsal or logs. No live Compose fixture
+was run in this sandbox. The default collector must block until trusted
+loaded-Nginx introspection can be implemented and independently verified.
 
-Later CI integration must run only on a GitHub-hosted runner and create
-disposable, project-owned Compose resources with no published ports. The CI
-fixture must use PostgreSQL 15, distinct effective app/maintenance identities,
-immutable images, and independently observe the currently loaded Caddy and
-Nginx route tables. It must clean up only those disposable resources. The
-workflow was intentionally not changed here; a successful CI observation
-still would not establish continuous writer exclusion or authorize a
-backup/restore/reopen step.
+Any live rehearsal must run only on an authorized GitHub-hosted runner and
+create disposable, uniquely named Compose resources with no published ports.
+It must use PostgreSQL 15, distinct effective app/maintenance identities,
+immutable images, and cleanup restricted to resources it owns. The currently
+available workflow run required approval and exposed no jobs; the workflow was
+not changed. More importantly, this repository has no trusted read-only
+interface for authenticating Nginx's loaded worker routes, so a real fixture
+cannot produce a complete `HostInventory` or claim TLS readiness. Even a
+successful future partial CI observation would not establish continuous
+writer exclusion or authorize backup, restore, writer reopening, or metadata
+publication.

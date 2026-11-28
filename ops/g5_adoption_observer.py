@@ -93,6 +93,41 @@ _SERVICES = frozenset({
     "backend", "frontend", "worker", "database", "nginx", "caddy", "migrate", "seed"
 })
 _REQUIRED = frozenset({"backend", "frontend", "worker", "database", "nginx", "caddy"})
+_ALLOWED_ENV = {
+    "backend": frozenset({
+        "APP_ENV", "DATABASE_URL", "SECRET_KEY", "CORS_ORIGINS", "SMTP_HOST",
+        "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_USE_STARTTLS",
+        "FROM_EMAIL", "FRONTEND_URL",
+    }),
+    "worker": frozenset({
+        "APP_ENV", "DATABASE_URL", "SECRET_KEY", "CORS_ORIGINS", "SMTP_HOST",
+        "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "FROM_EMAIL", "FRONTEND_URL",
+    }),
+    "migrate": frozenset({
+        "APP_ENV", "DATABASE_URL", "SECRET_KEY", "CORS_ORIGINS", "SMTP_HOST",
+        "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_USE_STARTTLS",
+        "FROM_EMAIL", "FRONTEND_URL",
+    }),
+    "seed": frozenset({
+        "APP_ENV", "DATABASE_URL", "SECRET_KEY", "CORS_ORIGINS", "SMTP_HOST",
+        "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_USE_STARTTLS",
+        "FROM_EMAIL", "FRONTEND_URL",
+    }),
+    "database": frozenset({"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"}),
+    "caddy": frozenset({"PUBLIC_HOST", "TLS_EMAIL"}),
+    "nginx": frozenset(),
+    "frontend": frozenset(),
+}
+_ALLOWED_MOUNT_TARGETS = {
+    "database": {"/var/lib/postgresql/data": "volume"},
+    "nginx": {
+        "/etc/nginx/nginx.conf": "bind",
+        "/etc/nginx/edge-maintenance": "bind",
+    },
+    "caddy": {
+        "/etc/caddy/Caddyfile": "bind", "/data": "volume", "/config": "volume",
+    },
+}
 _MAX_OUTPUT = 4 * 1024 * 1024
 _TIMEOUT = 20
 
@@ -650,6 +685,63 @@ def _validate_compose_config_hashes(
             raise ObservationError("runtime Compose service hash differs from effective configuration")
 
 
+def _validate_service_configuration(config: dict) -> None:
+    services = config.get("services")
+    if not isinstance(services, dict) or set(services) != _SERVICES:
+        raise ObservationError("effective Compose service topology is incomplete or unexpected")
+    volumes = config.get("volumes")
+    networks = config.get("networks")
+    if not isinstance(volumes, dict) or set(volumes) != {
+        "postgres-data", "caddy-data", "caddy-config"
+    } or not isinstance(networks, dict) or set(networks) != {"web"}:
+        raise ObservationError("effective Compose storage or network topology is unexpected")
+    for name, spec in volumes.items():
+        if (not isinstance(spec, dict) or spec.get("external")
+                or spec.get("driver") not in (None, "local") or spec.get("driver_opts")
+                or spec.get("name") not in (None, f"{config.get('name', '')}_{name}")):
+            raise ObservationError("effective Compose named volume is not project-local")
+    network = networks["web"]
+    if (not isinstance(network, dict) or network.get("driver") not in (None, "bridge")
+            or network.get("external") or network.get("internal")
+            or network.get("driver_opts") or network.get("ipam")
+            or network.get("attachable")):
+        raise ObservationError("effective Compose network is not an isolated bridge")
+    forbidden = {
+        "cap_add", "cap_drop", "devices", "dns", "dns_search", "entrypoint",
+        "extra_hosts", "network_mode", "pid", "ipc", "privileged", "ports",
+        "security_opt", "sysctls", "tmpfs", "userns_mode", "volumes_from",
+    }
+    allowed_fixture_commands = {
+        "backend": [["python", "-c", "import time; time.sleep(3600)"]],
+        "worker": [["python", "-c", "import time; time.sleep(3600)"], "python -m app.worker"],
+        "migrate": [["python", "-c", "pass"], "alembic -c /app/alembic.ini upgrade head"],
+        "seed": [["python", "-c", "pass"], "python -m app.seed"],
+    }
+    for service, spec in services.items():
+        if not isinstance(spec, dict) or forbidden.intersection(spec):
+            raise ObservationError("effective Compose contains unsafe service configuration")
+        environment = _environment_map(spec.get("environment", {}))
+        if set(environment) - _ALLOWED_ENV[service]:
+            raise ObservationError("effective Compose contains an unexpected service environment key")
+        mounts = spec.get("volumes", [])
+        if not isinstance(mounts, list):
+            raise ObservationError("effective Compose mount inventory is malformed")
+        targets = set()
+        for mount in mounts:
+            if not isinstance(mount, dict):
+                raise ObservationError("effective Compose mount is malformed")
+            target, kind = mount.get("target"), mount.get("type")
+            if (not isinstance(target, str) or target in targets
+                    or _ALLOWED_MOUNT_TARGETS.get(service, {}).get(target) != kind):
+                raise ObservationError("effective Compose contains an unsafe or duplicate mount")
+            targets.add(target)
+        command = spec.get("command")
+        if command is not None:
+            choices = allowed_fixture_commands.get(service, [])
+            if command not in choices:
+                raise ObservationError("effective Compose contains an unexpected command")
+
+
 def _network_identity(
     runner: Runner, containers: list[dict], config: dict, project: str
 ) -> str:
@@ -753,10 +845,14 @@ def _validate_mounts(
     host_config = row.get("HostConfig") or {}
     if (host_config.get("Privileged") is not False
             or host_config.get("CapAdd") not in (None, [])
+            or host_config.get("CapDrop") not in (None, [])
             or host_config.get("Devices") not in (None, [])
+            or host_config.get("SecurityOpt") not in (None, [])
+            or host_config.get("ReadonlyRootfs") is not False
             or host_config.get("NetworkMode", "").startswith("host")
             or host_config.get("PidMode") == "host"
-            or host_config.get("IpcMode") == "host"):
+            or host_config.get("IpcMode") == "host"
+            or host_config.get("UsernsMode") not in (None, "")):
         raise ObservationError("container has privileged host access or an extra capability")
     wanted = spec.get("volumes", [])
     if not isinstance(wanted, list) or len(wanted) != len(actual):
@@ -766,6 +862,12 @@ def _validate_mounts(
     if (len(by_target) != len(wanted) or len(set(actual_targets)) != len(actual_targets)
             or len(actual_targets) != len(actual)):
         raise ObservationError("effective Compose mount inventory is malformed")
+    allowed_targets = _ALLOWED_MOUNT_TARGETS.get(service, {})
+    if any(
+        target not in allowed_targets or by_target[target].get("type") != allowed_targets[target]
+        for target in by_target
+    ):
+        raise ObservationError("effective Compose contains an unsafe mount topology")
     volume_id = None
     for mount in actual:
         target = mount.get("Destination")
@@ -1069,9 +1171,9 @@ def _collect_once(request: ObserverRequest, runner: Runner) -> PartialHostInvent
             or not isinstance(config.get("services"), dict)
             or set(config["services"]) != _SERVICES):
         raise ObservationError("effective Compose service topology is incomplete or unexpected")
-    for service, spec in config["services"].items():
-        if not isinstance(spec, dict) or spec.get("ports"):
-            raise ObservationError("effective Compose contains a port exposure or malformed service")
+    _validate_service_configuration(config)
+    if any(spec.get("ports") for spec in config["services"].values()):
+        raise ObservationError("effective Compose contains a port exposure")
 
     rows = _container_rows(runner, request)
     service_rows: dict[str, dict] = {}
