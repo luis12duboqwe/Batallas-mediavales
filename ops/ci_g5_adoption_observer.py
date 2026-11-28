@@ -20,7 +20,10 @@ _ID = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_OUTPUT = 4 * 1024 * 1024
 
 
-def _docker(args: list[str], *, timeout: int = 120, capture: bool = True) -> str:
+def _docker(
+    args: list[str], *, timeout: int = 120, capture: bool = True,
+    input_data: bytes | None = None,
+) -> str:
     if not args:
         raise RuntimeError("empty fixture command")
     environment = os.environ.copy()
@@ -28,17 +31,26 @@ def _docker(args: list[str], *, timeout: int = 120, capture: bool = True) -> str
         if key.startswith(("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_TLS", "DOCKER_CERT_PATH")):
             environment.pop(key, None)
     try:
+        command = [
+            "docker", "--host", "unix:///var/run/docker.sock", *args,
+        ]
+        run_options = {
+            "stdout": subprocess.PIPE if capture else subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "text": False,
+            "shell": False,
+            "close_fds": True,
+            "timeout": timeout,
+            "check": False,
+            "env": environment,
+        }
+        if input_data is None:
+            run_options["stdin"] = subprocess.DEVNULL
+        else:
+            run_options["input"] = input_data
         result = subprocess.run(
-            ["docker", "--host", "unix:///var/run/docker.sock", *args],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            text=False,
-            shell=False,
-            close_fds=True,
-            timeout=timeout,
-            check=False,
-            env=environment,
+            command,
+            **run_options,
         )
     except (OSError, subprocess.SubprocessError):
         raise RuntimeError("owned G5 fixture Docker command failed or timed out") from None
@@ -131,8 +143,7 @@ def _cleanup(project: str) -> None:
         raise RuntimeError("owned G5 fixture images survived cleanup")
 
 
-def _compose_file(root: Path, project: str, sha: str, admin_password: str,
-                  app_password: str) -> tuple[Path, Path]:
+def _compose_file(root: Path, project: str, sha: str) -> tuple[Path, Path]:
     dockerfile = root / "Dockerfile"
     dockerfile.write_text(
         "FROM python:3.11-slim\n"
@@ -150,9 +161,9 @@ def _compose_file(root: Path, project: str, sha: str, admin_password: str,
                 "image": "postgres:15-alpine",
                 "restart": "unless-stopped",
                 "environment": {
-                    "POSTGRES_USER": "game_admin",
-                    "POSTGRES_PASSWORD": admin_password,
-                    "POSTGRES_DB": "game_db",
+                    "POSTGRES_USER": "${POSTGRES_USER:?required}",
+                    "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:?required}",
+                    "POSTGRES_DB": "${POSTGRES_DB:?required}",
                 },
                 "volumes": [
                     {"type": "volume", "source": "postgres-data",
@@ -171,9 +182,7 @@ def _compose_file(root: Path, project: str, sha: str, admin_password: str,
                 "command": no_op,
                 "restart": "no",
                 "environment": {
-                    "DATABASE_URL": (
-                        f"postgresql+psycopg://game_admin:{admin_password}@database:5432/game_db"
-                    ),
+                    "DATABASE_URL": "${G5_MIGRATION_DB_URL:?required}",
                 },
                 "networks": ["web"],
                 "labels": {_OWNER_LABEL: project},
@@ -184,9 +193,7 @@ def _compose_file(root: Path, project: str, sha: str, admin_password: str,
                 "command": no_op,
                 "restart": "no",
                 "environment": {
-                    "DATABASE_URL": (
-                        f"postgresql+psycopg://game_admin:{admin_password}@database:5432/game_db"
-                    ),
+                    "DATABASE_URL": "${G5_MIGRATION_DB_URL:?required}",
                 },
                 "networks": ["web"],
                 "labels": {_OWNER_LABEL: project},
@@ -197,9 +204,7 @@ def _compose_file(root: Path, project: str, sha: str, admin_password: str,
                 "command": app_sleep,
                 "restart": "unless-stopped",
                 "environment": {
-                    "DATABASE_URL": (
-                        f"postgresql+psycopg://game_app:{app_password}@database:5432/game_db"
-                    ),
+                    "DATABASE_URL": "${DB_URL:?required}",
                 },
                 "networks": ["web"],
                 "labels": {_OWNER_LABEL: project},
@@ -210,9 +215,7 @@ def _compose_file(root: Path, project: str, sha: str, admin_password: str,
                 "command": app_sleep,
                 "restart": "unless-stopped",
                 "environment": {
-                    "DATABASE_URL": (
-                        f"postgresql+psycopg://game_app:{app_password}@database:5432/game_db"
-                    ),
+                    "DATABASE_URL": "${DB_URL:?required}",
                 },
                 "networks": ["web"],
                 "labels": {_OWNER_LABEL: project},
@@ -256,13 +259,7 @@ def _compose_file(root: Path, project: str, sha: str, admin_password: str,
     compose_path = root / "compose.yml"
     compose_path.write_text(json.dumps(compose, sort_keys=True), encoding="utf-8")
     env_file = root / "fixture.env"
-    env_file.write_text(
-        f"POSTGRES_USER=game_admin\nPOSTGRES_PASSWORD={admin_password}\n"
-        f"POSTGRES_DB=game_db\n"
-        f"DB_URL=postgresql+psycopg://game_app:{app_password}@database:5432/game_db\n"
-        f"G5_MIGRATION_DB_URL=postgresql+psycopg://game_admin:{admin_password}@database:5432/game_db\n",
-        encoding="ascii",
-    )
+    env_file.touch(mode=0o600)
     env_file.chmod(0o600)
     return compose_path, env_file
 
@@ -278,7 +275,22 @@ def run() -> None:
     if _ids("container", project) or _ids("network", project) or _ids("volume", project):
         raise RuntimeError("unique G5 fixture project unexpectedly already exists")
     root = Path(tempfile.mkdtemp(prefix=project + "-")).resolve()
+    app_password = secrets.token_hex(24)
+    fixture_env = {
+        "POSTGRES_USER": "game_admin",
+        "POSTGRES_PASSWORD": secrets.token_hex(24),
+        "POSTGRES_DB": "game_db",
+    }
+    fixture_env["DB_URL"] = (
+        f"postgresql+psycopg://game_app:{app_password}@database:5432/game_db"
+    )
+    fixture_env["G5_MIGRATION_DB_URL"] = (
+        "postgresql+psycopg://game_admin:" + fixture_env["POSTGRES_PASSWORD"]
+        + "@database:5432/game_db"
+    )
+    saved_environment = {key: os.environ.get(key) for key in fixture_env}
     try:
+        os.environ.update(fixture_env)
         root.chmod(0o700)
         sha = subprocess.run(
             ["git", "-C", workspace, "rev-parse", "--verify", "HEAD"],
@@ -287,7 +299,7 @@ def run() -> None:
         ).stdout.strip()
         if not re.fullmatch(r"[0-9a-f]{40}", sha):
             raise RuntimeError("GitHub checkout revision is invalid")
-        admin_password, app_password = secrets.token_hex(24), secrets.token_hex(24)
+        admin_password = fixture_env["POSTGRES_PASSWORD"]
         (root / "nginx.conf").write_text(
             "events {}\nhttp { server { listen 80; location / { return 200 'fixture'; } } }\n",
             encoding="ascii",
@@ -297,9 +309,7 @@ def run() -> None:
             ":80 {\n    reverse_proxy nginx:80\n}\n",
             encoding="ascii",
         )
-        compose_path, env_file = _compose_file(
-            root, project, sha, admin_password, app_password
-        )
+        compose_path, env_file = _compose_file(root, project, sha)
         prefix = [
             "compose", "--project-name", project, "--project-directory", workspace,
             "--env-file", str(env_file), "-f", str(compose_path),
@@ -324,9 +334,10 @@ def run() -> None:
             raise RuntimeError("disposable PostgreSQL container did not start")
         _docker([
             *prefix, "exec", "--no-TTY", "database", "psql", "-X",
-            "-v", "ON_ERROR_STOP=1", "-U", "game_admin", "-d", "game_db",
-            "-c", f"CREATE ROLE game_app LOGIN PASSWORD '{app_password}'",
-        ], capture=False)
+            "-v", "ON_ERROR_STOP=1", "-U", "game_admin", "-d", "game_db", "-f", "-",
+        ], capture=False, input_data=(
+            f"CREATE ROLE game_app LOGIN PASSWORD '{app_password}';\n".encode("ascii")
+        ))
         for service, command in (
             ("nginx", ["wget", "-qO-", "http://127.0.0.1/"]),
             ("caddy", ["wget", "-qO-", "http://127.0.0.1:2019/config/"]),
@@ -374,4 +385,9 @@ def run() -> None:
         try:
             _cleanup(project)
         finally:
+            for key, value in saved_environment.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
             shutil.rmtree(root, ignore_errors=True)
