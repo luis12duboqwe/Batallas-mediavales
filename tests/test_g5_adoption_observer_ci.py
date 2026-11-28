@@ -75,3 +75,30 @@ def test_live_partial_observation_accepts_only_documented_limits():
     with pytest.raises(RuntimeError, match="required partial evidence"):
         lab._assert_partial_observations(
             SimpleNamespace(before=row, after=row, blockers=()), sha)
+
+
+def test_fixture_checkout_does_not_inherit_prior_recovery_marker(tmp_path):
+    import subprocess
+    from ops import ci_g5_adoption_observer as lab
+    from ops import g5_adoption_observer as observer
+
+    source = tmp_path / "source"
+    source.mkdir()
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(source), *args], text=True).strip()
+    git("init", "-q")
+    (source / ".gitignore").write_text(".ops-state/\n")
+    git("add", ".gitignore")
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "-qm", "fixture")
+    sha = git("rev-parse", "HEAD")
+    state = source / ".ops-state"
+    state.mkdir(mode=0o700)
+    marker = state / "recovery-required"
+    marker.write_text("synthetic prior drill")
+    assert observer._read_metadata(source).state is observer.MetadataState.INCIDENT
+    target = tmp_path / "isolated-checkout"
+    lab._clone_fixture_checkout(source, target, sha)
+    assert observer._read_metadata(target).state is observer.MetadataState.ABSENT
+    assert marker.read_text() == "synthetic prior drill"
+    assert not (target / ".ops-state").exists()

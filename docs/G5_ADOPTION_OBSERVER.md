@@ -138,3 +138,7 @@ restore, writer reopening, or metadata publication.
 ## Integración oficial del ensayo parcial
 
 Se exige RUNNER_ENVIRONMENT=github-hosted, además de CI/GITHUB_ACTIONS y socket local. El ensayo live se ejecuta en un paso obligatorio separado del job G5 operations (no se ejecuta inadvertidamente durante pytest general). Puede ejecutarse explícitamente mediante python3 -m ops.ci_g5_adoption_observer en ese runner, o mediante el test opt-in G5_OBSERVER_LIVE_TEST=1. Los cambios de archivos compilados fuera del scope del PR no se incluyen. El ensayo no certifica rutas activas de Nginx, imágenes de registry, TLS ni exclusión continua. Se conserva NO-GO y no se habilita un colector de producción.
+
+### Aislamiento entre ensayos CI
+
+El job G5 ejecuta antes ops/ci_verify.sh, que publica intencionadamente .ops-state/recovery-required al simular un restore bloqueado. El observador debe rechazar ese estado; el ensayo de adopción usa ahora un clon Git local nuevo y detached al mismo HEAD dentro del workspace hospedado, con contexto Docker separado, sin heredar ni borrar el marcador del ensayo anterior. Regresión con repositorio Git real y marcador preservado. La aceptación del ensayo exige exactamente los dos bloqueadores documentados y la ruta Caddy observada en ambas muestras. No se ignoran incidentes reales.

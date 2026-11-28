@@ -283,6 +283,29 @@ def _assert_partial_observations(observed, sha: str) -> None:
         raise RuntimeError("live disposable inventory failed required partial evidence assertions")
 
 
+
+def _clone_fixture_checkout(source: Path, target: Path, sha: str) -> None:
+    """A fresh local checkout cannot inherit another drill's ignored incident state."""
+    if target.exists() or target.is_symlink() or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError("invalid isolated fixture checkout")
+    try:
+        for args in (
+            ["git", "clone", "--local", "--shared", "--no-checkout", "--", str(source), str(target)],
+            ["git", "-C", str(target), "checkout", "--detach", sha],
+        ):
+            subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, shell=False, timeout=60, check=True)
+        actual = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "--verify", "HEAD"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, shell=False, timeout=10, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("isolated fixture checkout failed") from None
+    if actual != sha or observer._read_metadata(target).state is not observer.MetadataState.ABSENT:
+        raise RuntimeError("isolated fixture checkout identity or release metadata invalid")
+
+
 def run() -> None:
     """Create, observe, adversarially mutate, and clean up only a CI fixture."""
     workspace = os.environ.get("GITHUB_WORKSPACE")
@@ -294,7 +317,7 @@ def run() -> None:
     project = "bm-g5-adoption-" + uuid4().hex
     if _ids("container", project) or _ids("network", project) or _ids("volume", project):
         raise RuntimeError("unique G5 fixture project unexpectedly already exists")
-    root = Path(tempfile.mkdtemp(prefix=project + "-")).resolve()
+    root = Path(tempfile.mkdtemp(prefix=project + "-", dir=workspace)).resolve()
     app_password = secrets.token_hex(24)
     fixture_env = {
         "POSTGRES_USER": "game_admin",
@@ -319,19 +342,23 @@ def run() -> None:
         ).stdout.strip()
         if not re.fullmatch(r"[0-9a-f]{40}", sha):
             raise RuntimeError("GitHub checkout revision is invalid")
-        admin_password = fixture_env["POSTGRES_PASSWORD"]
-        (root / "nginx.conf").write_text(
+        checkout = root / "checkout"
+        _clone_fixture_checkout(Path(workspace), checkout, sha)
+        # Keep the Docker build context independent of the clone and .git.
+        config_root = root / "fixture"
+        config_root.mkdir(mode=0o700)
+        (config_root / "nginx.conf").write_text(
             "events {}\nhttp { server { listen 80; location / { return 200 'fixture'; } } }\n",
             encoding="ascii",
         )
-        (root / "Caddyfile").write_text(
+        (config_root / "Caddyfile").write_text(
             "{\n    admin 0.0.0.0:2019\n    auto_https off\n}\n"
             ":80 {\n    reverse_proxy nginx:80\n}\n",
             encoding="ascii",
         )
-        compose_path, env_file = _compose_file(root, project, sha)
+        compose_path, env_file = _compose_file(config_root, project, sha)
         prefix = [
-            "compose", "--project-name", project, "--project-directory", workspace,
+            "compose", "--project-name", project, "--project-directory", str(checkout),
             "--env-file", str(env_file), "-f", str(compose_path),
         ]
         _docker([*prefix, "build", "backend", "worker", "migrate", "seed"],
@@ -375,7 +402,7 @@ def run() -> None:
                 raise RuntimeError(f"disposable {service} fixture service did not become ready")
 
         request = observer.ObserverRequest(
-            Path(workspace), env_file, (compose_path,), project
+            checkout, env_file, (compose_path,), project
         )
         observed = observer.observe_partial(request, runner=observer._run)
         _assert_partial_observations(observed, sha)
