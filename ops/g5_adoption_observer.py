@@ -685,8 +685,9 @@ def _validate_compose_config_hashes(
     command = _compose_argv(request) + ["config"]
     for service, row in rows_by_service.items():
         actual = row["Config"]["Labels"]["com.docker.compose.config-hash"]
-        expected = _command(runner, *command, "--hash", service).strip()
-        if not _SHA256.fullmatch(expected) or actual != expected:
+        output = _command(runner, *command, "--hash", service).strip().split()
+        if (len(output) != 2 or output[0] != service
+                or not _SHA256.fullmatch(output[1]) or actual != output[1]):
             raise ObservationError("runtime Compose service hash differs from effective configuration")
 
 
@@ -1083,8 +1084,32 @@ def _pg_snapshot(
         "--no-owner", "--no-privileges", "-U", maintenance, "-d", database,
         limit=_MAX_OUTPUT,
     )
-    schema_sha = hashlib.sha256(dump.encode("utf-8")).hexdigest()
+    schema_sha = _schema_fingerprint(dump)
     return database, admin[2], schema_sha, admin[3], split.application
+
+
+def _schema_fingerprint(dump: str) -> str:
+    """Hash source catalog DDL after normalizing pg_dump's random guard token."""
+    normalized = []
+    guards: dict[str, list[str]] = {"restrict": [], "unrestrict": []}
+    for line in dump.splitlines(keepends=True):
+        if line.startswith(("\\restrict ", "\\unrestrict ")):
+            match = re.fullmatch(r"\\(un)?restrict ([A-Za-z0-9+/=]+)(\r?\n)?", line)
+            if not match:
+                raise ObservationError("PostgreSQL schema dump guard is malformed")
+            kind = "unrestrict" if match.group(1) else "restrict"
+            guards[kind].append(match.group(2))
+            newline = match.group(3) or ""
+            normalized.append(f"\\{kind} G5_OBSERVER_GUARD{newline}")
+        else:
+            normalized.append(line)
+    if any(guards.values()) and (
+        len(guards["restrict"]) != 1
+        or len(guards["unrestrict"]) != 1
+        or guards["restrict"][0] != guards["unrestrict"][0]
+    ):
+        raise ObservationError("PostgreSQL schema dump guards are incomplete")
+    return hashlib.sha256("".join(normalized).encode("utf-8")).hexdigest()
 
 
 def _caddy_routes(config: dict) -> tuple[dict, ...]:

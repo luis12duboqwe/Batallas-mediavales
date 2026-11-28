@@ -47,9 +47,12 @@ statically validated role split and inspected database container. No URL,
 password, complete environment, SQL dump, or user-table data is returned or
 logged.
 `schema_sha256` hashes only the source-side `pg_dump --schema-only
---no-owner --no-privileges` output. This is a source catalog fingerprint; it
-is not a data checksum and is not interchangeable with a restored catalog's
-deparsed schema fingerprint.
+--no-owner --no-privileges` output. PostgreSQL's randomized, paired
+`\restrict`/`\unrestrict` guard token is normalized to a fixed marker before
+hashing; all other dump bytes are retained. The guard pair must be complete
+and match. This is a source catalog export fingerprint; it is not a data
+checksum and is not interchangeable with a restored catalog's deparsed schema
+fingerprint.
 
 The deterministic `compose_sha256` hashes canonicalized `docker compose
 config --format json` output and selected Compose provenance labels. The

@@ -178,6 +178,17 @@ def test_compose_fingerprint_is_deterministic_without_returning_config_values():
     }}}}, labels)
 
 
+def test_schema_fingerprint_normalizes_only_paired_pg_dump_guard_tokens():
+    first = (
+        "\\restrict abcDEF123\nCREATE TABLE fixture (id integer);\n"
+        "\\unrestrict abcDEF123\n"
+    )
+    second = first.replace("abcDEF123", "differentToken456")
+    assert observer._schema_fingerprint(first) == observer._schema_fingerprint(second)
+    with pytest.raises(observer.ObservationError, match="guards are incomplete"):
+        observer._schema_fingerprint("\\restrict unmatched\n")
+
+
 def test_compose_environment_uses_effective_runtime_and_migration_urls():
     app_url = "postgresql+psycopg://" + "game_app:synthetic-app@database:5432/game_db"
     admin_url = (
@@ -586,7 +597,7 @@ class ComposeFixtureRunner:
             return json.dumps(self.config)
         if "compose" in argv and len(argv) >= 2 and argv[-2] == "--hash":
             service = argv[-1]
-            return format(len(service), "064x") + "\n"
+            return f"{service} {format(len(service), '064x')}\n"
         if argv[:3] == ("docker", "ps", "-a"):
             return "\n".join(json.dumps({"ID": row["Id"]}) for row in self.rows)
         if argv[:3] == ("docker", "inspect", "--type"):
