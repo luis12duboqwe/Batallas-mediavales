@@ -285,6 +285,15 @@ jobs:
           npm ci
           npm install --no-save --package-lock=false @playwright/test@1.55.0
           npx playwright install --with-deps chromium
+      - name: Verify isolated WebKit and Firefox G8 matrix
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          (cd batalla_medieval_frontend && npx playwright install --with-deps firefox webkit)
+          export G8_EXPECTED_HEAD="$(git rev-parse HEAD)"
+          export G8_PYTHON="$(command -v python)"
+          export G8_PLAYWRIGHT_MODULE="$PWD/batalla_medieval_frontend/node_modules/@playwright/test/index.js"
+          node batalla_medieval_frontend/e2e/parallel-g8-ci.mjs
       - name: Prepare G21/G22 database
         run: |
           alembic -c batalla_medieval_backend/alembic.ini upgrade head
