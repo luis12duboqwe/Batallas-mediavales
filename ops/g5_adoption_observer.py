@@ -137,6 +137,7 @@ def _run(argv: Sequence[str], *, timeout: int, max_output_bytes: int) -> str:
     """Run only read-only Git/local-Docker commands in GitHub-hosted CI."""
     if (os.environ.get("GITHUB_ACTIONS") != "true"
             or os.environ.get("CI") != "true"
+            or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
             or not Path("/var/run/docker.sock").is_socket()):
         raise ObservationError("default observer runner is restricted to GitHub CI local Docker")
     args = list(argv)
@@ -148,9 +149,28 @@ def _run(argv: Sequence[str], *, timeout: int, max_output_bytes: int) -> str:
                 or args[3:5] not in (["rev-parse", "--verify"], ["status", "--porcelain=v1"])):
             raise ObservationError("default runner refused a non-read-only Git command")
     elif args[0] == "docker":
-        if len(args) < 2 or args[1] not in {
-            "compose", "ps", "inspect", "image", "network", "volume", "exec"
-        }:
+        if len(args) < 2:
+            raise ObservationError("default runner refused a non-read-only Docker command")
+        command = args[1]
+        inspection = (
+            command in {"image", "network", "volume"} and len(args) >= 4
+            and args[2] == "inspect"
+        ) or command in {"ps", "inspect"}
+        compose_read = command == "compose" and (
+            args[-3:] == ["config", "--format", "json"] or args[-2:] == ["config", "--hash"]
+            or args[-3:] == ["config", "--hash", "*"]
+        )
+        # This private runner is used only by the fixed collector, not as
+        # a general remote command API. Reject arbitrary exec programs.
+        exec_args = args[2:]
+        if exec_args[:1] == ["-i"]:
+            exec_args = exec_args[1:]
+        exec_read = (
+            command == "exec" and len(exec_args) >= 2
+            and _SHA256.fullmatch(exec_args[0]) is not None
+            and exec_args[1] in {"psql", "pg_dump", "python", "wget"}
+        )
+        if not (inspection or compose_read or exec_read):
             raise ObservationError("default runner refused a non-read-only Docker command")
         args[1:1] = ["--host", "unix:///var/run/docker.sock"]
     else:
@@ -1383,6 +1403,7 @@ def observe_partial(
         or not re.fullmatch(r"bm-g5-adoption-[0-9a-f]{32}", request.project)
         or os.environ.get("GITHUB_ACTIONS") != "true"
         or os.environ.get("CI") != "true"
+        or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
     ):
         raise ObservationError("default observer runner accepts only an owned GitHub CI fixture")
     try:

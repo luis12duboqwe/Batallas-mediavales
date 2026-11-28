@@ -392,6 +392,11 @@ jobs:
         env:
           CI: "true"
         run: python3 -m ops.ci_g5_cutover_prepare_drill
+      - name: Rehearse partial Compose adoption inventory and runtime drift
+        timeout-minutes: 12
+        env:
+          CI: "true"
+        run: python3 -m ops.ci_g5_adoption_observer
       - name: Rehearse combined real G5 edge, SQL, Docker and PREPARED recovery
         env:
           CI: "true"
@@ -425,6 +430,11 @@ jobs:
         run: |
           docker tag medievol-g5-backend:ci "bm-g5-full-schema-head:$(git rev-parse HEAD)"
           python3 -m ops.ci_g5_full_schema_restore --scenario all
+      - name: Verify independent PostgreSQL logical clone recovery
+        timeout-minutes: 15
+        env:
+          CI: "true"
+        run: python3 -m ops.ci_g5_logical_clone
       - name: Build frontend image
         run: docker build --tag medievol-g5-frontend:ci --file batalla_medieval_frontend/Dockerfile batalla_medieval_frontend
       - name: Verify shipped frontend is readable to Nginx

@@ -24,6 +24,8 @@ def test_fixture_compose_does_not_persist_generated_credentials(tmp_path):
 _LIVE_CI = (
     os.environ.get("GITHUB_ACTIONS") == "true"
     and os.environ.get("CI") == "true"
+    and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
+    and os.environ.get("G5_OBSERVER_LIVE_TEST") == "1"
     and Path("/var/run/docker.sock").is_socket()
 )
 
@@ -33,3 +35,13 @@ def test_owned_live_compose_pg15_observation_and_runtime_mutation():
     from ops.ci_g5_adoption_observer import run
 
     run()
+
+
+def test_rehearsal_rejects_self_hosted_before_docker(monkeypatch):
+    from ops import ci_g5_adoption_observer as lab
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "self-hosted")
+    monkeypatch.setattr(lab, "_docker", lambda *_a, **_k: pytest.fail("must not access Docker"))
+    with pytest.raises(RuntimeError, match="GitHub CI"):
+        lab.run()

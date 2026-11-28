@@ -94,15 +94,15 @@ def _ids(kind: str, project: str) -> list[str]:
 
 def _cleanup(project: str) -> None:
     """Remove only resources discovered with this fixture's unique owner label."""
-    for identity in _ids("container", project):
+    containers = _ids("container", project)
+    for identity in containers:
         rows = json.loads(_docker(["inspect", "--type", "container", identity]))
         if (not isinstance(rows, list) or len(rows) != 1
                 or rows[0].get("Id") != identity
                 or (rows[0].get("Config", {}).get("Labels") or {}).get(_OWNER_LABEL) != project):
             raise RuntimeError("refusing to clean an unowned fixture container")
-    containers = _ids("container", project)
     if containers:
-        _docker(["rm", "--force", "--volumes", *containers], capture=False)
+        _docker(["rm", "--force", *containers], capture=False)
     if _ids("container", project):
         raise RuntimeError("owned G5 fixture containers survived cleanup")
 
@@ -268,6 +268,7 @@ def run() -> None:
     """Create, observe, adversarially mutate, and clean up only a CI fixture."""
     workspace = os.environ.get("GITHUB_WORKSPACE")
     if (os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("CI") != "true"
+            or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
             or not workspace or Path(workspace).resolve() != Path(__file__).resolve().parents[1]
             or not Path("/var/run/docker.sock").is_socket()):
         raise RuntimeError("live G5 observer rehearsal requires GitHub CI's local Docker socket")
@@ -381,6 +382,7 @@ def run() -> None:
             pass
         else:
             raise RuntimeError("live network mutation was not rejected by the observer")
+        print("G5 partial adoption: two independent Compose/PG15 observations and network drift rejection verified; full edge/provenance remains NO-GO", flush=True)
     finally:
         try:
             _cleanup(project)
@@ -391,3 +393,7 @@ def run() -> None:
                 else:
                     os.environ[key] = value
             shutil.rmtree(root, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    run()
