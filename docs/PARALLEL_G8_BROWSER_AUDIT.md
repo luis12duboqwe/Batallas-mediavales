@@ -13,7 +13,7 @@ Se revisaron `g21-accessibility.mjs` (teclado, diálogo y diseño), `g22-media-p
 3. Provocar 503 solo en GET de bandeja y reportes. Recuperar primero reportes y comprobar que el aviso global sigue por la bandeja; recuperar la bandeja con el backend real y comprobar que desaparece el aviso. No se fabrican respuestas exitosas.
 4. Cambiar la red del contexto offline/online, notificar ambos eventos al documento y volver a autenticar contra el backend. Después, cargar una ruta protegida con JWT inválido, comprobar el aviso y la eliminación del token y volver a entrar.
 
-El arnés falla ante excepciones, errores de consola, HTTP >=400 y fallos de red inesperados. Solo admite los 503 de los dos endpoints inyectados y los 401/errores de consola esperados durante la expiración; inspecciona el error Axios para no ignorar otros errores de aplicación. Bloquea HTTP y WebSocket fuera de los orígenes loopback configurados. Usa `assertIsolated`, `loginUi` y `playerSnapshot` existentes, y fixtures G2/G14 reales. El fallo 503 es deliberado, no evidencia de disponibilidad del backend.
+El arnés falla ante excepciones, errores de consola, HTTP >=400 y fallos de red inesperados. Solo admite los 503 de los dos endpoints inyectados y los 401/errores de consola esperados durante la expiración; inspecciona el error Axios para no ignorar otros errores de aplicación. Para evitar que una redirección escape del guard, el arnés obtiene respuestas reales sin seguir redirecciones automáticamente, comprueba cada destino y solo sigue redirecciones GET/HEAD a los orígenes loopback configurados; otras redirecciones fallan. Bloquea WebSocket externos y service workers. Usa `assertIsolated`, `loginUi` y `playerSnapshot` existentes, y fixtures G2/G14 reales. El fallo 503 es deliberado, no evidencia de disponibilidad del backend.
 
 ## Ejecución observada
 
@@ -44,7 +44,7 @@ npx playwright install-deps firefox webkit
 cd ..
 ```
 
-En una misma shell, reservar puertos libres locales, crear una DB nueva y compilar con las mismas URL que usarán los servicios y el test:
+En una misma shell Bash, crear una DB nueva y compilar con las mismas URL que usarán los servicios y el test:
 
 ```bash
 export PATH="/tmp/medievol-g8-venv/bin:$PATH"
@@ -63,18 +63,40 @@ python scripts/prepare_g14_community_e2e.py
 (cd batalla_medieval_frontend && npm run build)
 ```
 
-Verificar que ambos puertos están libres, iniciar el backend y preview **desde esa shell** y comprobar sus mensajes de arranque/`/health` antes de ejecutar el test:
+Iniciar y verificar los servicios **desde esa shell**. Este bloque requiere `ss` y `curl`: falla si un puerto ya está ocupado, si un proceso muere o si el listener no pertenece al PID iniciado. La trampa limpia servicios y DB incluso al fallar:
 
 ```bash
+set -e
+test -z "$(ss -H -ltn 'sport = :18318')"
+test -z "$(ss -H -ltn 'sport = :14318')"
+API_PID=
+UI_PID=
+cleanup() {
+  if [ -n "$API_PID" ]; then kill "$API_PID" 2>/dev/null || true; wait "$API_PID" 2>/dev/null || true; fi
+  if [ -n "$UI_PID" ]; then kill "$UI_PID" 2>/dev/null || true; wait "$UI_PID" 2>/dev/null || true; fi
+  rm -f "$PARALLEL_JOURNEY_DB"
+}
+trap cleanup EXIT
 python -m uvicorn app.main:socket_app --app-dir batalla_medieval_backend --host 127.0.0.1 --port 18318 &
 API_PID=$!
 (cd batalla_medieval_frontend && exec ./node_modules/.bin/vite preview --host 127.0.0.1 --port 14318 --strictPort) &
 UI_PID=$!
-# Tras comprobar que los dos procesos anteriores siguen vivos y están listos:
+ready=false
+for attempt in $(seq 1 60); do
+  kill -0 "$API_PID" "$UI_PID"
+  if ss -H -ltnp 'sport = :18318' | grep -Fq "pid=$API_PID," &&
+     ss -H -ltnp 'sport = :14318' | grep -Fq "pid=$UI_PID," &&
+     curl -fsS http://127.0.0.1:18318/health >/dev/null &&
+     curl -fsS http://127.0.0.1:14318/login >/dev/null; then
+    ready=true
+    break
+  fi
+  sleep 1
+done
+test "$ready" = true
 (cd batalla_medieval_frontend && node e2e/parallel-g8-browser.mjs)
-kill "$API_PID" "$UI_PID"
-wait "$API_PID" "$UI_PID" 2>/dev/null || true
-rm -f "$PARALLEL_JOURNEY_DB"
+cleanup
+trap - EXIT
 ```
 
 No reutilizar un servidor ajeno que ya ocupe el puerto: el guard de variables no demuestra por sí solo qué DB usa ese proceso ni con qué URL se compiló Vite. Conservar los logs ante fallos. `G8_ENGINES=webkit` o `G8_ENGINES=firefox` permite aislar un motor; por defecto se intentan ambos. Si falta el ejecutable, se imprime `SKIP` con su ruta; si no se ejecuta ninguno, o falla el arranque u otro escenario, el proceso termina con código no cero. Un `SKIP` no es PASS.
@@ -82,6 +104,6 @@ No reutilizar un servidor ajeno que ya ocupe el puerto: el guard de variables no
 ## Límites
 
 - Viewport/touch emulados en Linux no equivalen a Safari/iOS, Firefox móvil, lectores de pantalla o dispositivos físicos. No se verificaron Chromium ni otros navegadores en esta matriz.
-- Firefox de Playwright no produjo el evento offline en el primer intento usando únicamente `setOffline`; por eso se inyectan explícitamente los eventos de plataforma, además de cambiar el estado de red. No demuestra detección automática del SO ni reconexión Socket.IO tras una interrupción de larga duración.
+- Firefox de Playwright no produjo el evento offline en el primer intento usando únicamente `setOffline`; por eso se inyectan explícitamente los eventos de plataforma, además de cambiar el estado de red. El guard usa `route.fetch`, que no demuestra que las solicitudes de la aplicación fallen durante la desconexión. No demuestra detección automática del SO ni reconexión Socket.IO tras una interrupción de larga duración.
 - Se prueba un JWT inválido, no el vencimiento por reloj real ni todas las carreras entre sesiones. Las respuestas deliberadamente retenidas o 503 no miden latencia, recuperación bajo carga ni una caída real del servidor.
 - No cubre todas las interacciones, traducciones, medios ni estados de G21–G25; tampoco sustituye las auditorías de aventuras, mapa o las pruebas existentes. No se han ejecutado staging, CI de este nuevo script, G5 ni certificación G8.

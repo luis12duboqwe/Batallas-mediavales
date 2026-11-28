@@ -28,13 +28,14 @@ async function open(page, path) {
 }
 
 async function scenario(browser, label, options, work) {
-  const context = await browser.newContext({ ...options, reducedMotion: 'reduce' });
+  const context = await browser.newContext({ ...options, reducedMotion: 'reduce', serviceWorkers: 'block' });
   const page = await context.newPage();
   const unexpected = [];
   const consoleChecks = [];
   const expectedStatuses = new Set();
   let expectedConsole = () => false;
   let offline = false;
+  let closing = false;
   page.on('pageerror', (error) => unexpected.push(`pageerror: ${error.message}`));
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
@@ -49,15 +50,32 @@ async function scenario(browser, label, options, work) {
     }
   });
   page.on('requestfailed', (request) => {
-    if (!offline) unexpected.push(`requestfailed: ${request.url()} ${request.failure()?.errorText}`);
+    if (!offline && !closing) unexpected.push(`requestfailed: ${request.url()} ${request.failure()?.errorText}`);
   });
+  const allowed = (url) => url.protocol === 'http:' && url.hostname === '127.0.0.1'
+    && [new URL(UI).port, new URL(API).port].includes(url.port);
   await context.route('**/*', async (route) => {
-    const url = new URL(route.request().url());
-    if (!['http:', 'https:'].includes(url.protocol) || (url.hostname === '127.0.0.1' && [new URL(UI).port, new URL(API).port].includes(url.port))) {
-      await route.continue();
-    } else {
+    let url = new URL(route.request().url());
+    if (!allowed(url)) {
       unexpected.push(`Blocked external request: ${url.origin}${url.pathname}`);
-      await route.abort();
+      return route.abort();
+    }
+    try {
+      for (let redirects = 0; redirects <= 8; redirects += 1) {
+        const response = await route.fetch({ url: url.href, maxRedirects: 0 });
+        const location = response.headers().location;
+        if (![301, 302, 303, 307, 308].includes(response.status()) || !location) {
+          return await route.fulfill({ response });
+        }
+        if (!['GET', 'HEAD'].includes(route.request().method()) || redirects === 8) {
+          throw new Error(`Unsupported redirect from ${url.origin}${url.pathname}`);
+        }
+        url = new URL(location, url);
+        if (!allowed(url)) throw new Error(`Blocked external redirect: ${url.origin}${url.pathname}`);
+      }
+    } catch (error) {
+      if (!closing) unexpected.push(`Network guard: ${error.message.split('\n')[0]}`);
+      await route.abort().catch(() => {});
     }
   });
   await context.routeWebSocket('**/*', (socket) => {
@@ -79,6 +97,7 @@ async function scenario(browser, label, options, work) {
     unexpected.push(error.stack || String(error));
   } finally {
     await Promise.all(consoleChecks);
+    closing = true;
     await context.close();
   }
   if (unexpected.length) {
@@ -130,7 +149,8 @@ async function mapRace(page) {
     && url.searchParams.get('x') === String(point.x) && url.searchParams.get('y') === String(point.y);
   await page.route('**/map/tiles**', async (route) => {
     if (route.request().method() === 'GET' && matcher(new URL(route.request().url()), first)) {
-      const response = await route.fetch();
+      const response = await route.fetch({ maxRedirects: 0 });
+      assert.equal(response.status(), 200, 'Held map response must be a real successful response, not a redirect');
       arrived();
       await gate;
       await route.fulfill({ response });
@@ -161,9 +181,19 @@ async function mapRace(page) {
     const payload = await response.json();
     assert.ok(payload.tiles.length > 0, 'Real backend must supply tiles for the final center');
     await page.locator('[data-testid="map-grid-panel"][aria-busy="false"]').waitFor({ state: 'visible', timeout });
+    await page.evaluate(() => {
+      window.__g8StaleMapProcessed = false;
+      const onRecovered = (event) => {
+        if (event.detail?.path !== '/map/tiles') return;
+        window.__g8StaleMapProcessed = true;
+        window.removeEventListener('bm:service-recovered', onRecovered);
+      };
+      window.addEventListener('bm:service-recovered', onRecovered);
+    });
     const staleResponse = page.waitForResponse((res) => res.request().method() === 'GET' && matcher(new URL(res.url()), first), { timeout });
     release();
     await (await staleResponse).finished();
+    await page.waitForFunction(() => window.__g8StaleMapProcessed, null, { timeout });
     await page.evaluate(() => new Promise(requestAnimationFrame));
     await page.waitForFunction(([x, y]) => document.querySelector('[data-testid="map-center"]')?.textContent.includes(`(${x}, ${y})`), [last.x, last.y], { timeout });
     const rendered = await page.locator('[data-testid^="map-tile-"]').evaluateAll((nodes) => nodes.map((node) => node.dataset.mapCoordinate).sort());
@@ -212,6 +242,8 @@ async function outages(page, context, monitor) {
     page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/report/' && response.status() === 200, { timeout }),
     page.getByRole('button', { name: 'Reintentar reportes' }).click(),
   ]);
+  await page.getByTestId('reports-load-error').waitFor({ state: 'detached', timeout });
+  await page.getByTestId('reports-loading').waitFor({ state: 'detached', timeout });
   assert.equal(await page.getByTestId('connection-status').getAttribute('data-state'), 'service', 'Inbox outage remains after reports recover');
   failed.delete('/message/inbox');
   const inboxRecovery = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/message/inbox' && response.status() === 200, { timeout });
