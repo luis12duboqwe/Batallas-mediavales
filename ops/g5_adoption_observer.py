@@ -718,7 +718,9 @@ def _validate_service_configuration(config: dict) -> None:
         "seed": [["python", "-c", "pass"], "python -m app.seed"],
     }
     for service, spec in services.items():
-        if not isinstance(spec, dict) or forbidden.intersection(spec):
+        if (not isinstance(spec, dict) or any(
+                spec.get(key) not in (None, False, [], {}) for key in forbidden
+        )):
             raise ObservationError("effective Compose contains unsafe service configuration")
         environment = _environment_map(spec.get("environment", {}))
         if set(environment) - _ALLOWED_ENV[service]:

@@ -309,11 +309,14 @@ def run() -> None:
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             try:
-                _docker([
-                    *prefix, "exec", "--no-TTY", "database", "pg_isready",
-                    "-U", "game_admin", "-d", "game_db",
-                ], capture=False)
-                break
+                identity = _docker([
+                    *prefix, "exec", "--no-TTY", "database", "psql", "-X", "-q",
+                    "-U", "game_admin", "-d", "game_db", "-Atqc",
+                    "SELECT current_user || '|' || current_database()",
+                ]).strip()
+                if identity == "game_admin|game_db":
+                    break
+                time.sleep(1)
             except RuntimeError:
                 time.sleep(1)
         else:

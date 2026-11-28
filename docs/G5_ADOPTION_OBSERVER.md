@@ -109,20 +109,25 @@ python -m pytest -q -o addopts= tests/test_g5_adoption_observer.py
 
 `ComposeFixtureRunner` returns synthetic command responses and never starts a
 container, opens a socket, or contacts a host. Its inventory-assembly test is
-not successful runtime evidence or a real environment rehearsal. The live
-GitHub Actions runs for the follow-up commit were `action_required` with zero
-jobs, so they provided no live CI rehearsal or logs. No live Compose fixture
-was run in this sandbox. The default collector must block until trusted
-loaded-Nginx introspection can be implemented and independently verified.
+not successful runtime evidence. `tests/test_g5_adoption_observer_ci.py` runs a
+separate live rehearsal only when GitHub Actions, CI, and the local Docker
+socket are present. It creates a unique disposable Compose project with
+PostgreSQL 15, separate database roles, no published ports, and an isolated
+temporary checkout-independent configuration. It checks two observed
+checkout/Compose/cluster snapshots, disconnects its own worker from the
+fixture network, and requires the next observation to reject that mutation.
+Cleanup discovers resources only through the fixture's unique ownership label
+and verifies that label before removal. Test-built app images intentionally
+lack registry digest provenance, so their absence is an explicit partial
+evidence blocker, not a successful image-provenance assertion.
 
-Any live rehearsal must run only on an authorized GitHub-hosted runner and
-create disposable, uniquely named Compose resources with no published ports.
-It must use PostgreSQL 15, distinct effective app/maintenance identities,
-immutable images, and cleanup restricted to resources it owns. The currently
-available workflow run required approval and exposed no jobs; the workflow was
-not changed. More importantly, this repository has no trusted read-only
-interface for authenticating Nginx's loaded worker routes, so a real fixture
-cannot produce a complete `HostInventory` or claim TLS readiness. Even a
-successful future partial CI observation would not establish continuous
-writer exclusion or authorize backup, restore, writer reopening, or metadata
-publication.
+The fixture enables Caddy's admin endpoint only inside its private, temporary
+container network so the collector can inspect Caddy's active configuration.
+It publishes no ports and makes no TLS claim. Nginx's loaded worker routes are
+still unauthenticated, so even a clean live rehearsal remains partial and can
+never produce a complete `HostInventory`. The workflow was not edited; the
+live test runs as part of the existing backend pytest job when that job is
+authorized. The observed `action_required` Actions run exposed zero jobs and
+therefore supplied no CI log or successful Actions result. No point-in-time
+observation establishes continuous writer exclusion or authorizes backup,
+restore, writer reopening, or metadata publication.
