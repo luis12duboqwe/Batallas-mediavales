@@ -374,6 +374,12 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+      - name: Rehearse controlled immutable edge startup and authenticated routes
+        timeout-minutes: 20
+        env:
+          CI: "true"
+          G5_EDGE_PROVENANCE_PR_OPT_IN: "true"
+        run: python3 -m ops.ci_g5_edge_provenance
       - name: Rehearse real Nginx admission and pre-existing WebSocket disconnect
         env:
           CI: "true"
@@ -392,6 +398,11 @@ jobs:
         env:
           CI: "true"
         run: python3 -m ops.ci_g5_cutover_prepare_drill
+      - name: Rehearse partial Compose adoption inventory and runtime drift
+        timeout-minutes: 12
+        env:
+          CI: "true"
+        run: python3 -m ops.ci_g5_adoption_observer
       - name: Rehearse combined real G5 edge, SQL, Docker and PREPARED recovery
         env:
           CI: "true"
@@ -419,6 +430,15 @@ jobs:
         env:
           CI: "true"
         run: python3 -m ops.ci_g5_actual_migration
+      - name: Rehearse runtime role provisioning on populated historical schema
+        timeout-minutes: 25
+        env:
+          CI: "true"
+        run: |
+          git fetch --no-tags --depth=1 origin eafc5bbd5fdc9caad698db48cbb8ad80df942f0e
+          docker pull python:3.11-slim
+          docker pull postgres:15-alpine
+          python3 -m ops.ci_g5_role_provisioning
       - name: Rehearse full-schema PostgreSQL rollback and adversaries
         env:
           CI: "true"
