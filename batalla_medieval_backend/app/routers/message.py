@@ -1,12 +1,13 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
 from ..routers.auth import get_current_user
-from ..services import notification as notification_service
 from ..services import premium as premium_service
-from ..services import social_privacy, world_lifecycle
+from ..services import social_privacy, socket_manager, world_lifecycle
 
 router = APIRouter(tags=["message"])
 
@@ -132,9 +133,6 @@ def send_message(
             detail="Social interaction blocked",
         )
 
-    premium_service.get_or_create_status(db, receiver)
-    premium_service.get_or_create_status(db, current_user)
-
     try:
         world_lifecycle.require_world_open(db, world_id, lock=True)
     except ValueError as exc:
@@ -171,7 +169,7 @@ def send_message(
         .filter(models.PremiumStatus.user_id == receiver.id)
         .with_for_update()
         .populate_existing()
-        .one()
+        .one_or_none()
     )
     inbox_limit = premium_service.get_message_limit(receiver_status)
     inbox_query = db.query(models.Message).filter(
@@ -200,20 +198,43 @@ def send_message(
     if oldest is not None:
         db.delete(oldest)
 
+    notification = models.Notification(
+        user_id=receiver.id,
+        title="Nuevo mensaje privado",
+        body=f"Has recibido un mensaje de {sender.username}: {subject}",
+        type="message_received",
+    )
+    db.add(notification)
     try:
-        notification_service.create_notification(
-            db,
-            receiver,
-            title="Nuevo mensaje privado",
-            body=f"Has recibido un mensaje de {sender.username}: {message.subject}",
-            notification_type="message_received",
-            allow_email=False,
-        )
-        db.refresh(message)
-        return message
+        db.flush()
+        response = schemas.MessageRead.model_validate(message)
+        notification_payload = {
+            "id": notification.id,
+            "title": notification.title,
+            "body": notification.body,
+            "type": notification.type,
+            "created_at": notification.created_at.isoformat(),
+            "read": notification.read,
+        }
+        db.commit()
     except Exception:
         db.rollback()
         raise
+
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(
+                socket_manager.notify_user(receiver.id, "notification", notification_payload)
+            )
+        except RuntimeError:
+            asyncio.run(
+                socket_manager.notify_user(receiver.id, "notification", notification_payload)
+            )
+    except Exception:
+        pass
+
+    return response
 
 
 @router.get("/inbox", response_model=list[schemas.MessageRead])

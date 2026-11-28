@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..utils import utc_now
+from ..schemas.message import MESSAGE_CONTENT_MAX_LENGTH, MESSAGE_SUBJECT_MAX_LENGTH
 from . import socket_manager
 from . import quest as quest_service
+from . import premium as premium_service
 from . import world_lifecycle
 
 RANK_MEMBER = schemas.RANK_MEMBER
@@ -556,6 +558,23 @@ def send_mass_message(
     subject: str,
     content: str,
 ):
+    subject = str(subject).strip()
+    content = str(content).strip()
+    if not subject or not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Subject and content cannot be empty",
+        )
+    prefixed_subject = f"[ALLIANCE] {subject}"
+    if (
+        len(prefixed_subject) > MESSAGE_SUBJECT_MAX_LENGTH
+        or len(content) > MESSAGE_CONTENT_MAX_LENGTH
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Message exceeds the supported length",
+        )
+
     alliance = get_alliance_or_404(db, alliance_id)
     world_lifecycle.require_world_open_http(db, alliance.world_id)
     membership = require_membership(db, alliance_id, sender.id)
@@ -565,50 +584,107 @@ def send_mass_message(
             detail="Insufficient rank",
         )
 
-    memberships = (
-        db.query(models.AllianceMember)
-        .join(models.User, models.User.id == models.AllianceMember.user_id)
-        .filter(models.AllianceMember.alliance_id == alliance_id)
-        .all()
-    )
-
-    notifications = []
-    for mem in memberships:
-        msg = models.Message(
-            sender_id=sender.id,
-            receiver_id=mem.user_id,
-            world_id=alliance.world_id,
-            subject=f"[ALLIANCE] {subject}",
-            content=content,
-            timestamp=utc_now(),
+    try:
+        memberships = (
+            db.query(models.AllianceMember)
+            .filter(models.AllianceMember.alliance_id == alliance_id)
+            .order_by(models.AllianceMember.user_id.asc())
+            .all()
         )
-        db.add(msg)
-        notification = models.Notification(
-            user_id=mem.user_id,
-            title="New Alliance Message",
-            body=f"Alliance message: {subject}",
-            type="message_received",
+        recipient_ids = [member.user_id for member in memberships]
+        recipients = (
+            db.query(models.User)
+            .filter(models.User.id.in_(recipient_ids))
+            .order_by(models.User.id.asc())
+            .with_for_update()
+            .populate_existing()
+            .all()
         )
-        db.add(notification)
-        notifications.append((mem.user, notification))
+        recipients_by_id = {recipient.id: recipient for recipient in recipients}
+        if sender.id not in recipients_by_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Sender is no longer an alliance member",
+            )
 
-    db.commit()
-    for recipient, notification in notifications:
-        db.refresh(notification)
-        payload = {
-            "id": notification.id,
-            "title": notification.title,
-            "body": notification.body,
-            "type": notification.type,
-            "created_at": notification.created_at.isoformat(),
-            "read": notification.read,
+        premium_statuses = (
+            db.query(models.PremiumStatus)
+            .filter(models.PremiumStatus.user_id.in_(recipient_ids))
+            .order_by(models.PremiumStatus.user_id.asc())
+            .with_for_update()
+            .populate_existing()
+            .all()
+        )
+        limits = {
+            premium_status.user_id: premium_service.get_message_limit(premium_status)
+            for premium_status in premium_statuses
         }
+        notifications = []
+        for recipient_id in recipient_ids:
+            inbox_query = db.query(models.Message).filter(
+                models.Message.receiver_id == recipient_id,
+                models.Message.world_id == alliance.world_id,
+            )
+            limit = limits.get(recipient_id, premium_service.BASE_MESSAGE_LIMIT)
+            if inbox_query.count() >= limit:
+                oldest = (
+                    inbox_query.order_by(
+                        models.Message.timestamp.asc(),
+                        models.Message.id.asc(),
+                    )
+                    .with_for_update()
+                    .first()
+                )
+                if oldest is not None:
+                    db.delete(oldest)
+
+            db.add(
+                models.Message(
+                    sender_id=sender.id,
+                    receiver_id=recipient_id,
+                    world_id=alliance.world_id,
+                    subject=prefixed_subject,
+                    content=content,
+                    timestamp=utc_now(),
+                )
+            )
+            notification = models.Notification(
+                user_id=recipient_id,
+                title="New Alliance Message",
+                body=f"Alliance message: {subject}",
+                type="message_received",
+            )
+            db.add(notification)
+            notifications.append((recipient_id, notification))
+
+        db.flush()
+        notification_payloads = []
+        for recipient_id, notification in notifications:
+            notification_payloads.append(
+                (
+                    recipient_id,
+                    {
+                        "id": notification.id,
+                        "title": notification.title,
+                        "body": notification.body,
+                        "type": notification.type,
+                        "created_at": notification.created_at.isoformat(),
+                        "read": notification.read,
+                    },
+                )
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    for recipient_id, payload in notification_payloads:
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(socket_manager.notify_user(recipient.id, "notification", payload))
+            loop.create_task(socket_manager.notify_user(recipient_id, "notification", payload))
         except RuntimeError:
             try:
-                asyncio.run(socket_manager.notify_user(recipient.id, "notification", payload))
+                asyncio.run(socket_manager.notify_user(recipient_id, "notification", payload))
             except Exception:
                 pass
         except Exception:

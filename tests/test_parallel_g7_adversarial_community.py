@@ -160,6 +160,131 @@ def test_alliance_mass_message_is_rejected_when_world_is_paused(db_session, user
     assert db_session.query(models.Message).count() == 0
 
 
+def test_transfer_leadership_is_rejected_when_world_is_paused(db_session, user):
+    from app.services import community as community_service
+
+    world = db_session.query(models.World).first()
+    target_user = models.User(
+        username="g7_paused_transfer_target",
+        email="g7-paused-transfer-target@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(target_user)
+    db_session.flush()
+    alliance = _alliance(db_session, world, user, target_user)
+    target = (
+        db_session.query(models.AllianceMember)
+        .filter_by(alliance_id=alliance.id, user_id=target_user.id)
+        .one()
+    )
+    world.lifecycle_status = "paused"
+    world.is_active = False
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        community_service.transfer_leadership(
+            db_session,
+            alliance.id,
+            user.id,
+            target.id,
+        )
+
+    assert exc.value.status_code == 409
+    db_session.refresh(alliance)
+    assert alliance.leader_id == user.id
+
+
+def test_mass_message_normalizes_and_respects_premium_inbox_limit_without_private_block_filter(
+    db_session,
+    user,
+):
+    from app.services import social_privacy
+
+    world = db_session.query(models.World).first()
+    peer = models.User(
+        username="g7_mass_message_peer",
+        email="g7-mass-message-peer@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(peer)
+    db_session.flush()
+    alliance = _alliance(db_session, world, user, peer)
+    db_session.add_all(
+        [
+            models.Message(
+                sender_id=user.id,
+                receiver_id=peer.id,
+                world_id=world.id,
+                subject=f"Mass inbox {index}",
+                content="Existing",
+                timestamp=datetime(2020, 1, 1, tzinfo=timezone.utc)
+                + timedelta(days=index),
+            )
+            for index in range(50)
+        ]
+    )
+    db_session.add(
+        models.PremiumStatus(user_id=peer.id, increased_message_storage=True)
+    )
+    db_session.add(
+        models.UserBlock(
+            blocker_id=peer.id,
+            blocked_id=user.id,
+            world_id=world.id,
+        )
+    )
+    db_session.commit()
+    oldest_id = (
+        db_session.query(models.Message.id)
+        .filter_by(receiver_id=peer.id, world_id=world.id)
+        .order_by(models.Message.timestamp.asc(), models.Message.id.asc())
+        .first()[0]
+    )
+
+    result = alliance_service.send_mass_message(
+        db_session,
+        alliance.id,
+        user,
+        "  Council  ",
+        "  Alliance-wide notice  ",
+    )
+
+    assert result == {"count": 2}
+    peer_inbox = (
+        db_session.query(models.Message)
+        .filter_by(receiver_id=peer.id, world_id=world.id)
+        .all()
+    )
+    assert len(peer_inbox) == 51
+    assert oldest_id in {message.id for message in peer_inbox}
+    assert any(
+        message.subject == "[ALLIANCE] Council"
+        and message.content == "Alliance-wide notice"
+        for message in peer_inbox
+    )
+    assert social_privacy.interaction_blocked(db_session, user.id, peer.id, world.id)
+
+
+def test_mass_message_rejects_whitespace_without_side_effects(db_session, user):
+    world = db_session.query(models.World).first()
+    alliance = _alliance(db_session, world, user)
+
+    with pytest.raises(HTTPException) as exc:
+        alliance_service.send_mass_message(
+            db_session,
+            alliance.id,
+            user,
+            "   ",
+            "Content",
+        )
+
+    assert exc.value.status_code == 400
+    assert db_session.query(models.Message).count() == 0
+    assert db_session.query(models.Notification).count() == 0
+
+
 @pytest.mark.parametrize(
     ("subject", "content"),
     [("   ", "Valid content"), ("Valid subject", "   ")],
@@ -225,6 +350,13 @@ def test_invalid_private_message_does_not_evict_existing_inbox_message(
     assert exc.value.status_code == 400
     assert db_session.query(models.Message).filter_by(id=oldest_id).one_or_none() is not None
     assert db_session.query(models.Message).filter_by(receiver_id=receiver.id).count() == 50
+    assert (
+        db_session.query(models.PremiumStatus)
+        .filter(models.PremiumStatus.user_id.in_((user.id, receiver.id)))
+        .count()
+        == 0
+    )
+    assert db_session.query(models.Notification).count() == 0
 
 
 def test_valid_full_inbox_send_evicts_oldest_only_for_selected_world_and_recipient(
@@ -372,15 +504,10 @@ def test_failed_message_notification_rolls_back_inbox_eviction_and_insert(
         .first()[0]
     )
 
-    def fail_after_message_flush(db, *args, **kwargs):
-        db.flush()
+    def fail_commit():
         raise RuntimeError("notification persistence failed")
 
-    monkeypatch.setattr(
-        message_router.notification_service,
-        "create_notification",
-        fail_after_message_flush,
-    )
+    monkeypatch.setattr(db_session, "commit", fail_commit)
     with pytest.raises(RuntimeError, match="notification persistence failed"):
         message_router.send_message(
             schemas.MessageCreate(
@@ -406,6 +533,238 @@ def test_failed_message_notification_rolls_back_inbox_eviction_and_insert(
         == 50
     )
     assert db_session.query(models.Notification).count() == 0
+
+
+def test_notification_dispatch_failure_does_not_turn_committed_send_into_error(
+    db_session,
+    user,
+    monkeypatch,
+):
+    from app import schemas
+    from app.routers import message as message_router
+
+    world = db_session.query(models.World).first()
+    receiver = models.User(
+        username="g7_dispatch_failure_receiver",
+        email="g7-dispatch-failure-receiver@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+        world_id=world.id,
+    )
+    db_session.add(receiver)
+    db_session.flush()
+    user.world_id = world.id
+    _joined(db_session, user, world)
+    _joined(db_session, receiver, world)
+    db_session.commit()
+
+    async def fail_notification(*args, **kwargs):
+        raise RuntimeError("socket unavailable")
+
+    monkeypatch.setattr(
+        message_router.socket_manager,
+        "notify_user",
+        fail_notification,
+    )
+    sent = message_router.send_message(
+        schemas.MessageCreate(
+            receiver_id=receiver.id,
+            subject="Committed delivery",
+            content="Realtime is best effort",
+        ),
+        db_session,
+        user,
+    )
+
+    assert sent.subject == "Committed delivery"
+    assert db_session.query(models.Message).filter_by(id=sent.id).one()
+    assert (
+        db_session.query(models.Notification)
+        .filter_by(user_id=receiver.id, type="message_received")
+        .count()
+        == 1
+    )
+
+
+def test_private_websocket_revalidates_recipient_world_and_privacy_per_send(
+    client,
+    db_session,
+    user,
+):
+    from app.routers.auth import create_access_token
+
+    world = db_session.query(models.World).first()
+    receiver = models.User(
+        username="g7_socket_private_receiver",
+        email="g7-socket-private-receiver@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(receiver)
+    db_session.flush()
+    user.world_id = world.id
+    _joined(db_session, user, world)
+    _joined(db_session, receiver, world)
+    db_session.commit()
+    token = create_access_token(
+        {"sub": user.username, "type": "access", "ver": user.auth_version}
+    )
+
+    with client.websocket_connect(
+        f"/chat/private?token={token}&receiver_id={receiver.id}"
+    ) as socket:
+        db_session.query(models.PlayerWorld).filter_by(
+            user_id=receiver.id,
+            world_id=world.id,
+        ).delete()
+        db_session.commit()
+        socket.send_json({"content": "not delivered across worlds"})
+        assert socket.receive_json()["error"] == "Private interaction blocked"
+
+    assert db_session.query(models.ChatMessage).count() == 0
+
+
+def test_existing_websocket_rejects_paused_world_and_resumes_after_reopen(
+    client,
+    db_session,
+    user,
+):
+    from app.routers.auth import create_access_token
+    from app.services.chat_manager import chat_manager
+
+    world = db_session.query(models.World).first()
+    world.is_active = True
+    world.lifecycle_status = "open"
+    user.world_id = world.id
+    _joined(db_session, user, world)
+    db_session.commit()
+    token = create_access_token(
+        {"sub": user.username, "type": "access", "ver": user.auth_version}
+    )
+    chat_manager.last_message_at.pop(user.id, None)
+
+    with client.websocket_connect(f"/chat/global?token={token}") as socket:
+        world.lifecycle_status = "paused"
+        world.is_active = False
+        db_session.commit()
+        socket.send_json({"content": "blocked while paused"})
+        assert socket.receive_json()["error"] == "World is not open"
+        assert db_session.query(models.ChatMessage).count() == 0
+
+        world.lifecycle_status = "open"
+        world.is_active = True
+        db_session.commit()
+        socket.send_json({"content": "accepted after reopen"})
+        assert socket.receive_json()["content"] == "accepted after reopen"
+
+    messages = db_session.query(models.ChatMessage).all()
+    assert len(messages) == 1
+    assert messages[0].content == "accepted after reopen"
+
+
+@pytest.mark.parametrize("lifecycle_status", ["closed", "archived"])
+def test_existing_websocket_cannot_write_closed_or_archived_world(
+    client,
+    db_session,
+    user,
+    lifecycle_status,
+):
+    from app.routers.auth import create_access_token
+
+    world = db_session.query(models.World).first()
+    world.is_active = True
+    world.lifecycle_status = "open"
+    user.world_id = world.id
+    _joined(db_session, user, world)
+    db_session.commit()
+    token = create_access_token(
+        {"sub": user.username, "type": "access", "ver": user.auth_version}
+    )
+
+    with client.websocket_connect(f"/chat/global?token={token}") as socket:
+        world.lifecycle_status = lifecycle_status
+        world.is_active = False
+        db_session.commit()
+        socket.send_json({"content": "not written"})
+        assert socket.receive_json()["error"] == "World is not open"
+
+    assert db_session.query(models.ChatMessage).count() == 0
+
+
+@pytest.mark.skipif(
+    engine.dialect.name != "postgresql",
+    reason="World lifecycle row-lock validation requires PostgreSQL",
+)
+def test_pause_serializes_with_leadership_transfer_and_rejects_after_pause(
+    db_session,
+    user,
+):
+    from app.services import community as community_service
+
+    world = db_session.query(models.World).first()
+    target_user = models.User(
+        username="g7_transfer_pause_target",
+        email="g7-transfer-pause-target@example.com",
+        hashed_password="placeholder",
+        is_verified=True,
+    )
+    db_session.add(target_user)
+    db_session.flush()
+    alliance = _alliance(db_session, world, user, target_user)
+    target = (
+        db_session.query(models.AllianceMember)
+        .filter_by(alliance_id=alliance.id, user_id=target_user.id)
+        .one()
+    )
+    world_lifecycle.require_world_open(db_session, world.id, lock=True)
+
+    gate_query_started = threading.Event()
+    results = []
+
+    def observe_gate_query(connection, cursor, statement, parameters, context, executemany):
+        if (
+            threading.current_thread().name == "g7-transfer-writer"
+            and "worlds" in statement.lower()
+            and "for update" in statement.lower()
+        ):
+            gate_query_started.set()
+
+    from sqlalchemy import event
+
+    event.listen(engine, "before_cursor_execute", observe_gate_query)
+
+    def transfer_after_pause_gate():
+        session = SessionLocal()
+        try:
+            community_service.transfer_leadership(
+                session,
+                alliance.id,
+                user.id,
+                target.id,
+            )
+            results.append("transferred")
+        except HTTPException as exc:
+            session.rollback()
+            results.append(exc.status_code)
+        finally:
+            session.close()
+
+    writer = threading.Thread(target=transfer_after_pause_gate, name="g7-transfer-writer")
+    try:
+        writer.start()
+        assert gate_query_started.wait(timeout=5)
+        db_session.refresh(world)
+        world.lifecycle_status = "paused"
+        world.is_active = False
+        db_session.commit()
+        writer.join(timeout=10)
+        assert not writer.is_alive(), "Leadership transfer remained blocked after pause"
+    finally:
+        event.remove(engine, "before_cursor_execute", observe_gate_query)
+
+    assert results == [409]
+    db_session.refresh(alliance)
+    assert alliance.leader_id == user.id
 
 
 @pytest.mark.skipif(

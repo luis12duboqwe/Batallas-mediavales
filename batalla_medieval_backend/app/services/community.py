@@ -109,13 +109,26 @@ def transfer_leadership(
     """
 
     try:
+        alliance_world_id = (
+            db.query(models.Alliance.world_id)
+            .filter(models.Alliance.id == alliance_id)
+            .scalar()
+        )
+        if alliance_world_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Alliance not found",
+            )
+        world_lifecycle.require_world_open_http(db, alliance_world_id)
+
         alliance = (
             db.query(models.Alliance)
             .filter(models.Alliance.id == alliance_id)
             .with_for_update()
+            .populate_existing()
             .one_or_none()
         )
-        if alliance is None:
+        if alliance is None or alliance.world_id != alliance_world_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Alliance not found",

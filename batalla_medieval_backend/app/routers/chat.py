@@ -8,7 +8,7 @@ from ..database import get_db
 from ..routers.auth import decode_typed_token, get_current_user
 from ..schemas import privacy as privacy_schema
 from ..services import community as community_service
-from ..services import social_privacy
+from ..services import social_privacy, world_lifecycle
 from ..services.chat_manager import chat_manager
 from ..utils import utc_now
 
@@ -194,39 +194,63 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
     try:
         while True:
             data = await websocket.receive_json()
-            # Authentication is not a one-time handshake for a persistent
-            # connection. Freeze, password reset, token expiry and changing
-            # the selected world revoke this socket before any new writes.
-            if not _socket_session_is_valid(db, token, current_user.id, world_id):
-                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-                break
-
             raw_content = data.get("content") if isinstance(data, dict) else None
             try:
                 filtered_content = _normalize_content(raw_content)
             except ValueError as exc:
+                db.rollback()
                 await websocket.send_json({"error": str(exc)})
                 continue
 
-            # Re-check privacy on every private send so a block takes effect on
-            # an already-open socket without waiting for reconnection.
+            try:
+                world_lifecycle.require_world_open_http(db, world_id)
+            except HTTPException as exc:
+                db.rollback()
+                await websocket.send_json({"error": exc.detail})
+                continue
+
+            participant_ids = [current_user.id]
             if channel == "private" and receiver_id is not None:
-                if social_privacy.interaction_blocked(
-                    db,
-                    current_user.id,
-                    receiver_id,
-                    world_id,
+                participant_ids.append(receiver_id)
+            (
+                db.query(models.User)
+                .filter(models.User.id.in_(participant_ids))
+                .order_by(models.User.id.asc())
+                .with_for_update()
+                .populate_existing()
+                .all()
+            )
+
+            # Persistent sockets must revalidate their session and channel
+            # authorization while holding the world lifecycle lock.
+            if not _socket_session_is_valid(db, token, current_user.id, world_id):
+                db.rollback()
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                break
+
+            if channel == "private" and receiver_id is not None:
+                if (
+                    not _user_in_world(db, receiver_id, world_id)
+                    or social_privacy.interaction_blocked(
+                        db,
+                        current_user.id,
+                        receiver_id,
+                        world_id,
+                    )
                 ):
+                    db.rollback()
                     await websocket.send_json({"error": "Private interaction blocked"})
                     continue
 
-            if channel == "alliance":
-                current_alliance_id = _get_alliance_id(db, current_user.id, world_id)
-                if current_alliance_id != alliance_id:
-                    await websocket.send_json({"error": "Alliance membership changed"})
-                    continue
+            if channel == "alliance" and (
+                _get_alliance_id(db, current_user.id, world_id) != alliance_id
+            ):
+                db.rollback()
+                await websocket.send_json({"error": "Alliance membership changed"})
+                continue
 
             if not chat_manager.allow_message(current_user.id):
+                db.rollback()
                 await websocket.send_json({"error": "Rate limit exceeded"})
                 continue
 
@@ -240,20 +264,24 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
                 timestamp=utc_now(),
             )
             db.add(chat_message)
-            db.commit()
-            db.refresh(chat_message)
-
-            payload = {
-                "id": chat_message.id,
-                "user_id": current_user.id,
-                "username": current_user.username,
-                "world_id": chat_message.world_id,
-                "alliance_id": chat_message.alliance_id,
-                "channel": chat_message.channel,
-                "receiver_id": chat_message.receiver_id,
-                "content": chat_message.content,
-                "timestamp": chat_message.timestamp.isoformat(),
-            }
+            try:
+                db.flush()
+                payload = {
+                    "id": chat_message.id,
+                    "user_id": current_user.id,
+                    "username": current_user.username,
+                    "world_id": chat_message.world_id,
+                    "alliance_id": chat_message.alliance_id,
+                    "channel": chat_message.channel,
+                    "receiver_id": chat_message.receiver_id,
+                    "content": chat_message.content,
+                    "timestamp": chat_message.timestamp.isoformat(),
+                }
+                db.commit()
+            except Exception:
+                db.rollback()
+                await websocket.send_json({"error": "Message could not be saved"})
+                continue
 
             # A receiver may have left or been kicked since socket opening.
             authorized_user_ids = (
@@ -261,6 +289,7 @@ async def websocket_chat(websocket: WebSocket, channel: str, db: Session = Depen
                 if channel == "alliance" and alliance_id is not None
                 else None
             )
+            db.rollback()
 
             await chat_manager.broadcast(
                 channel=channel,
