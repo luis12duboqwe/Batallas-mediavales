@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -1049,7 +1050,7 @@ def _pg_snapshot(
         item.get("IPAddress") for item in db_networks.values()
         if isinstance(item, dict) and isinstance(item.get("IPAddress"), str)
     }
-    if len(db_ips) != 1:
+    if len(db_ips) != 1 or not next(iter(db_ips)):
         raise ObservationError("PostgreSQL runtime network address is unavailable")
     for service in ("backend", "worker"):
         service_row = next(
@@ -1066,8 +1067,14 @@ def _pg_snapshot(
         app = _json(app_output, f"{service} PostgreSQL connection")
         if (not isinstance(app, list) or len(app) != 8 or app[0] != split.application
                 or app[1] != split.application or app[2] != database or app[3] != admin[2]
-                or app[4] not in db_ips or app[5] is not False or app[6] is not False
-                or app[7] != "on"):
+                or not isinstance(app[4], str) or app[5] is not False
+                or app[6] is not False or app[7] != "on"):
+            raise ObservationError(f"effective {service} PostgreSQL identity is unverified")
+        try:
+            server_ip = str(ipaddress.ip_interface(app[4]).ip)
+        except ValueError:
+            raise ObservationError(f"effective {service} PostgreSQL identity is unverified") from None
+        if server_ip not in db_ips:
             raise ObservationError(f"effective {service} PostgreSQL identity is unverified")
 
     # Hash only the schema-only dump. Never return or print SQL or user data.
