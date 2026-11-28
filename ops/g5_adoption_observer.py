@@ -643,10 +643,14 @@ def _verify_runtime_service(
     if actual_env != expected_env:
         raise ObservationError(f"{service} runtime environment differs from effective Compose")
 
+    configured_entrypoint = service_config.get("entrypoint")
+    configured_command = service_config.get("command")
     entrypoint = _argv_value(
-        service_config.get("entrypoint", image_config.get("Entrypoint"))
+        image_config.get("Entrypoint") if configured_entrypoint is None else configured_entrypoint
     )
-    command = _argv_value(service_config.get("command", image_config.get("Cmd")))
+    command = _argv_value(
+        image_config.get("Cmd") if configured_command is None else configured_command
+    )
     actual_entrypoint = row.get("Config", {}).get("Entrypoint")
     actual_command = row.get("Config", {}).get("Cmd")
     if actual_entrypoint != entrypoint or actual_command != command:

@@ -141,6 +141,22 @@ def test_runner_uses_bounded_argv_and_sanitizes_command_failures():
         observer._run(["python"], timeout=7, max_output_bytes=10)
 
 
+def test_runtime_service_uses_image_defaults_when_compose_overrides_are_null():
+    def runner(argv, **_kwargs):
+        assert argv[:4] == ("docker", "image", "inspect", "sha256:" + "a" * 64)
+        return json.dumps([{"Config": {
+            "Env": ["BASE=value"], "Entrypoint": ["fixture-entry"], "Cmd": ["fixture-cmd"],
+        }}])
+
+    row = {"Image": "sha256:" + "a" * 64, "Config": {
+        "Env": ["BASE=value"], "Entrypoint": ["fixture-entry"], "Cmd": ["fixture-cmd"],
+    }}
+    observer._verify_runtime_service(
+        runner, "caddy", row,
+        {"environment": {}, "entrypoint": None, "command": None},
+    )
+
+
 def test_compose_fingerprint_is_deterministic_without_returning_config_values():
     config = {"services": {"database": {"environment": {"PASSWORD": "secret-value"}}}}
     labels = [{
