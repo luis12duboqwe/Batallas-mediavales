@@ -1,11 +1,13 @@
+import asyncio
 from typing import List
 
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..utils import utc_now
-from . import notification as notification_service
+from . import socket_manager
 from . import quest as quest_service
 from . import world_lifecycle
 
@@ -97,19 +99,13 @@ def create_alliance(
     payload: schemas.AllianceCreate,
     founder: models.User,
 ) -> models.Alliance:
-    world = (
-        db.query(models.World)
-        .filter(
-            models.World.id == payload.world_id,
-            models.World.lifecycle_status == "open",
-        )
-        .first()
-    )
-    if not world:
+    try:
+        world = world_lifecycle.require_world_open(db, payload.world_id, lock=True)
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="World not available",
-        )
+        ) from exc
 
     _require_player_world(db, founder.id, payload.world_id)
     if get_membership_in_world(db, founder.id, payload.world_id):
@@ -164,6 +160,14 @@ def invite_member(
     target_user_id: int,
 ) -> models.AllianceInvitation:
     alliance = get_alliance_or_404(db, alliance_id)
+    world_lifecycle.require_world_open_http(db, alliance.world_id)
+    (
+        db.query(models.User)
+        .filter(models.User.id == target_user_id)
+        .with_for_update()
+        .populate_existing()
+        .one_or_none()
+    )
     inviter_membership = require_membership(db, alliance_id, inviter.id)
     if inviter_membership.rank < RANK_GENERAL:
         raise HTTPException(
@@ -199,7 +203,15 @@ def invite_member(
         invited_by_id=inviter.id,
         status="pending",
     )
-    db.add(invitation)
+    try:
+        with db.begin_nested():
+            db.add(invitation)
+            db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An invitation already exists for this user",
+        ) from exc
     db.commit()
     db.refresh(invitation)
     return invitation
@@ -214,7 +226,20 @@ def accept_invitation(
         invitation = (
             db.query(models.AllianceInvitation)
             .filter(models.AllianceInvitation.id == invitation_id)
+            .one_or_none()
+        )
+        if not invitation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invitation not found",
+            )
+        alliance = get_alliance_or_404(db, invitation.alliance_id)
+        world_lifecycle.require_world_open_http(db, alliance.world_id)
+        invitation = (
+            db.query(models.AllianceInvitation)
+            .filter(models.AllianceInvitation.id == invitation_id)
             .with_for_update()
+            .populate_existing()
             .one_or_none()
         )
         if not invitation:
@@ -237,10 +262,9 @@ def accept_invitation(
             db.query(models.User)
             .filter(models.User.id == user.id)
             .with_for_update()
+            .populate_existing()
             .one()
         )
-        alliance = get_alliance_or_404(db, invitation.alliance_id)
-        world_lifecycle.require_world_open_http(db, alliance.world_id)
         _require_player_world(db, locked_user.id, alliance.world_id)
         if get_membership_in_world(db, locked_user.id, alliance.world_id):
             raise HTTPException(
@@ -532,6 +556,8 @@ def send_mass_message(
     subject: str,
     content: str,
 ):
+    alliance = get_alliance_or_404(db, alliance_id)
+    world_lifecycle.require_world_open_http(db, alliance.world_id)
     membership = require_membership(db, alliance_id, sender.id)
     if membership.rank not in [RANK_LEADER, RANK_GENERAL]:
         raise HTTPException(
@@ -539,7 +565,6 @@ def send_mass_message(
             detail="Insufficient rank",
         )
 
-    alliance = get_alliance_or_404(db, alliance_id)
     memberships = (
         db.query(models.AllianceMember)
         .join(models.User, models.User.id == models.AllianceMember.user_id)
@@ -547,7 +572,7 @@ def send_mass_message(
         .all()
     )
 
-    count = 0
+    notifications = []
     for mem in memberships:
         msg = models.Message(
             sender_id=sender.id,
@@ -558,13 +583,34 @@ def send_mass_message(
             timestamp=utc_now(),
         )
         db.add(msg)
-        notification_service.create_notification(
-            db,
-            mem.user,
-            "New Alliance Message",
-            f"Alliance message: {subject}",
+        notification = models.Notification(
+            user_id=mem.user_id,
+            title="New Alliance Message",
+            body=f"Alliance message: {subject}",
+            type="message_received",
         )
-        count += 1
+        db.add(notification)
+        notifications.append((mem.user, notification))
 
     db.commit()
-    return {"count": count}
+    for recipient, notification in notifications:
+        db.refresh(notification)
+        payload = {
+            "id": notification.id,
+            "title": notification.title,
+            "body": notification.body,
+            "type": notification.type,
+            "created_at": notification.created_at.isoformat(),
+            "read": notification.read,
+        }
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(socket_manager.notify_user(recipient.id, "notification", payload))
+        except RuntimeError:
+            try:
+                asyncio.run(socket_manager.notify_user(recipient.id, "notification", payload))
+            except Exception:
+                pass
+        except Exception:
+            pass
+    return {"count": len(notifications)}

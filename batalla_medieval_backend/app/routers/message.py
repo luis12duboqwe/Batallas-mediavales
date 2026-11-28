@@ -104,9 +104,11 @@ def send_message(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    subject = _normalize_text(payload.subject, "Subject")
+    content = _normalize_text(payload.content, "Content")
     world_id = _active_world_id(db, current_user)
     try:
-        world_lifecycle.require_world_open(db, world_id)
+        world_lifecycle.require_world_open(db, world_id, lock=False)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail="World is not open") from exc
     receiver = db.query(models.User).filter(models.User.id == payload.receiver_id).first()
@@ -130,39 +132,88 @@ def send_message(
             detail="Social interaction blocked",
         )
 
-    receiver_status = premium_service.get_or_create_status(db, receiver)
+    premium_service.get_or_create_status(db, receiver)
+    premium_service.get_or_create_status(db, current_user)
+
+    try:
+        world_lifecycle.require_world_open(db, world_id, lock=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="World is not open") from exc
+
+    locked_users = (
+        db.query(models.User)
+        .filter(models.User.id.in_((current_user.id, receiver.id)))
+        .order_by(models.User.id.asc())
+        .with_for_update()
+        .populate_existing()
+        .all()
+    )
+    users_by_id = {user.id: user for user in locked_users}
+    sender = users_by_id.get(current_user.id)
+    receiver = users_by_id.get(receiver.id)
+    if sender is None or receiver is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if _active_world_id(db, sender) != world_id:
+        raise HTTPException(status_code=409, detail="Active world changed")
+    if not _user_in_world(db, receiver.id, world_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Players do not share a world",
+        )
+    if social_privacy.interaction_blocked(db, sender.id, receiver.id, world_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Social interaction blocked",
+        )
+
+    receiver_status = (
+        db.query(models.PremiumStatus)
+        .filter(models.PremiumStatus.user_id == receiver.id)
+        .with_for_update()
+        .populate_existing()
+        .one()
+    )
     inbox_limit = premium_service.get_message_limit(receiver_status)
     inbox_query = db.query(models.Message).filter(
         models.Message.receiver_id == receiver.id,
         models.Message.world_id == world_id,
     )
+    oldest = None
     if inbox_query.count() >= inbox_limit:
-        oldest = inbox_query.order_by(models.Message.timestamp.asc()).first()
-        if oldest:
-            db.delete(oldest)
-            db.commit()
-
-    premium_service.get_or_create_status(db, current_user)
+        oldest = (
+            inbox_query.order_by(
+                models.Message.timestamp.asc(),
+                models.Message.id.asc(),
+            )
+            .with_for_update()
+            .first()
+        )
 
     message = models.Message(
-        sender_id=current_user.id,
-        receiver_id=payload.receiver_id,
+        sender_id=sender.id,
+        receiver_id=receiver.id,
         world_id=world_id,
-        subject=_normalize_text(payload.subject, "Subject"),
-        content=_normalize_text(payload.content, "Content"),
+        subject=subject,
+        content=content,
     )
     db.add(message)
-    db.commit()
-    db.refresh(message)
-    notification_service.create_notification(
-        db,
-        receiver,
-        title="Nuevo mensaje privado",
-        body=f"Has recibido un mensaje de {current_user.username}: {message.subject}",
-        notification_type="message_received",
-        allow_email=False,
-    )
-    return message
+    if oldest is not None:
+        db.delete(oldest)
+
+    try:
+        notification_service.create_notification(
+            db,
+            receiver,
+            title="Nuevo mensaje privado",
+            body=f"Has recibido un mensaje de {sender.username}: {message.subject}",
+            notification_type="message_received",
+            allow_email=False,
+        )
+        db.refresh(message)
+        return message
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get("/inbox", response_model=list[schemas.MessageRead])
@@ -205,6 +256,10 @@ def read_message(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this message")
 
     if not message.read and message.receiver_id == current_user.id:
+        try:
+            world_lifecycle.require_world_open(db, world_id, lock=True)
+        except ValueError:
+            return message
         message.read = True
         db.commit()
         db.refresh(message)
@@ -221,6 +276,11 @@ def delete_message(
     message = _scoped_message(db, message_id, world_id)
     if current_user.id not in {message.sender_id, message.receiver_id}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this message")
+
+    try:
+        world_lifecycle.require_world_open(db, world_id, lock=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="World is not open") from exc
 
     db.delete(message)
     db.commit()
