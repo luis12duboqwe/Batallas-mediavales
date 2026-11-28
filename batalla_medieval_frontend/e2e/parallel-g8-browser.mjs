@@ -350,7 +350,15 @@ async function sessionAndReconnect(page, context, monitor) {
   await page.evaluate(() => localStorage.setItem('bm_token', 'invalid.jwt.token'));
   monitor.expectedStatuses.add('/auth/me:401');
   monitor.expectedStatuses.add('/tutorial/status:401');
-  monitor.allowConsole((message) => /Failed to load resource.*401|server responded with a status of 401|Socket connection error:.*authentication failed/i.test(message.text()));
+  monitor.allowConsole(async (message) => {
+    if (/Failed to load resource.*401|server responded with a status of 401|Socket connection error:.*authentication failed/i.test(message.text())) return true;
+    if (!message.text().startsWith('Socket connection error:')) return false;
+    for (const arg of message.args()) {
+      const detail = await arg.evaluate((value) => value?.message).catch(() => null);
+      if (detail === 'authentication failed') return true;
+    }
+    return false;
+  });
   await page.goto(`${UI}/profile`, { waitUntil: 'domcontentloaded' });
   await page.waitForURL((url) => url.pathname === '/login', { timeout });
   await page.getByTestId('session-expired').waitFor({ state: 'visible', timeout });

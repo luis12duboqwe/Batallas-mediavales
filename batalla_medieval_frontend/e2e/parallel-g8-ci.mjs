@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
@@ -23,11 +24,43 @@ assert.equal(command('git', ['rev-parse', 'HEAD']), expected, 'Unexpected HEAD')
 assert.equal(command('git', ['status', '--porcelain', '--untracked-files=all']), '', 'Checkout must be clean');
 assert.equal(command('git', ['rev-parse', '--show-toplevel']), root);
 
+assert.equal(process.platform, 'linux', 'Process-group cleanup requires Linux /proc');
 const scratch = await mkdtemp('/tmp/medievol-journey-g8-');
 const children = [];
 const groups = new Set();
 let interrupted = false;
 let escalation;
+function processInfo(pid) {
+  try {
+    const text = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const fields = text.slice(text.lastIndexOf(')') + 2).split(' ');
+    return { pid: Number(pid), parent: Number(fields[1]), group: Number(fields[2]) };
+  } catch (error) {
+    if (['ENOENT', 'ESRCH', 'EACCES'].includes(error.code)) return null;
+    throw error;
+  }
+}
+const ownGroup = processInfo('self').group;
+function captureGroups() {
+  const entries = readdirSync('/proc').filter((name) => /^\d+$/.test(name)).map(processInfo).filter(Boolean);
+  const descendants = new Set(entries.filter((entry) => groups.has(entry.group)).map((entry) => entry.pid));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const entry of entries) {
+      if (descendants.has(entry.parent) && !descendants.has(entry.pid)) {
+        descendants.add(entry.pid);
+        changed = true;
+      }
+    }
+  }
+  for (const entry of entries) {
+    if (descendants.has(entry.pid) && entry.group !== ownGroup) groups.add(entry.group);
+  }
+  const active = new Set(entries.map((entry) => entry.group));
+  for (const group of groups) if (!active.has(group)) groups.delete(group);
+}
+const groupMonitor = setInterval(captureGroups, 250);
 function signalGroup(pid, signal) {
   try { process.kill(-pid, signal); } catch (error) {
     if (error.code !== 'ESRCH') throw error;
@@ -35,6 +68,7 @@ function signalGroup(pid, signal) {
 }
 const stop = () => {
   interrupted = true;
+  captureGroups();
   for (const pid of groups) signalGroup(pid, 'SIGTERM');
   escalation ||= setTimeout(() => {
     for (const pid of groups) signalGroup(pid, 'SIGKILL');
@@ -174,6 +208,7 @@ try {
   });
   for (const pid of groups) signalGroup(pid, 'SIGKILL');
   clearTimeout(escalation);
+  clearInterval(groupMonitor);
   await rm(scratch, { recursive: true, force: true });
   process.removeListener('SIGINT', stop);
   process.removeListener('SIGTERM', stop);
