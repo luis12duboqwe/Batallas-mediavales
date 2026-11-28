@@ -118,11 +118,12 @@ observación del backup. Los intervalos de ejecución de health/soak comienzan
 tras el deploy, terminan antes de su observación y abarcan al menos la duración
 de carga declarada. La observación de blockers debe ser posterior o igual a
 todas las demás. En recuperación de desastres, el punto de recuperación es
-exactamente el instante de captura del backup; precede al último commit, que
-precede al incidente. El incidente
+exactamente el instante de captura del backup, posterior al deploy y anterior
+al incidente. El último commit puede ser anterior a la captura, pero no
+posterior al incidente. El incidente
 es posterior al restore en clon y la recuperación del servicio precede a la
-observación del rollback. RPO debe ser exactamente `last_commit_at -
-recovery_point_at` y no superar 86400 s; RTO debe ser exactamente
+observación del rollback. RPO debe ser exactamente el máximo entre cero y
+`last_commit_at - recovery_point_at`, y no superar 86400 s; RTO debe ser exactamente
 `service_restored_at - incident_at` y no superar 14400 s. Estos tiempos son
 declaraciones del simulacro, no una garantía de recuperación real.
 
@@ -171,7 +172,8 @@ aislado; no autoriza reabrir el entorno real ni restaurar un snapshot obsoleto.
 escenario real ensayado: `stop_writers`, `backup`, `pull`, `migration`, `up`,
 `https_timeout`, `smoke`, `load`, `recovery`, `before_commit` (fase
 `"precommit"`), y `after_commit`, `reopen`, `lost_response` (fase
-`"postcommit"`). Cada entrada requiere `phase`, `reference` único, los mismos
+`"postcommit"`). Cada entrada requiere `phase`, `reference` único, `origin` y
+`environment_id` iguales a la raíz, los mismos
 `source_release_sha`, `target_release_sha` y cuatro campos de imagen, y
 `barrier_started_at <= failure_at <= barrier_ended_at <=
 protected_cutover.observed_at`. Debe declarar `failure_injected`, `isolated`,
@@ -190,7 +192,8 @@ fallo imaginario. Los ensayos sintéticos o de CI no sustituyen evidencia real.
 El archivo de aprobación es otro objeto JSON: `release_sha`, `environment_id`,
 `origin: "real"`, `decision: "approve"`, `owner_id`, `reference`, `approved_at`
 y `evidence_sha256`. `owner_id` y `reference` son identificadores opacos; la
-referencia debe ser distinta de las de evidencia. La aprobación debe ser
+referencia debe ser distinta de las de evidencia, incluidos los casos de
+fallo. La aprobación debe ser
 posterior a todos los registros y se exige evidencia real completa.
 `evidence_sha256` vincula la declaración al contenido exacto del documento,
 no autentica al firmante ni firma el archivo. Calcularlo localmente con el JSON

@@ -237,12 +237,12 @@ def validate_evidence(document, *, now):
     require(all((captured, recovery_point, last_commit, incident, restored)),
             "recovery: valid UTC timestamps required")
     if all((captured, recovery_point, last_commit, incident, restored)):
-        require(recovery_point == captured and captured <= times.get("backup", now)
-                and recovery_point <= last_commit <= incident <= restored <= times.get("rollback", now)
+        require(recovery_point == captured and times.get("deploy", now) <= captured <= times.get("backup", now)
+                and captured <= incident and last_commit <= incident <= restored <= times.get("rollback", now)
                 and times.get("clone_restore", now) <= incident,
                 "recovery: inconsistent timeline")
         require(_number(rec("rollback").get("rpo_seconds"), 0, 86400)
-                and rec("rollback")["rpo_seconds"] == (last_commit - recovery_point).total_seconds(),
+                and rec("rollback")["rpo_seconds"] == max(0, (last_commit - recovery_point).total_seconds()),
                 "rollback: RPO does not match timeline")
         require(_number(rec("rollback").get("rto_seconds"), 0, 14400)
                 and rec("rollback")["rto_seconds"] == (restored - incident).total_seconds(),
@@ -327,6 +327,7 @@ def validate_evidence(document, *, now):
                       "no_lost_commits", "no_stale_restore"):
             valid = valid and case.get(field) is True
         valid = valid and case.get("recovery_required") is True
+        valid = valid and case.get("origin") == origin and case.get("environment_id") == environment
         valid = valid and case.get("source_release_sha") == source_sha and case.get("target_release_sha") == sha
         valid = valid and all(case.get(field) == cutover.get(field) for field in
                               ("source_backend_image", "source_frontend_image", "target_backend_image", "target_frontend_image"))
@@ -387,6 +388,13 @@ def validate_approval(document, approval, *, now):
                 if approval.get("reference") == record.get("reference"):
                     errors.append("approval: reference must be separate")
                     break
+        cutover = document["records"].get("protected_cutover")
+        cases = cutover.get("failure_matrix") if isinstance(cutover, dict) else None
+        if isinstance(cases, dict) and any(
+            isinstance(case, dict) and case.get("reference") == approval.get("reference")
+            for case in cases.values()
+        ):
+            errors.append("approval: reference must be separate from failure evidence")
     return {"status": "NO_GO", "approval_declaration": "INCOMPLETE" if errors else "REVIEW_REQUIRED",
             "blockers": result["blockers"] + errors}
 

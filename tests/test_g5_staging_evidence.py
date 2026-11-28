@@ -61,6 +61,7 @@ def fixture(origin="real"):
             "sql_exclusion_continuous": True, "edge_exclusion_continuous": True,
             "docker_exclusion_continuous": True, "privileged_exclusion_continuous": True,
             "no_lost_commits": True, "no_stale_restore": True, "recovery_required": True,
+            "origin": origin, "environment_id": "staging-1",
             "source_release_sha": SOURCE_SHA, "target_release_sha": SHA,
             **images,
             "barrier_started_at": stamp(NOW - timedelta(minutes=250)),
@@ -253,6 +254,9 @@ class EvidenceTests(unittest.TestCase):
                 self.assertEqual(validate_approval(fixture(), declaration, now=NOW)["approval_declaration"],
                                  "INCOMPLETE")
         self.assertEqual(validate_approval(fixture(), None, now=NOW)["status"], "NO_GO")
+        declaration = approval()
+        declaration["reference"] = fixture()["records"]["protected_cutover"]["failure_matrix"]["after_commit"]["reference"]
+        self.assertEqual(validate_approval(fixture(), declaration, now=NOW)["approval_declaration"], "INCOMPLETE")
 
     def test_every_mandatory_ci_job_and_step_must_run(self):
         for workflow, jobs in CI_JOBS.items():
@@ -283,6 +287,7 @@ class EvidenceTests(unittest.TestCase):
                     doc["records"]["protected_cutover"]["failure_matrix"][name][field] = False
                     self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
             for field, value in (("phase", "wrong"), ("source_release_sha", SHA),
+                                 ("origin", "synthetic"), ("environment_id", "other"),
                                  ("target_release_sha", SOURCE_SHA), ("target_backend_image", "sha256:" + "f" * 64),
                                  ("barrier_started_at", stamp(NOW - timedelta(minutes=235))),
                                  ("barrier_ended_at", stamp(NOW - timedelta(minutes=241)))):
@@ -339,6 +344,7 @@ class EvidenceTests(unittest.TestCase):
                         self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
         for record, field, value in (
             ("backup", "captured_at", stamp(NOW - timedelta(minutes=105))),
+            ("backup", "captured_at", stamp(NOW - timedelta(hours=4))),
             ("rollback", "recovery_point_at", stamp(NOW - timedelta(minutes=111))),
             ("migration", "observed_at", stamp(NOW - timedelta(minutes=180))),
             ("protected_cutover", "observed_at", stamp(NOW - timedelta(minutes=179))),
@@ -349,6 +355,9 @@ class EvidenceTests(unittest.TestCase):
                 doc = fixture()
                 doc["records"][record][field] = value
                 self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+        doc = fixture()
+        doc["records"]["rollback"]["last_commit_at"] = stamp(NOW - timedelta(minutes=120))
+        self.assertEqual(validate_evidence(doc, now=NOW)["status"], "REVIEW_REQUIRED")
 
     def test_cli_rejects_duplicate_keys_and_invalid_json(self):
         script = Path(__file__).resolve().parents[1] / "ops" / "g5_staging_evidence.py"
