@@ -47,6 +47,11 @@ por sí solo no demuestra el cierre de ese canal.
 
 GET no equivale a transacción read-only:
 
+* La dependencia común `get_current_user` actualiza `users.last_active_at`,
+  hace commit y refresh tras validar el usuario; por tanto muchos GET
+  autenticados escriben incluso si su handler solo lee. El commit ocurre antes
+  de ejecutar el handler
+  ([auth](../batalla_medieval_backend/app/routers/auth.py#L100-L121)).
 * `/city/`, `/{id}` y `/{id}/status` recalculan producción; los dos primeros
   pueden registrar eventos de recursos ([city](../batalla_medieval_backend/app/routers/city.py#L41-L74),
   [detalle/status](../batalla_medieval_backend/app/routers/city.py#L78-L123),
@@ -80,17 +85,18 @@ necesidades observadas o potenciales por operación, **no** lista completa de
 SQL efectivo ni permisos concedidos. L requiere SELECT y al menos un
 privilegio UPDATE de columna apropiado en PostgreSQL, incluso si no se
 modifica la fila; los objetos bloqueados en joins importan. Las lecturas de
-autenticación/membresía `users`, `player_world`, `worlds`, y las secuencias
-de cada INSERT se suman a las indicadas. D por cascada ORM es condicional,
+autenticación/membresía `users`, `player_world`, `worlds`, el UPDATE de
+`users` por `get_current_user` y las secuencias de cada INSERT se suman a
+las indicadas. D por cascada ORM es condicional,
 no una afirmación de que exista un endpoint de borrado de cuenta.
 
 | Operación y alcance | Tablas y operaciones identificadas; locks/joins | Evidencia |
 |---|---|---|
-| Registro/login, unión al mundo y ciudad inicial | `users` S/I/U/L; `worlds` S/L; `player_world` S/I/L; `cities` S/I; `buildings`, `troops` I+; J de membresía y ciudad. | [auth](../batalla_medieval_backend/app/routers/auth.py#L120-L161), [unión](../batalla_medieval_backend/app/services/world_membership.py#L112-L165) |
+| Registro/login, unión al mundo y ciudad inicial | `users` S/I/U/L; `worlds` S/L; `player_world` S/I/U/L: asignación de `starting_city_id` al crear o completar membresía; `cities` S/I; `buildings`, `troops` I+; J de membresía y ciudad. | [auth](../batalla_medieval_backend/app/routers/auth.py#L100-L161), [unión](../batalla_medieval_backend/app/services/world_membership.py#L139-L200) |
 | Lectura de ciudad/producción y mejora | `cities` S/U/L; `buildings`, `troops`, `heroes`, `research`, `building_queue`, `troop_queue`, `worlds` S; `building_queue` I/D; `achievement_progress`, `logs` I/U+ por eventos. | [producción](../batalla_medieval_backend/app/services/production.py#L101-L114), [mejora](../batalla_medieval_backend/app/services/building.py#L124-L162), [cancelación](../batalla_medieval_backend/app/services/building.py#L435-L460), [city](../batalla_medieval_backend/app/routers/city.py#L69-L72) |
 | Investigación y entrenamiento | `research_queue`, `troop_queue` S/I/D/L; `research`, `troops` S/I/U; `cities` S/U/L; `buildings`, `worlds` S; progreso/notificaciones I/U+. | [research](../batalla_medieval_backend/app/services/research.py#L53-L74), [resolución](../batalla_medieval_backend/app/services/research.py#L128-L191), [troops](../batalla_medieval_backend/app/services/troops.py#L71-L87), [resolución](../batalla_medieval_backend/app/services/troops.py#L198-L261) |
 | Worker, `/queue/status` | `building_queue`, `research_queue`, `troop_queue` S/D/L `SKIP LOCKED`; `buildings`, `research`, `troops` S/I/U; `cities` S/U/L; `movements` S/I/U/L; `notifications` I; `worlds`, `users` S; wonder, log y progreso según rama. Jobs usan advisory locks de sesión, conexión separada y ORM con commits propios. | [scheduler](../batalla_medieval_backend/app/scheduler.py#L26-L76), [colas](../batalla_medieval_backend/app/services/queue.py#L56-L106), [orquestación](../batalla_medieval_backend/app/services/queue.py#L129-L183) |
-| Worker bárbaro/PvE | `worlds`, `cities`, `oases`, `troops`, `buildings` S; crecimiento puede U de mundo, oasis y tropas e I de tropas. No inferir cobertura del tick por la prueba de almacén. | [delegación](../batalla_medieval_backend/app/services/barbarian_ai.py#L8-L17), [PvE](../batalla_medieval_backend/app/services/pve.py#L499-L591) |
+| Worker bárbaro/PvE | `worlds` S/U/L; `cities`, `oases`, `troops` S/I/U; `buildings` S/I. `ensure_world_pve` puede crear ciudades bárbaras, sus edificios y tropas, y oasis; regeneración actualiza recursos y guardias. Los INSERT con ID generado necesitan acceso a las secuencias adjuntas de `cities`, `buildings`, `troops` y `oases`, según el esquema efectivo. No inferir cobertura del tick por la prueba de almacén. | [creación](../batalla_medieval_backend/app/services/pve.py#L234-L290), [reposición](../batalla_medieval_backend/app/services/pve.py#L385-L445), [regeneración](../batalla_medieval_backend/app/services/pve.py#L466-L511), [tick](../batalla_medieval_backend/app/services/pve.py#L531-L591) |
 | Despacho, combate, espionaje, retorno y transporte | `cities`, `troops`, `heroes` S/U/L; `movements` S/I/U/L; `reports`, `spy_reports` I/S; `oases` S/U+; notificaciones, log y progreso I/U+. J/relaciones para tropas, héroes y ciudades; resolución selecciona movimientos vencidos con `SKIP LOCKED`. Conquista PvP no está permitida. | [reserva](../batalla_medieval_backend/app/services/movement.py#L81-L190), [combate](../batalla_medieval_backend/app/services/movement.py#L424-L542), [resolución](../batalla_medieval_backend/app/services/movement.py#L716-L769), [espionaje](../batalla_medieval_backend/app/services/espionage.py#L381-L402) |
 | Mercado: oferta, aceptación, cancelación, NPC, envío | `market_offers` S/I/D/L; `cities` S/U/L; `movements` S/I; `alliance_members`, `alliances`, `users` S/J; anti-cheat `anti_cheat_rate_buckets`, `anti_cheat_flags`, `logs` S/I/U+ y posible progreso. Aceptación reserva recursos, crea transportes y elimina oferta; no basta con probar listado. | [filtros y joins](../batalla_medieval_backend/app/services/market.py#L349-L389), [aceptación](../batalla_medieval_backend/app/services/market.py#L410-L491), [cancelación/transporte](../batalla_medieval_backend/app/services/market.py#L514-L607), [rate limit](../batalla_medieval_backend/app/routers/market.py#L32-L47) |
 | Alianza, invitación, cargos, chat, diplomacia | `alliances`, `alliance_members`, `alliance_invitations` S/I/U/D+ y L; `alliance_chat_messages`, `chat_messages`, `messages` S/I; `diplomacy` S/I/U/D/L; `users`, `worlds` S/L; joins por membresía y mundo. | [alianza](../batalla_medieval_backend/app/services/alliance.py#L142-L150), [invitación](../batalla_medieval_backend/app/services/alliance.py#L202-L256), [salida](../batalla_medieval_backend/app/services/alliance.py#L307-L307), [mensajes](../batalla_medieval_backend/app/services/alliance.py#L450-L560), [diplomacia](../batalla_medieval_backend/app/services/diplomacy.py#L21-L98) |
