@@ -535,6 +535,13 @@ class ComposeFixtureRunner:
                         "IPAddress": f"172.20.0.{int(identity, 16)}",
                     },
                 }
+            elif service in {"migrate", "seed"}:
+                network_settings["Networks"] = {
+                    "isolated_web": {
+                        "NetworkID": self.network_id, "Aliases": [service],
+                        "IPAddress": "", "EndpointID": "",
+                    },
+                }
             rows.append({
                 "Id": identity, "Image": image_id,
                 "Config": {
@@ -543,7 +550,7 @@ class ComposeFixtureRunner:
                     "Env": [f"{key}={value}" for key, value in
                             configs[service].get("environment", {}).items()],
                 },
-                "State": {"Running": running},
+                "State": {"Running": running, "ExitCode": 0},
                 "HostConfig": {
                     "PortBindings": {},
                     "Privileged": False, "CapAdd": [], "CapDrop": [], "Devices": [],

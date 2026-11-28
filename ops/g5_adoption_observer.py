@@ -755,33 +755,12 @@ def _network_identity(
     expected_members: set[str] = set()
     aliases_to_service: dict[str, str] = {}
     addresses: set[str] = set()
-    for row in containers:
-        if row.get("State", {}).get("Running") is not True:
-            networks = row.get("NetworkSettings", {}).get("Networks") or {}
-            if any(
-                isinstance(item, dict) and item.get("NetworkID")
-                for item in networks.values()
-            ):
-                raise ObservationError("stopped container retains an unexpected network attachment")
-            continue
-        settings = row.get("NetworkSettings")
-        networks = settings.get("Networks") if isinstance(settings, dict) else None
-        if not isinstance(networks, dict) or len(networks) != 1:
-            raise ObservationError("container network inventory is incomplete or has a bypass network")
-        network = next(iter(networks.values()))
-        network_id = network.get("NetworkID") if isinstance(network, dict) else None
-        if not isinstance(network_id, str) or not _SHA256.fullmatch(network_id):
-            raise ObservationError("container network identity is missing")
-        network_ids.add(network_id)
-        labels = row.get("Config", {}).get("Labels", {})
-        service = labels.get("com.docker.compose.service")
-        network_name = next(iter(networks))
-        if labels.get(f"com.docker.compose.network") not in (None, "web"):
-            raise ObservationError("container network Compose label is unexpected")
-        expected_name = config["networks"]["web"].get("name") or f"{project}_web"
-        if network_name != expected_name:
-            raise ObservationError("container is attached to an unexpected Compose network")
-        aliases = network.get("Aliases") if isinstance(network, dict) else None
+    expected_name = config["networks"]["web"].get("name") or f"{project}_web"
+
+    def validate_aliases(row: dict, service: object, network: dict) -> None:
+        if not isinstance(service, str):
+            raise ObservationError("Compose network service is unavailable")
+        aliases = network.get("Aliases")
         if not isinstance(aliases, list) or service not in aliases:
             raise ObservationError("Compose service network alias is unavailable")
         service_config = config["services"].get(service)
@@ -792,7 +771,7 @@ def _network_identity(
             not isinstance(alias, str) or not alias for alias in configured_aliases
         ):
             raise ObservationError("effective Compose network aliases are malformed")
-        expected_aliases = {service, *(alias for alias in configured_aliases)}
+        expected_aliases = {service, *configured_aliases}
         container_name = row.get("Name", "").lstrip("/")
         if container_name:
             expected_aliases.add(container_name)
@@ -802,6 +781,40 @@ def _network_identity(
             previous = aliases_to_service.setdefault(alias, service)
             if previous != service:
                 raise ObservationError("Compose network alias is duplicated across services")
+
+    for row in containers:
+        labels = row.get("Config", {}).get("Labels", {})
+        service = labels.get("com.docker.compose.service")
+        settings = row.get("NetworkSettings")
+        networks = settings.get("Networks") if isinstance(settings, dict) else None
+        if row.get("State", {}).get("Running") is not True:
+            if service not in {"migrate", "seed"}:
+                raise ObservationError("non-one-shot Compose container is unexpectedly stopped")
+            if not isinstance(networks, dict) or len(networks) != 1:
+                raise ObservationError("stopped one-shot network inventory is incomplete")
+            network_name, network = next(iter(networks.items()))
+            if (not isinstance(network, dict) or network_name != expected_name
+                    or not isinstance(network.get("NetworkID"), str)
+                    or not _SHA256.fullmatch(network["NetworkID"])
+                    or network.get("IPAddress") not in (None, "")
+                    or network.get("EndpointID") not in (None, "")):
+                raise ObservationError("stopped one-shot retains an unexpected network endpoint")
+            network_ids.add(network["NetworkID"])
+            validate_aliases(row, service, network)
+            continue
+        if not isinstance(networks, dict) or len(networks) != 1:
+            raise ObservationError("container network inventory is incomplete or has a bypass network")
+        network = next(iter(networks.values()))
+        network_id = network.get("NetworkID") if isinstance(network, dict) else None
+        if not isinstance(network_id, str) or not _SHA256.fullmatch(network_id):
+            raise ObservationError("container network identity is missing")
+        network_ids.add(network_id)
+        network_name = next(iter(networks))
+        if labels.get(f"com.docker.compose.network") not in (None, "web"):
+            raise ObservationError("container network Compose label is unexpected")
+        if network_name != expected_name:
+            raise ObservationError("container is attached to an unexpected Compose network")
+        validate_aliases(row, service, network)
         address = network.get("IPAddress") if isinstance(network, dict) else None
         if (not isinstance(address, str) or not address
                 or address in addresses):
@@ -1264,8 +1277,10 @@ def _collect_once(request: ObserverRequest, runner: Runner) -> PartialHostInvent
             raise ObservationError("container restart policy is unavailable")
         if service in _REQUIRED and running is not True:
             raise ObservationError("required Compose service is not running")
-        if service in {"migrate", "seed"} and (running is not False or restart != "no"):
-            raise ObservationError("one-shot Compose container is active or restartable")
+        if service in {"migrate", "seed"} and (
+            running is not False or restart != "no" or state.get("ExitCode") != 0
+        ):
+            raise ObservationError("one-shot Compose container did not exit successfully")
         container_volume = None
         container_volume = _validate_mounts(
             runner, service, row, config, request.project, checkout
