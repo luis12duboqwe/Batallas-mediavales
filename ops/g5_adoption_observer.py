@@ -1001,7 +1001,7 @@ def _pg_snapshot(
     sql = (
         "SET TRANSACTION READ ONLY; "
         "SELECT json_build_array(current_user,current_database(),"
-        "(SELECT oid FROM pg_database WHERE datname=current_database()),"
+        "(SELECT oid::bigint FROM pg_database WHERE datname=current_database()),"
         "(SELECT system_identifier::text FROM pg_control_system()),"
         "current_setting('server_version_num'),"
         "(SELECT rolsuper FROM pg_roles WHERE rolname=current_user),"
@@ -1028,7 +1028,7 @@ def _pg_snapshot(
         "e=create_engine(os.environ['DATABASE_URL'],connect_args={'connect_timeout':3}); "
         "c=e.connect(); c.exec_driver_sql('SET TRANSACTION READ ONLY'); "
         "r=c.exec_driver_sql(\"SELECT current_user,session_user,current_database(),"
-        "(SELECT oid FROM pg_database WHERE datname=current_database()),"
+        "(SELECT oid::bigint FROM pg_database WHERE datname=current_database()),"
         "inet_server_addr()::text,"
         "(SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls "
         "FROM pg_roles WHERE rolname=current_user),"
