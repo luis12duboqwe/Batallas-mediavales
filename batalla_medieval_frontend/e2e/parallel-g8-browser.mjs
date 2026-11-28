@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { firefox, webkit } from '@playwright/test';
-import { API, UI, assertIsolated, loginUi, playerSnapshot } from './parallel-journey-helpers.mjs';
+import { createRequire } from 'node:module';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { API, UI, assertIsolated, loginUi } from './parallel-journey-helpers.mjs';
+
+const require = createRequire(import.meta.url);
+const playwright = process.env.G8_PLAYWRIGHT_MODULE || '@playwright/test';
+const packagePath = require.resolve('@playwright/test/package.json', process.env.G8_PLAYWRIGHT_MODULE
+  ? { paths: [dirname(process.env.G8_PLAYWRIGHT_MODULE)] } : undefined);
+assert.equal(require(packagePath).version, '1.55.0', 'The existing browser tooling must be Playwright 1.55.0');
+const { firefox, webkit } = require(playwright);
 
 assertIsolated();
 for (const value of [process.env.VITE_SOCKET_URL, API, UI].filter(Boolean)) {
@@ -130,7 +140,13 @@ async function keyboardAndDialog(page) {
 
 async function mapRace(page) {
   const token = await loginUi(page, ...credentials.general);
-  const { cities, worldId } = await playerSnapshot(token);
+  const headers = { Authorization: 'Bearer ' + token };
+  const profileResponse = await page.context().request.get(`${API}/auth/me`, { headers, maxRedirects: 0 });
+  assert.equal(profileResponse.status(), 200);
+  const worldId = (await profileResponse.json()).world_id;
+  const citiesResponse = await page.context().request.get(`${API}/city/?world_id=${worldId}`, { headers, maxRedirects: 0 });
+  assert.equal(citiesResponse.status(), 200);
+  const cities = await citiesResponse.json();
   assert.equal(cities.length, 1);
   const city = cities[0];
   await open(page, '/map');
@@ -203,6 +219,57 @@ async function mapRace(page) {
     release();
     await page.unrouteAll({ behavior: 'wait' });
   }
+}
+
+async function adventureStartRetry(page, context, monitor) {
+  const python = process.env.PARALLEL_JOURNEY_PYTHON;
+  assert.ok(python?.startsWith('/'), 'An absolute isolated fixture interpreter is required');
+  execFileSync(python, [resolve(dirname(fileURLToPath(import.meta.url)), '../../scripts/prepare_g13_hero_e2e.py')], {
+    env: process.env, timeout: 30000, stdio: 'pipe',
+  });
+  const token = await loginUi(page, 'g13_hero', 'G13-Hero-Test-2026!');
+  const headers = { Authorization: 'Bearer ' + token };
+  const profile = await context.request.get(`${API}/auth/me`, { headers, maxRedirects: 0 });
+  assert.equal(profile.status(), 200);
+  const worldId = (await profile.json()).world_id;
+  const snapshot = async () => {
+    const response = await context.request.get(`${API}/adventure/?world_id=${worldId}`, { headers, maxRedirects: 0 });
+    assert.equal(response.status(), 200);
+    return response.json();
+  };
+  const initial = await snapshot();
+  assert.equal(initial.length, 1);
+  const adventure = initial[0];
+  assert.equal(adventure.status, 'available');
+  const path = `/adventure/${adventure.id}/start`;
+  monitor.expectedStatuses.add(`${path}:503`);
+  monitor.allowConsole((message) => /Failed to load resource.*503|server responded with a status of 503/i.test(message.text()));
+  let rejected = 0;
+  await page.route('**/adventure/**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin === new URL(API).origin && url.pathname === path && route.request().method() === 'POST' && rejected === 0) {
+      rejected += 1;
+      await route.fulfill({ status: 503, headers: { 'access-control-allow-origin': UI, 'access-control-allow-credentials': 'true' }, contentType: 'application/json', body: '{"detail":"Service unavailable"}' });
+    } else {
+      await route.fallback();
+    }
+  });
+  await open(page, '/adventures');
+  const start = page.getByTestId(`adventure-start-${adventure.id}`);
+  await start.waitFor({ state: 'visible', timeout });
+  await start.click();
+  await page.getByRole('alert').waitFor({ state: 'visible', timeout });
+  assert.equal(rejected, 1);
+  assert.equal((await snapshot())[0].status, 'available', 'Rejected start must not mutate the real fixture');
+  assert.equal(await start.isEnabled(), true);
+  const started = page.waitForResponse((response) => response.request().method() === 'POST'
+    && new URL(response.url()).pathname === path && response.status() === 200, { timeout });
+  await start.click();
+  const realResponse = await (await started).json();
+  assert.equal(realResponse.status, 'active');
+  await start.waitFor({ state: 'detached', timeout });
+  await page.getByTestId(`adventure-${adventure.id}`).getByText('En curso').waitFor({ state: 'visible', timeout });
+  assert.equal((await snapshot())[0].status, 'active', 'Retry must persist the real server state');
 }
 
 async function outages(page, context, monitor) {
@@ -279,7 +346,9 @@ async function sessionAndReconnect(page, context, monitor) {
 for (const name of selected) {
   const type = { webkit, firefox }[name];
   if (!existsSync(type.executablePath())) {
-    console.log(`SKIP ${name}: executable missing at ${type.executablePath()}`);
+    const message = `${name}: executable missing at ${type.executablePath()}`;
+    if (process.env.G8_REQUIRE_ALL === '1') failures.push(message);
+    else console.log(`SKIP ${message}`);
     continue;
   }
   let browser;
@@ -294,7 +363,7 @@ for (const name of selected) {
       ['desktop', { viewport: { width: 1440, height: 900 } }],
       ['mobile', { viewport: { width: 390, height: 844 }, hasTouch: true }],
     ]) {
-      for (const [scenarioName, work] of Object.entries({ keyboardAndDialog, mapRace, outages, sessionAndReconnect })) {
+      for (const [scenarioName, work] of Object.entries({ keyboardAndDialog, mapRace, outages, sessionAndReconnect, adventureStartRetry })) {
         executed += 1;
         await scenario(browser, `${name}/${view}/${scenarioName}`, options, work);
       }
