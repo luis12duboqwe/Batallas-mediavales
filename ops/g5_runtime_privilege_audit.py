@@ -108,7 +108,7 @@ def inspect_runtime_privileges(
                        f"AND a.is_grantable AND {grantable_grantee})"
                        + (f" AND NOT EXISTS (SELECT 1 FROM pg_attribute col CROSS JOIN LATERAL "
                           f"aclexplode(col.attacl) a WHERE col.attrelid={oid} "
-                          f"AND col.attnum>0 AND NOT col.attisdropped AND a.is_grantable "
+                          f"AND NOT col.attisdropped AND a.is_grantable "
                           f"AND {grantable_grantee})" if rule.kind == "table" else "")))
         function = "has_table_privilege" if rule.kind == "table" else "has_sequence_privilege"
         for privilege in sorted(rule.required):
@@ -118,6 +118,9 @@ def inspect_runtime_privileges(
             effective = f"{function}('{app}', {oid}, '{privilege}')"
             if rule.kind == "table" and privilege in {"SELECT", "INSERT", "UPDATE", "REFERENCES"}:
                 effective += f" OR has_any_column_privilege('{app}', {oid}, '{privilege}')"
+                effective += (f" OR EXISTS (SELECT 1 FROM pg_attribute col WHERE col.attrelid={oid} "
+                              f"AND col.attnum<0 AND NOT col.attisdropped "
+                              f"AND has_column_privilege('{app}', {oid}, col.attnum, '{privilege}'))")
             checks.append((f"{rule.name}:unexpected:{privilege}",
                            f"NOT COALESCE(({effective}), false)"))
 

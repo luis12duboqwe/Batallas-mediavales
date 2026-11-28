@@ -269,6 +269,15 @@ def test_effective_grants_and_adversarial_acl(pg):
     finally:
         pg("REVOKE UPDATE (slot) ON item_templates FROM game_app;")
     try:
+        pg("REVOKE SELECT ON item_templates FROM game_app; "
+           "GRANT SELECT (ctid) ON item_templates TO game_app WITH GRANT OPTION;")
+        blockers = observe()
+        assert {"item_templates:grant_option", "item_templates:missing:SELECT"} <= set(blockers)
+        forbidden = (RelationRule("item_templates", "table", frozenset(), frozenset({"SELECT"})),)
+        assert "item_templates:unexpected:SELECT" in inspect_runtime_privileges(target, Reader(pg), forbidden).blockers
+    finally:
+        pg("REVOKE SELECT (ctid) ON item_templates FROM game_app; GRANT SELECT ON item_templates TO game_app;")
+    try:
         pg("CREATE ROLE inherited_writer; GRANT inherited_writer TO game_app; "
            "GRANT DELETE ON hero_items TO inherited_writer;")
         assert "hero_items:unexpected:DELETE" in observe()

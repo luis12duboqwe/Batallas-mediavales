@@ -2,9 +2,11 @@
 
 **Estado: inventario de trabajo, NO-GO; no es una política de grants ni una
 certificación de mínimo privilegio.** Alcance: código de base `86adbd8` y
-laboratorio inmutable de #219 `6d27de4e2fa9ae748ec5b83aa37eb739d4768b2f`.
+laboratorio de #219 fusionado como `9ccc610a2974315a83223847457337439ed8a60d`
+(contenido de la revisión `6d27de4e2fa9ae748ec5b83aa37eb739d4768b2f`).
 Las referencias a código sin otra revisión son relativas a esa base. El
-laboratorio no está en esta base: sus referencias se enlazan al SHA exacto.
+laboratorio no está en la base local `86adbd8`: sus referencias se enlazan
+al commit fusionado exacto.
 El inventario read-only de #215 observa vías privilegiadas; no demuestra que
 una lista de privilegios de aplicación sea suficiente ni excluye escritores
 externos continuamente ([inventario](G5_PRIVILEGED_INVENTORY.md#L3-L29)).
@@ -135,8 +137,8 @@ restringirlo; la política de privacidad exige revisión manual.
 Cada INSERT con ID generado necesita verificar la secuencia real asociada y
 sus ACL efectivas, incluidas las nuevas de 0020. El laboratorio concede
 `USAGE, SELECT` a secuencias adjuntas, no concesiones generales por nombre
-supuesto ([código #219](https://github.com/luis12duboqwe/Batallas-mediavales/blob/6d27de4e2fa9ae748ec5b83aa37eb739d4768b2f/ops/ci_g5_role_provisioning.py#L168-L182),
-[grants](https://github.com/luis12duboqwe/Batallas-mediavales/blob/6d27de4e2fa9ae748ec5b83aa37eb739d4768b2f/ops/ci_g5_role_provisioning.py#L315-L323)).
+supuesto ([código #219](https://github.com/luis12duboqwe/Batallas-mediavales/blob/9ccc610a2974315a83223847457337439ed8a60d/ops/ci_g5_role_provisioning.py#L168-L182),
+[grants](https://github.com/luis12duboqwe/Batallas-mediavales/blob/9ccc610a2974315a83223847457337439ed8a60d/ops/ci_g5_role_provisioning.py#L315-L323)).
 Auditar también defaults, columnas, objetos no adjuntos, ownership, PUBLIC y
 membresías; no dar UPDATE de secuencia ni CREATE de esquema por comodidad.
 
@@ -156,22 +158,22 @@ controlan root, Docker, otros secretos, volúmenes o cambios concurrentes.
 En el SHA citado el laboratorio declara una **cota amplia**: CRUD para
 muchas tablas de juego; `wiki_articles` S/I/U; `item_templates` S/U; tablas
 internas y wonder con operaciones específicas; excluye `alembic_version`
-([política](https://github.com/luis12duboqwe/Batallas-mediavales/blob/6d27de4e2fa9ae748ec5b83aa37eb739d4768b2f/ops/ci_g5_role_provisioning.py#L118-L142)).
+([política](https://github.com/luis12duboqwe/Batallas-mediavales/blob/9ccc610a2974315a83223847457337439ed8a60d/ops/ci_g5_role_provisioning.py#L118-L142)).
 Su script contiene pruebas de registro/login, unión, mejora de almacén,
 soporte y privacidad con controles de usuario/administrador
-([HTTP](https://github.com/luis12duboqwe/Batallas-mediavales/blob/6d27de4e2fa9ae748ec5b83aa37eb739d4768b2f/ops/ci_g5_role_provisioning.py#L361-L446)),
+([HTTP](https://github.com/luis12duboqwe/Batallas-mediavales/blob/9ccc610a2974315a83223847457337439ed8a60d/ops/ci_g5_role_provisioning.py#L361-L446)),
 equipar/sustituir/desequipar con objetos sintéticos insertados por mantenimiento
-([héroe](https://github.com/luis12duboqwe/Batallas-mediavales/blob/6d27de4e2fa9ae748ec5b83aa37eb739d4768b2f/ops/ci_g5_role_provisioning.py#L451-L524)),
+([héroe](https://github.com/luis12duboqwe/Batallas-mediavales/blob/9ccc610a2974315a83223847457337439ed8a60d/ops/ci_g5_role_provisioning.py#L451-L524)),
 y worker real de ambas imágenes completando una cola de almacén con
-persistencia SQL ([worker](https://github.com/luis12duboqwe/Batallas-mediavales/blob/6d27de4e2fa9ae748ec5b83aa37eb739d4768b2f/ops/ci_g5_role_provisioning.py#L575-L612)).
+persistencia SQL ([worker](https://github.com/luis12duboqwe/Batallas-mediavales/blob/9ccc610a2974315a83223847457337439ed8a60d/ops/ci_g5_role_provisioning.py#L575-L612)).
 La candidata consulta conteos de las dos tablas wonder, no ejercita financiar
-ni contribuir ([candidata](https://github.com/luis12duboqwe/Batallas-mediavales/blob/6d27de4e2fa9ae748ec5b83aa37eb739d4768b2f/ops/ci_g5_role_provisioning.py#L845-L858)).
+ni contribuir ([candidata](https://github.com/luis12duboqwe/Batallas-mediavales/blob/9ccc610a2974315a83223847457337439ed8a60d/ops/ci_g5_role_provisioning.py#L845-L858)).
 Hay pruebas negativas selectivas de CREATE ROLE, ALTER SYSTEM, lectura de
 archivo/catálogo, CONNECT y escritura del ledger
-([denegaciones](https://github.com/luis12duboqwe/Batallas-mediavales/blob/6d27de4e2fa9ae748ec5b83aa37eb739d4768b2f/ops/ci_g5_role_provisioning.py#L339-L358)).
+([denegaciones](https://github.com/luis12duboqwe/Batallas-mediavales/blob/9ccc610a2974315a83223847457337439ed8a60d/ops/ci_g5_role_provisioning.py#L339-L358)).
 Esto describe pruebas *implementadas*, no un resultado CI verificado para ese
 SHA; la nota de ejecución local anterior identifica otra revisión y no prueba
-restauración ([#219 doc](https://github.com/luis12duboqwe/Batallas-mediavales/blob/6d27de4e2fa9ae748ec5b83aa37eb739d4768b2f/docs/G5_ROLE_PROVISIONING.md#L70-L87)).
+restauración ([#219 doc](https://github.com/luis12duboqwe/Batallas-mediavales/blob/9ccc610a2974315a83223847457337439ed8a60d/docs/G5_ROLE_PROVISIONING.md#L70-L87)).
 
 No hay evidencia allí de cobertura integral de combate/espionaje, mercados,
 alianzas/diplomacia, aventuras y botín, contribuciones wonder, exportación,
@@ -179,6 +181,16 @@ moderación/resolución anti-cheat, todas las colas, PvE, cascadas ni
 concurrencia. Tampoco una prueba de mínimo privilegio, restauración real o
 exclusión continua de escritores. No extrapolar un SELECT de tabla a todas
 sus escrituras ni una prueba SQLite a permisos PostgreSQL.
+
+La ruta real de contribución permanece pendiente: el laboratorio fusionado
+construye y destruye su fixture dentro de su ejecución y esta rama basada en
+`86adbd8` no contiene dicho módulo. El fixture de esta auditoría solo tiene
+un subconjunto sintético del esquema y no puede ejecutar el ORM real. Tras
+integrar #219, añadir un ensayo independiente con la migración 0020 y los
+grants de ese laboratorio, datos de prueba, backend bajo `game_app`, GET/POST
+de wonder, repetición idempotente y verificación de persistencia/rollback,
+sin cambiar #219 ni usar una base existente. Hasta entonces no se acredita
+gameplay real de wonder ni compatibilidad de esa ruta con esos grants.
 
 ## Plan para `item_templates` y validación independiente
 
@@ -238,38 +250,50 @@ ambiguas se rechazan; `AuditError` no es una observación favorable.
 `AuditObservation.blockers` identifica requisitos incumplidos. La
 comprobación requiere privilegios positivos a nivel de tabla/secuencia;
 las prohibiciones de SELECT/INSERT/UPDATE/REFERENCES en tablas incluyen
-ACL de columnas. `has_*_privilege` contempla privilegios efectivos por
+ACL de cualquier columna: un permiso por columna no satisface el requisito
+positivo de tabla completa, pero sí infringe una prohibición. Por tanto no
+demuestra que una operación concreta necesite acceso a toda la tabla.
+`has_*_privilege` contempla privilegios efectivos por
 PUBLIC y herencia. El checker rechaza **toda membresía directa o transitiva**
 del rol runtime, incluso con `NOINHERIT` y posibilidad de `SET ROLE`; también
-rechaza propiedad directa o mediante membresía de cada relación declarada.
-Comprueba además CREATE del esquema/base y TEMP de base y atributos peligrosos
-del rol ([implementación](../ops/g5_runtime_privilege_audit.py#L65-L100)).
+rechaza propiedad directa o mediante membresía de la base, esquema público y
+cada relación declarada. Rechaza opciones de grant explícitas en ACL de base,
+esquema, relaciones declaradas y columnas, incluso concedidas a roles
+asumibles o PUBLIC, incluidas columnas de sistema. Comprueba además CREATE del esquema/base y TEMP de base y
+atributos peligrosos del rol
+([implementación](../ops/g5_runtime_privilege_audit.py)).
 La prueba PG15 incluye membresía heredada y el caso `NOINHERIT` con
-propiedad indirecta y `SET ROLE`
-([test](../tests/test_g5_runtime_privilege_audit_pg15.py#L83-L102)).
+propiedad indirecta y `SET ROLE`.
 
 Un resultado sin bloqueadores solo se refiere a las reglas y al instante
-observado: no cubre el catálogo completo, RLS, triggers, grant options,
-propiedad de objetos no declarados, privilegios por operación ni ejecución
+observado: no cubre el catálogo completo, RLS, triggers, default ACL,
+funciones, grant options o propiedad de objetos no declarados, privilegios por operación ni ejecución
 de servicios. No reemplaza el inventario privilegiado de #215, pruebas
 funcionales bajo el rol real ni control continuo de escritores. Obtener la
 lista de reglas de esta matriz y contrastarla independientemente con el
 esquema real; no asumir que declarar una tabla controla todas las demás.
 
-Pruebas del checker, desde la raíz y con pytest y Docker disponibles:
+Pruebas del checker desde la raíz, en un runner GitHub-hosted desechable con
+`CI=true`, `GITHUB_ACTIONS=true`, `RUNNER_ENVIRONMENT=github-hosted`, pytest,
+Docker local y la imagen `postgres:15-alpine` ya disponible:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 G5_PRIVILEGE_AUDIT_PG15=1 python -m pytest -q -o addopts='' tests/test_g5_runtime_privilege_audit.py tests/test_g5_runtime_privilege_audit_pg15.py
 ```
 
-La prueba PG15 crea un contenedor sintético sin red y lo elimina al finalizar
-([fixture](../tests/test_g5_runtime_privilege_audit_pg15.py#L19-L58)).
+La prueba PG15 crea un contenedor sintético sin red en
+`unix:///var/run/docker.sock`, sin heredar variables Docker ni configuración
+de usuario. Sus comandos tienen timeout y diagnósticos acotados; comprueba ID
+y etiqueta exactos antes de iniciar y eliminar el contenedor. Si la creación
+falla o expira antes de devolver un ID válido no adivina ni elimina recursos:
+podría quedar un contenedor huérfano en el runner desechable. El fixture no
+se debe usar sobre un daemon compartido o datos reales
+([fixture](../tests/test_g5_runtime_privilege_audit_pg15.py)).
 La prueba de lock contrasta SQL con `FOR UPDATE` y `FOR UPDATE OF h`;
 otra prueba sintética de wonder usa `FOR UPDATE OF` sobre membresía,
 funding/contribution, secuencias y verifica rollback al faltar USAGE
-([héroe](../tests/test_g5_runtime_privilege_audit_pg15.py#L130-L140),
-[wonder](../tests/test_g5_runtime_privilege_audit_pg15.py#L143-L189)).
-**No prueban los servicios reales** ni la transición de imágenes. Se ha
-comunicado un resultado anterior de 23 pruebas aprobadas; no se ha reproducido
-en esta revisión documental ni se atribuye al código actualizado. No implica
-cobertura integral ni certificación.
+([héroe y wonder](../tests/test_g5_runtime_privilege_audit_pg15.py)).
+**No prueban los servicios reales** ni la transición de imágenes. La ejecución
+local de este cambio bajo las variables de runner declaradas aprobó 37 pruebas,
+incluidas estas pruebas SQL sintéticas; no es resultado del CI obligatorio ni
+prueba del laboratorio #219. No implica cobertura integral ni certificación.
