@@ -13,19 +13,41 @@ and this document. It does not change deployment files or workflows.
 
 ## Evidence from controlled startup
 
-`ops/ci_g5_edge_provenance.py` is intended for a trusted push or manual
-dispatch on this repository's GitHub-hosted runner. It rejects pull-request
-events and non-hosted runners. Run it from a trusted CI step with:
+`ops/ci_g5_edge_provenance.py` accepts a trusted push/manual dispatch on this
+repository's GitHub-hosted runner. A normal `pull_request` job may opt in only
+when the maintainer's ordinary hosted workflow step sets the explicit
+environment guard below. The workflow must remain a `pull_request` workflow:
+do not use `pull_request_target`, request extra token permissions, or expose
+production/deployment credentials.
 
 ```sh
-python ops/ci_g5_edge_provenance.py
+python -m ops.ci_g5_edge_provenance
 ```
 
-It creates a uniquely labelled Docker bridge network marked `internal`, with
-no published ports. The public proxy images are pulled by immutable OCI index
-digest. Backend and frontend images are built from the checked-out source,
-then run and recorded by Docker image ID; the source revision and source-tree
-hashes are included in the output.
+For the maintainer-added hosted PR step, the exact opt-in invocation is:
+
+```sh
+G5_EDGE_PROVENANCE_PR_OPT_IN=true python -m ops.ci_g5_edge_provenance
+```
+
+In addition to requiring `GITHUB_ACTIONS`, `CI`, the exact repository name,
+and `RUNNER_ENVIRONMENT=github-hosted`, the PR guard checks the event payload:
+open, non-draft PR; head and base repositories both exactly this repository;
+non-fork head; author association `OWNER`, `MEMBER`, or `COLLABORATOR`; and
+well-formed PR number, refs, and commit SHAs. It fetches the exact event base
+branch and PR head through the existing `origin` remote, confirms those refs
+still match the event SHAs, then requires the exact base SHA to be an ancestor
+of the PR head. A stale/unsynced branch, changed ref, unavailable read access,
+or any incomplete event fails closed. This requires only the job's existing
+repository read access and makes no workflow or permissions changes. This is a
+guardrail for a trusted same-repository CI step, not a way to safely run
+unreviewed contributor code with Docker access.
+
+The rehearsal creates a uniquely labelled Docker bridge network marked
+`internal`, with no published ports. The public proxy images are pulled by
+immutable OCI index digest. Backend and frontend images are built from the
+checked-out source, then run and recorded by Docker image ID; the source
+revision and source-tree hashes are included in the output.
 
 The rehearsal derives proxy configs from the checked-out Caddyfile and Nginx
 config, applies only the internal listener/host changes needed for the isolated
@@ -39,19 +61,32 @@ ephemeral `tmpfs` mounts. No container publishes a host port.
 
 Before probes, the runner records and verifies container IDs, image IDs,
 PID-1 arguments and UID, read-only mounts, network ID and aliases, and the
-internal bridge settings. It then verifies the HTTP health path, the real
-FastAPI `/api/health` route, the real built frontend, and a real Engine.IO
-WebSocket handshake through Caddy and Nginx to the application's Socket.IO
-server. The Socket.IO test intentionally uses an invalid token and expects the
-application's authentication rejection; it does not manufacture a success or
-require a production/database credential.
+internal bridge settings. It verifies the HTTP health path, the real FastAPI
+`/api/health` route, and the real built frontend. The G5 admission marker
+starts open; the lab removes it and verifies API and Socket.IO return the
+maintenance 503, while the frontend remains served. It recreates the marker
+and verifies API and Socket.IO admission works again. These close/reopen
+transitions occur only in the disposable fixture.
 
-Adversarial checks reject a changed route/config digest and a replacement
-Caddy container, even if it uses the same image and mounts. The fixture is
-stopped and removed by its unique label, and cleanup verifies its containers
-and network are gone. The JSON report records content/runtime identities and
-limitations; successful probes are not treated as proof of the loaded
-configuration.
+The Socket.IO probe initializes a synthetic verified user in the fixture's
+ephemeral SQLite database, signs a short-lived access JWT with a random
+fixture-only key, and performs a real Engine.IO/WebSocket handshake through
+Caddy and Nginx. It requires the application's successful namespace connect
+and `joined` event for that synthetic user's personal room; a second attempt
+with an invalid token must receive the application's authentication rejection.
+This proves authenticated socket admission and room assignment for the fixture,
+not a full gameplay transaction or a production identity/database flow.
+
+Adversarial checks change the API upstream route and config bytes and require
+the content check to reject them. A separate disposable Nginx starts with the
+deliberately diverted API route and demonstrates that `/api/health` then
+reaches the frontend rather than the backend; that altered config fails the
+pinned digest. The lab also rejects a replacement Caddy container, even if it
+uses the same image and mounts. No changed config is reloaded into an already
+running proxy. The fixture is stopped and removed by its unique label, and
+cleanup verifies its containers and network are gone. The JSON report records
+content/runtime identities and limitations; successful probes are not treated
+as proof of the loaded configuration.
 
 ## Retrospective host observation is a different evidence class
 
@@ -64,7 +99,9 @@ labels such facts as inconclusive and explicitly sets both
 
 The controlled-startup report demonstrates only the exact disposable launch
 that it observed. Its probes cover selected paths; they cannot establish the
-absence of alternate listeners, network paths, or bypasses.
+absence of alternate listeners, network paths, or bypasses. The Socket.IO
+probe checks authentication and synthetic room join only; it is not an
+authenticated gameplay-action test.
 
 ## Trust and operational limits
 

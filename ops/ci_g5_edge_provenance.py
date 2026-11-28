@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,8 @@ _NGINX = "nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a1
 _FIXTURE = re.compile(r"bm-g5-edge-provenance-[0-9a-f]{32}")
 _ID = re.compile(r"[0-9a-f]{64}")
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
+_SHA = re.compile(r"[0-9a-f]{40}")
+_TRUSTED_ASSOCIATIONS = {"COLLABORATOR", "MEMBER", "OWNER"}
 _FRONTEND_CONF = b"""worker_processes 1;
 error_log /dev/stderr notice;
 pid /tmp/nginx.pid;
@@ -62,11 +65,40 @@ print("HTTP, API, and frontend route checks passed")
 '''
 _SOCKET_IO_PROBE = r'''
 import base64
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
 import socket
 import struct
+import uuid
+
+import jwt
+from app import models
+from app.config import get_settings
+from app.database import Base, SessionLocal, engine
+
+Base.metadata.create_all(bind=engine)
+db = SessionLocal()
+user = models.User(
+    username="g5-edge-" + uuid.uuid4().hex,
+    email="g5-edge-" + uuid.uuid4().hex + "@example.invalid",
+    hashed_password="unused-ci-only",
+    is_verified=True,
+    auth_version=0,
+)
+db.add(user)
+db.commit()
+db.refresh(user)
+settings = get_settings()
+token = jwt.encode({
+    "sub": user.username,
+    "type": "access",
+    "ver": user.auth_version,
+    "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+}, settings.secret_key, algorithm=settings.algorithm)
+expected_room = "user_" + str(user.id)
+db.close()
 
 def recv_exact(conn, count):
     data = b""
@@ -79,15 +111,14 @@ def recv_exact(conn, count):
 
 def recv_frame(conn):
     first, second = recv_exact(conn, 2)
+    if second & 128:
+        raise RuntimeError("server sent a masked WebSocket frame")
     length = second & 127
     if length == 126:
         length = struct.unpack("!H", recv_exact(conn, 2))[0]
     elif length == 127:
         length = struct.unpack("!Q", recv_exact(conn, 8))[0]
     payload = recv_exact(conn, length)
-    if second & 128:
-        mask = recv_exact(conn, 4)
-        payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
     return first & 15, payload
 
 def send_text(conn, value):
@@ -103,32 +134,93 @@ def send_text(conn, value):
         raise RuntimeError("unexpectedly large Socket.IO message")
     conn.sendall(prefix + mask + masked)
 
+
+def connect(token_value):
+    with socket.create_connection(("caddy", 8080), timeout=5) as conn:
+        conn.settimeout(10)
+        key = "dGhlIHNhbXBsZSBub25jZQ=="
+        conn.sendall(
+            b"GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\n"
+            b"Host: caddy:8080\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n"
+            b"Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: " + key.encode() + b"\r\n\r\n"
+        )
+        response = bytearray()
+        while b"\r\n\r\n" not in response:
+            response.extend(conn.recv(1))
+            if len(response) > 16384:
+                raise RuntimeError("oversized WebSocket handshake")
+        headers = bytes(response).split(b"\r\n\r\n", 1)[0]
+        if not headers.startswith(b"HTTP/1.1 101 "):
+            return "handshake_failed", {"status": int(headers.split()[1])}
+        expected = base64.b64encode(
+            hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()
+        )
+        assert b"Sec-WebSocket-Accept: " + expected.lower() in headers.lower(), headers
+        opcode, packet = recv_frame(conn)
+        assert opcode == 1 and packet.startswith(b"0{"), packet
+        send_text(conn, "40" + json.dumps({"token": token_value}, separators=(",", ":")))
+        for _ in range(8):
+            opcode, packet = recv_frame(conn)
+            if opcode != 1:
+                raise RuntimeError("unexpected Socket.IO WebSocket opcode")
+            if packet.startswith(b"44"):
+                return "rejected", json.loads(packet[2:])
+            if packet.startswith(b"40"):
+                accepted = json.loads(packet[2:])
+                if token_value != token or not accepted.get("sid"):
+                    raise RuntimeError("unexpected Socket.IO namespace acceptance")
+            elif packet.startswith(b"42"):
+                event = json.loads(packet[2:])
+                if event[0] == "joined":
+                    return "joined", event[1]
+                raise RuntimeError("unexpected Socket.IO event: " + str(event[0]))
+            else:
+                raise RuntimeError("unexpected Socket.IO packet: " + packet.decode(errors="replace"))
+        raise RuntimeError("Socket.IO server did not complete namespace admission")
+
+result, joined = connect(token)
+assert result == "joined" and joined.get("room") == expected_room, (result, joined)
+result, rejected = connect("invalid-ci-token")
+assert result == "rejected" and rejected.get("message") == "authentication failed", (result, rejected)
+print("authenticated Socket.IO connection joined its synthetic user room; invalid token rejected")
+'''
+
+_CLOSED_GATE_PROBE = r'''
+import socket
+import urllib.error
+import urllib.request
+
+def expect_503(path):
+    try:
+        urllib.request.urlopen("http://caddy:8080" + path, timeout=5)
+    except urllib.error.HTTPError as error:
+        assert error.code == 503, (path, error.code)
+        assert error.headers.get("Retry-After") == "60", error.headers
+        assert error.headers.get("Cache-Control") == "no-store", error.headers
+    else:
+        raise AssertionError(path + " unexpectedly admitted")
+
+expect_503("/api/health")
+with urllib.request.urlopen("http://caddy:8080/", timeout=5) as response:
+    assert response.status == 200 and b"<html" in response.read(4096).lower()
 with socket.create_connection(("caddy", 8080), timeout=5) as conn:
-    conn.settimeout(10)
-    key = "dGhlIHNhbXBsZSBub25jZQ=="
     conn.sendall(
         b"GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\n"
         b"Host: caddy:8080\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n"
-        b"Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: " + key.encode() + b"\r\n\r\n"
+        b"Sec-WebSocket-Version: 13\r\n"
+        b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
     )
-    response = bytearray()
-    while b"\r\n\r\n" not in response:
-        response.extend(conn.recv(1))
-        if len(response) > 16384:
-            raise RuntimeError("oversized WebSocket handshake")
-    headers = bytes(response).split(b"\r\n\r\n", 1)[0]
-    assert headers.startswith(b"HTTP/1.1 101 "), headers
-    expected = base64.b64encode(
-        hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()
-    )
-    assert b"Sec-WebSocket-Accept: " + expected.lower() in headers.lower(), headers
-    opcode, packet = recv_frame(conn)
-    assert opcode == 1 and packet.startswith(b"0{"), packet
-    send_text(conn, '40{"token":"invalid-ci-token"}')
-    opcode, packet = recv_frame(conn)
-    assert opcode == 1 and packet.startswith(b"44"), packet
-    assert json.loads(packet[2:]).get("message") == "authentication failed", packet
-print("real Socket.IO Engine.IO/WebSocket handshake and app auth rejection passed")
+    status = conn.makefile("rb").readline()
+    assert status.startswith(b"HTTP/1.1 503 "), status
+print("closed edge rejects API and Socket.IO with maintenance responses")
+'''
+_ROUTE_DEVIATION_PROBE = r'''
+import urllib.request
+
+with urllib.request.urlopen("http://nginx-diverted:8080/api/health", timeout=5) as response:
+    body = response.read()
+    assert response.status == 200 and body == b"ok\n", (response.status, body)
+print("deliberately diverted API route reached frontend, not the backend API")
 '''
 
 
@@ -225,10 +317,13 @@ def config_bundle(repo: Path, directory: Path) -> dict[str, tuple[Path, str]]:
         raise FixtureError("unexpected Caddy route source")
     caddy_text = caddy_text.replace("reverse_proxy nginx:80", "reverse_proxy nginx:8080")
 
-    nginx_text = (repo / "nginx.conf").read_text()
+    nginx_text = (repo / "nginx.g5.conf").read_text()
     if nginx_text.count("listen 80;") != 1:
-        raise FixtureError("unexpected Nginx route source")
+        raise FixtureError("unexpected G5 Nginx route source")
     nginx_text = "pid /tmp/nginx.pid;\n" + nginx_text.replace("listen 80;", "listen 8080;")
+    if nginx_text.count("server frontend:80;") != 1:
+        raise FixtureError("unexpected frontend upstream source")
+    nginx_text = nginx_text.replace("server frontend:80;", "server frontend:8081;")
 
     values = {
         "Caddyfile": caddy_text.encode(),
@@ -247,7 +342,10 @@ def config_bundle(repo: Path, directory: Path) -> dict[str, tuple[Path, str]]:
 
 
 def write_status(fixture: str, service: str, image_id: str, network: str,
-                 *, bind_mounts: tuple[tuple[str, str], ...] = ()):
+                 *, bind_mounts: tuple[tuple[str, str], ...] = (),
+                 secret_key: str | None = None,
+                 network_alias: str | None = None,
+                 container_suffix: str | None = None):
     temp_mounts = {
         "caddy": ("/data", "/config", "/tmp"),
         "nginx": ("/tmp", "/var/cache/nginx"),
@@ -268,8 +366,9 @@ def write_status(fixture: str, service: str, image_id: str, network: str,
         for path in temp_mounts
     )
     args = [
-        "run", "--detach", "--pull=never", "--name", fixture + "-" + service,
-        "--network", network, "--network-alias", service,
+        "run", "--detach", "--pull=never", "--name",
+        fixture + "-" + (container_suffix or service),
+        "--network", network, "--network-alias", network_alias or service,
         "--label", "medievol.g5.edge-fixture=" + fixture,
         "--label", "com.docker.compose.project=" + fixture,
         "--label", "com.docker.compose.service=" + service,
@@ -280,10 +379,13 @@ def write_status(fixture: str, service: str, image_id: str, network: str,
     for path, options in tmpfs_options:
         args.extend(["--tmpfs", f"{path}:{options}"])
     if service == "backend":
+        if not secret_key:
+            raise FixtureError("synthetic backend signing key unavailable")
         args.extend([
             "--env", "APP_ENV=test",
             "--env", "DATABASE_URL=sqlite:////tmp/g5-edge-provenance-unused.db",
             "--env", "CORS_ORIGINS=http://localhost",
+            "--env", "SECRET_KEY=" + secret_key,
         ])
     for source, target in bind_mounts:
         args.extend(["--mount", f"type=bind,source={source},target={target},readonly"])
@@ -293,7 +395,7 @@ def write_status(fixture: str, service: str, image_id: str, network: str,
         raise FixtureError("Docker returned an invalid container identity")
     contract = ContainerContract(
         service=service, container_id=container_id, image_id=image_id,
-        network_name=network, network_id="0" * 64, alias=service,
+        network_name=network, network_id="0" * 64, alias=network_alias or service,
         command=commands[service], uid=uids[service], bind_mounts=bind_mounts,
         tmpfs_options=tmpfs_options,
     )
@@ -320,23 +422,25 @@ def inspect_contract(contract: ContainerContract, network_id: str,
 def assert_rejected_config(path: Path, expected_digest: str) -> None:
     original = path.read_bytes()
     if path.name == "nginx.conf":
-        altered = original.replace(b"proxy_pass http://backend/;",
-                                   b"proxy_pass http://frontend/;", 1)
+        altered = original.replace(b"proxy_pass http://backend;",
+                                   b"proxy_pass http://frontend;", 1)
         if altered == original:
             raise FixtureError("could not construct a route-deviation fixture")
     else:
         altered = original + b"\n"
     path.chmod(0o644)
+    rejected = False
     try:
         path.write_bytes(altered)
         try:
             read_config(path, expected_digest)
         except ProvenanceError:
-            return
-        raise FixtureError("altered edge configuration was accepted")
+            rejected = True
     finally:
         path.write_bytes(original)
         path.chmod(0o444)
+    if not rejected:
+        raise FixtureError("altered edge configuration was accepted")
     read_config(path, expected_digest)
 
 
@@ -382,21 +486,121 @@ def cleanup(fixture: str) -> None:
         run(["image", "rm", *images], timeout=60)
 
 
-def _require_ci() -> None:
-    if (os.environ.get("GITHUB_ACTIONS") != "true"
-            or os.environ.get("CI") != "true"
-            or os.environ.get("GITHUB_REPOSITORY") != "luis12duboqwe/Batallas-mediavales"
-            or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
-            or os.environ.get("GITHUB_EVENT_NAME") not in {"push", "workflow_dispatch"}):
-        raise FixtureError("only the repository's hosted push/dispatch CI may run this fixture")
+def _validate_pull_request(payload: dict, repository: str) -> dict:
+    pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
+    if not isinstance(pull_request, dict):
+        raise FixtureError("pull request event payload unavailable")
+    head = pull_request.get("head")
+    base = pull_request.get("base")
+    head_repo = head.get("repo") if isinstance(head, dict) else None
+    base_repo = base.get("repo") if isinstance(base, dict) else None
+    if (not isinstance(head, dict) or not isinstance(base, dict)
+            or not isinstance(head_repo, dict) or not isinstance(base_repo, dict)
+            or head_repo.get("full_name") != repository
+            or head_repo.get("fork") is not False
+            or base_repo.get("full_name") != repository
+            or pull_request.get("author_association") not in _TRUSTED_ASSOCIATIONS
+            or pull_request.get("state") != "open"
+            or pull_request.get("draft") is not False
+            or type(pull_request.get("number")) is not int
+            or pull_request["number"] < 1
+            or not isinstance(head.get("ref"), str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,255}", head["ref"])
+            or not isinstance(base.get("ref"), str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,255}", base["ref"])
+            or not isinstance(head.get("sha"), str) or not _SHA.fullmatch(head["sha"])
+            or not isinstance(base.get("sha"), str) or not _SHA.fullmatch(base["sha"])):
+        raise FixtureError("PR must be open, same-repository, trusted, and maintainer-synced")
+    return pull_request
+
+
+def _validate_ci_context(environ: dict[str, str], payload: dict | None = None) -> dict | None:
+    repository = "luis12duboqwe/Batallas-mediavales"
+    if (environ.get("GITHUB_ACTIONS") != "true"
+            or environ.get("CI") != "true"
+            or environ.get("GITHUB_REPOSITORY") != repository
+            or environ.get("RUNNER_ENVIRONMENT") != "github-hosted"):
+        raise FixtureError("only the repository's hosted GitHub runner may run this fixture")
+    event_name = environ.get("GITHUB_EVENT_NAME")
+    if event_name in {"push", "workflow_dispatch"}:
+        return None
+    if (event_name != "pull_request"
+            or environ.get("G5_EDGE_PROVENANCE_PR_OPT_IN") != "true"):
+        raise FixtureError("PR rehearsal requires the explicit hosted-CI opt-in")
+    return _validate_pull_request(payload, repository)
+
+
+def _require_ci() -> dict | None:
+    payload = None
+    if os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
+        event_path = os.environ.get("GITHUB_EVENT_PATH")
+        try:
+            payload = json.loads(Path(event_path).read_text())
+        except (OSError, TypeError, json.JSONDecodeError):
+            raise FixtureError("pull request event payload unavailable") from None
+    return _validate_ci_context(os.environ, payload)
+
+
+def _verify_synced_pull_request(repo: Path, pull_request: dict) -> None:
+    number = pull_request["number"]
+    base_ref = pull_request["base"]["ref"]
+    head_ref = pull_request["head"]["ref"]
+    for ref in (base_ref, head_ref):
+        if subprocess.run(
+            ["git", "-C", str(repo), "check-ref-format", "refs/heads/" + ref],
+            capture_output=True, check=False,
+        ).returncode:
+            raise FixtureError("invalid PR branch ref")
+    base_target = "refs/g5-edge-provenance/base"
+    head_target = "refs/g5-edge-provenance/head"
+    shallow = subprocess.check_output(
+        ["git", "-C", str(repo), "rev-parse", "--is-shallow-repository"], text=True,
+    ).strip() == "true"
+    fetch = ["git", "-C", str(repo), "fetch", "--no-tags", "--force"]
+    if shallow:
+        fetch.append("--unshallow")
+    fetch.extend([
+        "origin",
+        f"+refs/heads/{base_ref}:{base_target}",
+        f"+refs/pull/{number}/head:{head_target}",
+    ])
+    try:
+        subprocess.run(fetch, capture_output=True, check=True, timeout=300)
+        fetched_base = subprocess.check_output(
+            ["git", "-C", str(repo), "rev-parse", base_target], text=True,
+        ).strip()
+        fetched_head = subprocess.check_output(
+            ["git", "-C", str(repo), "rev-parse", head_target], text=True,
+        ).strip()
+        if (fetched_base != pull_request["base"]["sha"]
+                or fetched_head != pull_request["head"]["sha"]):
+            raise FixtureError("PR refs changed after the event payload was created")
+        if subprocess.run(
+            ["git", "-C", str(repo), "merge-base", "--is-ancestor", base_target, head_target],
+            capture_output=True, check=False,
+        ).returncode:
+            raise FixtureError("PR head does not contain the exact current base commit")
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise FixtureError("could not verify maintainer-synced PR ancestry") from exc
+    finally:
+        subprocess.run(
+            ["git", "-C", str(repo), "update-ref", "-d", base_target],
+            capture_output=True, check=False,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "update-ref", "-d", head_target],
+            capture_output=True, check=False,
+        )
 
 
 def main() -> int:
     fixture = None
     cleanup_done = False
     try:
-        _require_ci()
+        pull_request = _require_ci()
         repo = Path(__file__).resolve().parents[1]
+        if pull_request is not None:
+            _verify_synced_pull_request(repo, pull_request)
         revision = run(["version", "--format", "{{.Server.Version}}"]).strip()
         if not revision:
             raise FixtureError("Docker daemon version unavailable")
@@ -429,6 +633,9 @@ def main() -> int:
 
             run(["network", "create", "--driver", "bridge", "--internal",
                  "--label", "medievol.g5.edge-fixture=" + fixture, fixture])
+            edge = root / "edge-maintenance"
+            edge.mkdir(mode=0o755)
+            (edge / "open").mkdir(mode=0o755)
             network = json.loads(run(["network", "inspect", fixture]))[0]
             network_id = network.get("Id")
             if not isinstance(network_id, str) or not _ID.fullmatch(network_id):
@@ -436,17 +643,20 @@ def main() -> int:
             verify_network(network, network_id, fixture)
             contracts = {}
             ids = {}
+            synthetic_secret_key = secrets.token_urlsafe(48)
             for service, image, mounts in (
                 ("backend", backend_image, ()),
                 ("frontend", frontend_image, ((str(configs["frontend.conf"][0]),
                                                 "/etc/nginx/nginx.conf"),)),
                 ("nginx", nginx_image, ((str(configs["nginx.conf"][0]),
-                                         "/etc/nginx/nginx.conf"),)),
+                                         "/etc/nginx/nginx.conf"),
+                                        (str(edge), "/etc/nginx/edge-maintenance"))),
                 ("caddy", caddy_image, ((str(configs["Caddyfile"][0]),
                                          "/etc/caddy/Caddyfile"),)),
             ):
                 ids[service], contracts[service] = write_status(
                     fixture, service, image, fixture, bind_mounts=mounts,
+                    secret_key=synthetic_secret_key if service == "backend" else None,
                 )
                 contracts[service] = ContainerContract(
                     **{**contracts[service].__dict__, "network_id": network_id},
@@ -463,6 +673,51 @@ def main() -> int:
             assert_rejected_config(configs["frontend.conf"][0], configs["frontend.conf"][1])
             wait_for_edge(ids["backend"])
             probe_app(ids["backend"])
+
+            nginx_source, nginx_digest = configs["nginx.conf"]
+            route_deviation = nginx_source.read_bytes().replace(
+                b"proxy_pass http://backend;",
+                b"proxy_pass http://frontend;",
+                1,
+            )
+            if route_deviation == nginx_source.read_bytes():
+                raise FixtureError("could not construct an API route deviation")
+            deviation_dir = root / "route-deviation"
+            deviation_dir.mkdir(mode=0o700)
+            deviation_config = deviation_dir / "nginx.conf"
+            deviation_config.write_bytes(route_deviation)
+            deviation_config.chmod(0o444)
+            route_deviation_rejected = False
+            try:
+                read_config(deviation_config, nginx_digest)
+            except ProvenanceError:
+                route_deviation_rejected = True
+            else:
+                raise FixtureError("route-deviated configuration passed the pinned digest")
+            deviation_id, deviation_contract = write_status(
+                fixture,
+                "nginx",
+                nginx_image,
+                fixture,
+                bind_mounts=((str(deviation_config), "/etc/nginx/nginx.conf"),
+                             (str(edge), "/etc/nginx/edge-maintenance")),
+                network_alias="nginx-diverted",
+                container_suffix="nginx-route-deviation",
+            )
+            deviation_contract = ContainerContract(
+                **{**deviation_contract.__dict__, "network_id": network_id},
+            )
+            inspect_contract(deviation_contract, network_id)
+            ids["nginx_route_deviation"] = deviation_id
+            run(["exec", ids["backend"], "python", "-c", _ROUTE_DEVIATION_PROBE], timeout=30)
+            network = json.loads(run(["network", "inspect", fixture]))[0]
+            verify_network(network, network_id, fixture, set(ids.values()))
+
+            (edge / "open").rmdir()
+            run(["exec", ids["backend"], "python", "-c", _CLOSED_GATE_PROBE], timeout=30)
+            (edge / "open").mkdir(mode=0o755)
+            run(["exec", ids["backend"], "python", "-c", _APP_PROBE], timeout=30)
+            run(["exec", ids["backend"], "python", "-c", _SOCKET_IO_PROBE], timeout=30)
 
             original_caddy = contracts["caddy"]
             run(["rm", "--force", ids["caddy"]])
@@ -510,11 +765,16 @@ def main() -> int:
                     "read-only roots, no added capabilities, no published ports",
                     "isolated internal bridge network",
                     "Caddy to Nginx to actual backend HTTP/API and frontend",
-                    "actual Socket.IO Engine.IO/WebSocket handshake and auth rejection",
-                    "route-deviation and config-content drift rejected",
+                    "authenticated Socket.IO connection and synthetic user-room join",
+                    "invalid Socket.IO token rejected by the application",
+                    "G5 gate closes API/Socket.IO and reopens without blocking frontend",
+                    "pinned digest rejects API route deviation observed in an isolated Nginx",
+                    "config-content drift rejected",
                     "replacement container rejected",
                 ],
                 "replacement_rejected": replacement_rejected,
+                "route_deviation_rejected": route_deviation_rejected,
+                "route_deviation_observed": True,
                 "replacement_container_id": replacement_id,
                 "limitations": [
                     "Docker daemon access is root-equivalent on the disposable hosted runner.",
