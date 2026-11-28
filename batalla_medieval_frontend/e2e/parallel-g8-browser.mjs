@@ -253,8 +253,9 @@ async function adventureStartRetry(page, context, monitor) {
     return response.json();
   };
   const initial = await snapshot();
-  assert.equal(initial.length, 1);
-  const adventure = initial[0];
+  const fixtures = initial.filter((entry) => entry.duration === 0 && entry.status === 'available');
+  assert.equal(fixtures.length, 1, 'G13 fixture must include exactly one zero-duration adventure');
+  const adventure = fixtures[0];
   assert.equal(adventure.status, 'available');
   const path = `/adventure/${adventure.id}/start`;
   monitor.expectedStatuses.add(`${path}:503`);
@@ -275,7 +276,7 @@ async function adventureStartRetry(page, context, monitor) {
   await start.click();
   await page.getByRole('alert').waitFor({ state: 'visible', timeout });
   assert.equal(rejected, 1);
-  assert.equal((await snapshot())[0].status, 'available', 'Rejected start must not mutate the real fixture');
+  assert.equal((await snapshot()).find((entry) => entry.id === adventure.id)?.status, 'available', 'Rejected start must not mutate the real fixture');
   assert.equal(await start.isEnabled(), true);
   const started = page.waitForResponse((response) => response.request().method() === 'POST'
     && new URL(response.url()).pathname === path && response.status() === 200, { timeout });
@@ -284,7 +285,7 @@ async function adventureStartRetry(page, context, monitor) {
   assert.equal(realResponse.status, 'active');
   await start.waitFor({ state: 'detached', timeout });
   await page.getByTestId(`adventure-${adventure.id}`).getByText('En curso').waitFor({ state: 'visible', timeout });
-  assert.equal((await snapshot())[0].status, 'active', 'Retry must persist the real server state');
+  assert.equal((await snapshot()).find((entry) => entry.id === adventure.id)?.status, 'active', 'Retry must persist the real server state');
 }
 
 async function outages(page, context, monitor) {
