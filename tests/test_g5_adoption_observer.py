@@ -758,3 +758,20 @@ def test_compose_fixture_rejects_configuration_mount_and_network_drift(
     monkeypatch.setattr(observer, "_caddy_runtime_routes", lambda *_args: ("/",))
     with pytest.raises(observer.ObservationError, match=expected):
         observer.observe(request, runner=runner, clock=lambda: NOW)
+
+
+@pytest.mark.parametrize("argv", [
+    ["docker", "network", "disconnect", "net", "container"],
+    ["docker", "volume", "rm", "volume"],
+    ["docker", "image", "rm", "image"],
+    ["docker", "compose", "up", "-d"],
+    ["docker", "exec", "a" * 64, "sh", "-c", "true"],
+])
+def test_default_runner_rejects_mutating_command_shapes(monkeypatch, argv):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(observer.Path, "is_socket", lambda self: True)
+    monkeypatch.setattr(observer.subprocess, "Popen", lambda *a, **k: pytest.fail("unexpected command"))
+    with pytest.raises(observer.ObservationError, match="non-read-only"):
+        observer._run(argv, timeout=1, max_output_bytes=10)

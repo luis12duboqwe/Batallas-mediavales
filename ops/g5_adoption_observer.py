@@ -158,7 +158,8 @@ def _run(argv: Sequence[str], *, timeout: int, max_output_bytes: int) -> str:
         ) or command in {"ps", "inspect"}
         compose_read = command == "compose" and (
             args[-3:] == ["config", "--format", "json"] or args[-2:] == ["config", "--hash"]
-            or args[-3:] == ["config", "--hash", "*"]
+            or (len(args) >= 3 and args[-3:-1] == ["config", "--hash"]
+                and args[-1] in _SERVICES)
         )
         # This private runner is used only by the fixed collector, not as
         # a general remote command API. Reject arbitrary exec programs.
