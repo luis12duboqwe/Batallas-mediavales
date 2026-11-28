@@ -7,7 +7,9 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
+import os
 import re
+import stat
 import sys
 
 
@@ -22,7 +24,24 @@ AGES = {
     "https": 7, "smtp": 7, "health_manual": 1, "health_schedule": 1,
     "soak": 7, "alerts": 7, "migration": 7, "backup": 7,
     "clone_restore": 7, "rollback": 7, "blockers": 1, "policy": 7,
+    "protected_cutover": 7,
 }
+
+CI_JOBS = {
+    "ci_validation": ("backend", "postgres-concurrency", "frontend", "browser-e2e",
+                      "accessibility-e2e", "dependency-audit", "g5-operations", "images"),
+    "ci_journeys": ("isolated-journeys",),
+}
+CI_G5_STEPS = ("actual_migration", "role_provisioning", "full_schema_restore",
+               "logical_clone", "actual_reopen", "release_transition")
+CUTOVER_CASES = {
+    "stop_writers": "precommit", "backup": "precommit", "pull": "precommit",
+    "migration": "precommit", "up": "precommit", "https_timeout": "precommit",
+    "smoke": "precommit", "load": "precommit", "recovery": "precommit",
+    "before_commit": "precommit", "after_commit": "postcommit",
+    "reopen": "postcommit", "lost_response": "postcommit",
+}
+MAX_JSON_BYTES = 256 * 1024
 
 
 def _time(value):
@@ -107,6 +126,18 @@ def validate_evidence(document, *, now):
     for name in ("ci_validation", "ci_journeys"):
         require(rec(name).get("conclusion") == "success", f"{name}: CI must succeed")
         true(name, "completed")
+        jobs = rec(name).get("jobs")
+        for job in CI_JOBS[name]:
+            entry = jobs.get(job) if isinstance(jobs, dict) else None
+            require(isinstance(entry, dict) and entry.get("executed") is True
+                    and entry.get("conclusion") == "success", f"{name}: job {job} must run and succeed")
+        if name == "ci_validation":
+            steps = rec(name).get("g5_image_steps")
+            for step in CI_G5_STEPS:
+                entry = steps.get(step) if isinstance(steps, dict) else None
+                require(isinstance(entry, dict) and entry.get("executed") is True
+                        and entry.get("conclusion") == "success",
+                        f"{name}: images step {step} must run and succeed")
     true("deploy", "workflow_executed", "immutable", "migration_succeeded")
     require(rec("deploy").get("deployed_sha") == sha and isinstance(sha, str) and SHA.fullmatch(sha) is not None,
             "deploy: deployed_sha mismatch")
@@ -153,6 +184,10 @@ def validate_evidence(document, *, now):
         metrics(name, "load_metrics")
         require(_number(r.get("load_duration_seconds"), 10), f"{name}: load duration too short")
         run_interval(name, "load_duration_seconds")
+    manual_end = _time(rec("health_manual").get("ended_at"))
+    scheduled_start = _time(rec("health_schedule").get("started_at"))
+    require(manual_end is not None and scheduled_start is not None and manual_end <= scheduled_start,
+            "health: manual must complete before scheduled start")
     true("soak", "job_executed", "load_executed", "smoke_executed",
          "server_metrics_reviewed", "no_duplicate_effects")
     require(rec("soak").get("job_conclusion") == "success", "soak: probe job must succeed")
@@ -178,6 +213,15 @@ def validate_evidence(document, *, now):
             "clone_restore: backup hash mismatch")
     clone_id = rec("clone_restore").get("clone_id")
     require(_id(clone_id) and clone_id != environment, "clone_restore: invalid clone identity")
+    def distinct_identities(name):
+        record = rec(name)
+        identities = [record.get(field) for field in ("source_identity", "clone_identity", "witness_identity")]
+        for field in ("cluster", "container", "network", "volume"):
+            values = [item.get(field) if isinstance(item, dict) else None for item in identities]
+            require(all(_id(value) for value in values) and len(set(v for v in values if _id(v))) == 3,
+                    f"{name}: source, clone and witness {field} identities must differ")
+
+    distinct_identities("clone_restore")
     true("rollback", "isolated", "application_verified", "database_verified", "smoke_verified")
     require(_id(clone_id) and rec("rollback").get("clone_id") == clone_id,
             "rollback: clone identity mismatch")
@@ -193,7 +237,7 @@ def validate_evidence(document, *, now):
     require(all((captured, recovery_point, last_commit, incident, restored)),
             "recovery: valid UTC timestamps required")
     if all((captured, recovery_point, last_commit, incident, restored)):
-        require(recovery_point <= captured <= times.get("backup", now)
+        require(recovery_point == captured and captured <= times.get("backup", now)
                 and recovery_point <= last_commit <= incident <= restored <= times.get("rollback", now)
                 and times.get("clone_restore", now) <= incident,
                 "recovery: inconsistent timeline")
@@ -220,11 +264,85 @@ def validate_evidence(document, *, now):
     for name in ("ci_validation", "ci_journeys"):
         ordered(name, "deploy")
     for name in AGES:
-        if name not in ("ci_validation", "ci_journeys", "deploy"):
+        if name not in ("ci_validation", "ci_journeys", "deploy", "migration", "protected_cutover"):
             ordered("deploy", name)
+    ordered("migration", "protected_cutover")
+    ordered("protected_cutover", "deploy")
     ordered("health_manual", "health_schedule")
     ordered("backup", "clone_restore")
     ordered("clone_restore", "rollback")
+    for name in AGES:
+        if name != "blockers":
+            ordered(name, "blockers")
+
+    cutover = rec("protected_cutover")
+    true("protected_cutover", "isolated_rehearsal", "sql_exclusion_continuous",
+         "edge_exclusion_continuous", "docker_exclusion_continuous",
+         "privileged_exclusion_continuous", "external_writers_excluded",
+         "snapshot_external", "snapshot_verified", "logical_clone_verified",
+         "no_lost_commits", "no_stale_restore", "committed_writes_preserved",
+         "concurrent_write_blocked", "no_early_reopen", "restore_forbidden_after_commit")
+    source_sha = cutover.get("source_release_sha")
+    require(isinstance(source_sha, str) and SHA.fullmatch(source_sha) is not None
+            and source_sha != sha and rec("deploy").get("source_release_sha") == source_sha,
+            "protected_cutover: source release mismatch")
+    require(cutover.get("target_release_sha") == sha and isinstance(sha, str)
+            and SHA.fullmatch(sha) is not None, "protected_cutover: target release mismatch")
+    for field in ("source_backend_image", "source_frontend_image", "target_backend_image", "target_frontend_image"):
+        value = cutover.get(field)
+        require(isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None,
+                f"protected_cutover: {field} immutable image identity required")
+        require(rec("deploy").get(field) == value, f"deploy: {field} mismatch")
+    snapshot = cutover.get("snapshot_sha256")
+    require(isinstance(snapshot, str) and HASH.fullmatch(snapshot) is not None
+            and rec("migration").get("backup_sha256") == snapshot
+            and cutover.get("clone_backup_sha256") == snapshot,
+            "protected_cutover: snapshot, clone and migration hash mismatch")
+    distinct_identities("protected_cutover")
+    require(_number(cutover.get("rpo_seconds"), 0, 0), "protected_cutover: RPO must be zero")
+    barrier = _time(cutover.get("barrier_started_at"))
+    snapshot_at = _time(cutover.get("snapshot_captured_at"))
+    snapshot_verified = _time(cutover.get("snapshot_verified_at"))
+    clone_verified = _time(cutover.get("clone_verified_at"))
+    committed = _time(cutover.get("committed_at"))
+    barrier_end = _time(cutover.get("barrier_ended_at"))
+    require(all((barrier, snapshot_at, snapshot_verified, clone_verified, committed, barrier_end)),
+            "protected_cutover: valid timeline required")
+    if all((barrier, snapshot_at, snapshot_verified, clone_verified, committed, barrier_end)):
+        require(barrier <= snapshot_at <= snapshot_verified <= clone_verified
+                <= times.get("migration", now) <= committed <= barrier_end <= times.get("protected_cutover", now)
+                and barrier >= now - timedelta(days=AGES["protected_cutover"]),
+                "protected_cutover: snapshot, rehearsal and barrier chronology invalid")
+    cases = cutover.get("failure_matrix")
+    case_refs = set()
+    for name, phase in CUTOVER_CASES.items():
+        case = cases.get(name) if isinstance(cases, dict) else None
+        valid = isinstance(case, dict) and case.get("phase") == phase and _id(case.get("reference"))
+        if valid:
+            ref = case["reference"]
+            valid = ref not in case_refs and ref not in refs
+            case_refs.add(ref)
+        for field in ("failure_injected", "isolated", "sql_exclusion_continuous", "edge_exclusion_continuous",
+                      "docker_exclusion_continuous", "privileged_exclusion_continuous",
+                      "no_lost_commits", "no_stale_restore"):
+            valid = valid and case.get(field) is True
+        valid = valid and case.get("recovery_required") is True
+        valid = valid and case.get("source_release_sha") == source_sha and case.get("target_release_sha") == sha
+        valid = valid and all(case.get(field) == cutover.get(field) for field in
+                              ("source_backend_image", "source_frontend_image", "target_backend_image", "target_frontend_image"))
+        start = _time(case.get("barrier_started_at")) if isinstance(case, dict) else None
+        failed = _time(case.get("failure_at")) if isinstance(case, dict) else None
+        end = _time(case.get("barrier_ended_at")) if isinstance(case, dict) else None
+        valid = valid and start is not None and failed is not None and end is not None
+        if start and failed and end:
+            valid = valid and now - timedelta(days=AGES["protected_cutover"]) <= start <= failed <= end <= times.get("protected_cutover", now)
+        if phase == "postcommit":
+            committed = _time(case.get("committed_at")) if isinstance(case, dict) else None
+            valid = valid and committed is not None and start is not None and failed is not None and start <= committed <= failed
+            valid = valid and case.get("restore_forbidden_after_commit") is True
+        else:
+            valid = valid and case.get("commit_not_recorded") is True
+        require(valid, f"protected_cutover: {name} failure evidence incomplete")
 
     return {
         "status": "INCOMPLETE" if errors else ("SYNTHETIC_ONLY" if origin == "synthetic" else "REVIEW_REQUIRED"),
@@ -282,9 +400,34 @@ def _load(path):
             result[key] = value
         return result
 
-    with open(path, encoding="utf-8") as source:
-        return json.load(source, object_pairs_hook=object_pairs,
-                         parse_constant=lambda _: (_ for _ in ()).throw(ValueError("invalid number")))
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise ValueError("input must be a regular file")
+        raw = source.read(MAX_JSON_BYTES + 1)
+    if len(raw) > MAX_JSON_BYTES:
+        raise ValueError("input too large")
+    def finite_float(value):
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ValueError("invalid number")
+        return parsed
+
+    document = json.loads(raw.decode("utf-8"), object_pairs_hook=object_pairs,
+                          parse_float=finite_float,
+                          parse_constant=lambda _: (_ for _ in ()).throw(ValueError("invalid number")))
+    pending = [(document, 0)]
+    count = 0
+    while pending:
+        value, depth = pending.pop()
+        count += 1
+        if depth > 32 or count > 10000:
+            raise ValueError("JSON too complex")
+        if isinstance(value, dict):
+            pending.extend((child, depth + 1) for child in value.values())
+        elif isinstance(value, list):
+            pending.extend((child, depth + 1) for child in value)
+    return document
 
 
 def main(argv=None):

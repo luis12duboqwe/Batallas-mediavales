@@ -8,12 +8,16 @@ import sys
 import tempfile
 import unittest
 
-from ops.g5_staging_evidence import AGES, validate_approval, validate_evidence
+from ops.g5_staging_evidence import (
+    AGES, CI_G5_STEPS, CI_JOBS, CUTOVER_CASES, MAX_JSON_BYTES,
+    validate_approval, validate_evidence,
+)
 
 
 NOW = datetime(2026, 11, 28, 12, 0, tzinfo=timezone.utc)
 SHA = "a" * 40
 HASH = "b" * 64
+SOURCE_SHA = "c" * 40
 
 
 def stamp(value):
@@ -30,13 +34,59 @@ def fixture(origin="real"):
     }
     for name in ("ci_validation", "ci_journeys"):
         records[name].update(completed=True, conclusion="success",
-                             observed_at=stamp(NOW - timedelta(hours=4)))
+                             jobs={job: {"executed": True, "conclusion": "success"} for job in CI_JOBS[name]},
+                             observed_at=stamp(NOW - timedelta(hours=5)))
+    records["ci_validation"]["g5_image_steps"] = {
+        step: {"executed": True, "conclusion": "success"} for step in CI_G5_STEPS
+    }
+    images = {key: "sha256:" + digit * 64 for key, digit in (
+        ("source_backend_image", "1"), ("source_frontend_image", "2"),
+        ("target_backend_image", "3"), ("target_frontend_image", "4"))}
     records["deploy"].update(workflow_executed=True, immutable=True,
                              migration_succeeded=True, deployed_sha=SHA,
+                             source_release_sha=SOURCE_SHA, **images,
                              observed_at=stamp(NOW - timedelta(hours=3)))
     records["https"].update(dns_verified=True, tls_verified=True, hostname_verified=True, https_verified=True)
     records["smtp"].update(real_provider=True, test_recipient_only=True, delivery_verified=True)
-    records["migration"].update(staging_source=True, recoverable_copy=True, upgrade_verified=True)
+    records["migration"].update(staging_source=True, recoverable_copy=True, upgrade_verified=True,
+                                backup_sha256=HASH, observed_at=stamp(NOW - timedelta(hours=4)))
+    identities = {
+        role + "_identity": {field: role + "-" + field for field in ("cluster", "container", "network", "volume")}
+        for role in ("source", "clone", "witness")
+    }
+    cases = {}
+    for name, phase in CUTOVER_CASES.items():
+        cases[name] = {
+            "phase": phase, "reference": "case-" + name, "failure_injected": True, "isolated": True,
+            "sql_exclusion_continuous": True, "edge_exclusion_continuous": True,
+            "docker_exclusion_continuous": True, "privileged_exclusion_continuous": True,
+            "no_lost_commits": True, "no_stale_restore": True, "recovery_required": True,
+            "source_release_sha": SOURCE_SHA, "target_release_sha": SHA,
+            **images,
+            "barrier_started_at": stamp(NOW - timedelta(minutes=250)),
+            "failure_at": stamp(NOW - timedelta(minutes=240)),
+            "barrier_ended_at": stamp(NOW - timedelta(minutes=230)),
+        }
+        if phase == "postcommit":
+            cases[name].update(committed_at=stamp(NOW - timedelta(minutes=245)),
+                               restore_forbidden_after_commit=True)
+        else:
+            cases[name]["commit_not_recorded"] = True
+    records["protected_cutover"].update(
+        isolated_rehearsal=True, sql_exclusion_continuous=True, edge_exclusion_continuous=True,
+        docker_exclusion_continuous=True, privileged_exclusion_continuous=True, external_writers_excluded=True,
+        snapshot_external=True, snapshot_verified=True, logical_clone_verified=True,
+        no_lost_commits=True, no_stale_restore=True, committed_writes_preserved=True,
+        concurrent_write_blocked=True, no_early_reopen=True, restore_forbidden_after_commit=True,
+        source_release_sha=SOURCE_SHA, target_release_sha=SHA,
+        **images, **copy.deepcopy(identities), snapshot_sha256=HASH, clone_backup_sha256=HASH,
+        rpo_seconds=0, barrier_started_at=stamp(NOW - timedelta(minutes=270)),
+        snapshot_captured_at=stamp(NOW - timedelta(minutes=260)),
+        snapshot_verified_at=stamp(NOW - timedelta(minutes=255)),
+        clone_verified_at=stamp(NOW - timedelta(minutes=250)),
+        committed_at=stamp(NOW - timedelta(minutes=220)),
+        barrier_ended_at=stamp(NOW - timedelta(minutes=210)),
+        observed_at=stamp(NOW - timedelta(minutes=200)), failure_matrix=cases)
     metrics = {"requests": 1000, "errors": 0, "server_errors": 0, "p95_ms": 750}
     for name, trigger in (("health_manual", "manual"), ("health_schedule", "schedule")):
         start = NOW - timedelta(minutes=160 if trigger == "manual" else 140)
@@ -60,7 +110,7 @@ def fixture(origin="real"):
                              observed_at=stamp(NOW - timedelta(minutes=100)))
     records["clone_restore"].update(isolated=True, fixture_mutated=True, restore_verified=True,
                                     data_verified=True, backup_sha256=HASH, clone_id="clone-1",
-                                    observed_at=stamp(NOW - timedelta(minutes=90)))
+                                    observed_at=stamp(NOW - timedelta(minutes=90)), **copy.deepcopy(identities))
     records["rollback"].update(isolated=True, application_verified=True, database_verified=True,
                                smoke_verified=True, clone_id="clone-1", backup_sha256=HASH,
                                rpo_seconds=0, rto_seconds=600,
@@ -70,7 +120,8 @@ def fixture(origin="real"):
                                service_restored_at=stamp(NOW - timedelta(minutes=70)),
                                observed_at=stamp(NOW - timedelta(minutes=60)))
     records["blockers"].update(inventory_complete=True, p0_open=0, p1_open=0,
-                               p2_156="resolved", p2_156_reference="p2-decision")
+                               p2_156="resolved", p2_156_reference="p2-decision",
+                               observed_at=stamp(NOW - timedelta(minutes=30)))
     records["policy"].update(support=True, privacy=True, terms=True, retention=True, operator_details=True)
     return {"release_sha": SHA, "main_head_sha": SHA, "environment_id": "staging-1",
             "origin": origin, "records": records}
@@ -203,6 +254,102 @@ class EvidenceTests(unittest.TestCase):
                                  "INCOMPLETE")
         self.assertEqual(validate_approval(fixture(), None, now=NOW)["status"], "NO_GO")
 
+    def test_every_mandatory_ci_job_and_step_must_run(self):
+        for workflow, jobs in CI_JOBS.items():
+            for job in jobs:
+                for bad in (None, {"executed": False, "conclusion": "success"},
+                            {"executed": True, "conclusion": "skipped"}):
+                    with self.subTest(workflow=workflow, job=job, bad=bad):
+                        doc = fixture()
+                        doc["records"][workflow]["jobs"][job] = bad
+                        self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+        for step in CI_G5_STEPS:
+            doc = fixture()
+            doc["records"]["ci_validation"]["g5_image_steps"][step]["executed"] = False
+            self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE", step)
+
+    def test_cutover_failure_matrix_is_independent_and_fail_closed(self):
+        for name, phase in CUTOVER_CASES.items():
+            with self.subTest(name=name):
+                doc = fixture()
+                del doc["records"]["protected_cutover"]["failure_matrix"][name]
+                self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+            for field in ("failure_injected", "isolated", "sql_exclusion_continuous", "edge_exclusion_continuous",
+                          "docker_exclusion_continuous", "privileged_exclusion_continuous",
+                          "no_lost_commits", "no_stale_restore", "recovery_required",
+                          "restore_forbidden_after_commit" if phase == "postcommit" else "commit_not_recorded"):
+                with self.subTest(name=name, field=field):
+                    doc = fixture()
+                    doc["records"]["protected_cutover"]["failure_matrix"][name][field] = False
+                    self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+            for field, value in (("phase", "wrong"), ("source_release_sha", SHA),
+                                 ("target_release_sha", SOURCE_SHA), ("target_backend_image", "sha256:" + "f" * 64),
+                                 ("barrier_started_at", stamp(NOW - timedelta(minutes=235))),
+                                 ("barrier_ended_at", stamp(NOW - timedelta(minutes=241)))):
+                with self.subTest(name=name, field=field):
+                    doc = fixture()
+                    doc["records"]["protected_cutover"]["failure_matrix"][name][field] = value
+                    self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+        doc = fixture()
+        matrix = doc["records"]["protected_cutover"]["failure_matrix"]
+        matrix["after_commit"]["reference"] = matrix["before_commit"]["reference"]
+        self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+        doc = fixture()
+        doc["records"]["protected_cutover"]["failure_matrix"]["after_commit"]["committed_at"] = stamp(NOW)
+        self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+        doc = fixture()
+        del doc["records"]["protected_cutover"]
+        self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+
+    def test_cutover_and_disaster_recovery_are_not_interchangeable(self):
+        for field in ("isolated_rehearsal", "sql_exclusion_continuous", "edge_exclusion_continuous",
+                      "docker_exclusion_continuous", "privileged_exclusion_continuous", "external_writers_excluded",
+                      "snapshot_external", "snapshot_verified", "logical_clone_verified", "no_lost_commits",
+                      "no_stale_restore", "no_early_reopen", "restore_forbidden_after_commit",
+                      "committed_writes_preserved", "concurrent_write_blocked"):
+            with self.subTest(field=field):
+                doc = fixture()
+                doc["records"]["protected_cutover"][field] = False
+                self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+        for field, value in (("rpo_seconds", 1), ("source_release_sha", SHA), ("target_release_sha", SOURCE_SHA),
+                             ("snapshot_sha256", "d" * 64), ("clone_backup_sha256", "d" * 64),
+                             ("target_backend_image", "latest"),
+                             ("snapshot_verified_at", stamp(NOW - timedelta(minutes=230))),
+                             ("committed_at", stamp(NOW - timedelta(minutes=205))),
+                             ("barrier_started_at", stamp(NOW - timedelta(days=8)))):
+            with self.subTest(field=field):
+                doc = fixture()
+                doc["records"]["protected_cutover"][field] = value
+                self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+        doc = fixture()
+        doc["records"]["migration"]["backup_sha256"] = "d" * 64
+        self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+        doc = fixture()
+        doc["records"]["deploy"]["target_backend_image"] = "sha256:" + "f" * 64
+        self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+
+    def test_distinct_clone_identity_and_chronology(self):
+        for record in ("clone_restore", "protected_cutover"):
+            for field in ("cluster", "container", "network", "volume"):
+                for other in ("source_identity", "witness_identity"):
+                    with self.subTest(record=record, field=field, other=other):
+                        doc = fixture()
+                        obj = doc["records"][record]
+                        obj["clone_identity"][field] = obj[other][field]
+                        self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+        for record, field, value in (
+            ("backup", "captured_at", stamp(NOW - timedelta(minutes=105))),
+            ("rollback", "recovery_point_at", stamp(NOW - timedelta(minutes=111))),
+            ("migration", "observed_at", stamp(NOW - timedelta(minutes=180))),
+            ("protected_cutover", "observed_at", stamp(NOW - timedelta(minutes=179))),
+            ("health_schedule", "started_at", stamp(NOW - timedelta(minutes=160))),
+            ("blockers", "observed_at", stamp(NOW - timedelta(minutes=70))),
+        ):
+            with self.subTest(record=record, field=field):
+                doc = fixture()
+                doc["records"][record][field] = value
+                self.assertEqual(validate_evidence(doc, now=NOW)["status"], "INCOMPLETE")
+
     def test_cli_rejects_duplicate_keys_and_invalid_json(self):
         script = Path(__file__).resolve().parents[1] / "ops" / "g5_staging_evidence.py"
         with tempfile.TemporaryDirectory() as directory:
@@ -215,6 +362,19 @@ class EvidenceTests(unittest.TestCase):
             result = subprocess.run([sys.executable, str(script), str(path)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 1)
             self.assertEqual(json.loads(result.stdout)["status"], "INCOMPLETE")
+            for text in (' ' * (MAX_JSON_BYTES + 1), '[' * 2000 + ']' * 2000,
+                         '{"x":' + '1' * 5000 + '}'):
+                path.write_text(text, encoding="utf-8")
+                result = subprocess.run([sys.executable, str(script), str(path)], capture_output=True, text=True,
+                                        timeout=5)
+                self.assertEqual(result.returncode, 2)
+                self.assertNotIn("Traceback", result.stderr)
+            fifo = Path(directory) / "fifo"
+            import os
+            os.mkfifo(fifo)
+            result = subprocess.run([sys.executable, str(script), str(fifo)], capture_output=True, text=True,
+                                    timeout=5)
+            self.assertEqual(result.returncode, 2)
 
 
 if __name__ == "__main__":
