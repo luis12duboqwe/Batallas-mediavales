@@ -293,7 +293,8 @@ def run() -> None:
             encoding="ascii",
         )
         (root / "Caddyfile").write_text(
-            "{ admin 0.0.0.0:2019; auto_https off }\n:80 { reverse_proxy nginx:80 }\n",
+            "{\n    admin 0.0.0.0:2019\n    auto_https off\n}\n"
+            ":80 {\n    reverse_proxy nginx:80\n}\n",
             encoding="ascii",
         )
         compose_path, env_file = _compose_file(
