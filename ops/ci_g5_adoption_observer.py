@@ -326,6 +326,21 @@ def run() -> None:
             "-v", "ON_ERROR_STOP=1", "-U", "game_admin", "-d", "game_db",
             "-c", f"CREATE ROLE game_app LOGIN PASSWORD '{app_password}'",
         ], capture=False)
+        for service, command in (
+            ("nginx", ["wget", "-qO-", "http://127.0.0.1/"]),
+            ("caddy", ["wget", "-qO-", "http://127.0.0.1:2019/config/"]),
+        ):
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                try:
+                    if _docker([
+                        *prefix, "exec", "--no-TTY", service, *command,
+                    ]).strip():
+                        break
+                except RuntimeError:
+                    time.sleep(1)
+            else:
+                raise RuntimeError(f"disposable {service} fixture service did not become ready")
 
         request = observer.ObserverRequest(
             Path(workspace), env_file, (compose_path,), project
